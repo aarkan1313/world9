@@ -104,7 +104,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Convert review fog to edge-only masking by disabling global fog density, pushing fog start/end to the far clipmap horizon, applying the same shader fog to unshaded near/far gray materials, and tracking the fog center from the viewer instead of snapped clipmap origins so the fade does not step/click during movement.
 - [x] Review the World 4 ultra-far GPU clipmap motion harness and capture the WG9 adaptation plan at `plans/world4_clipmap_adaptation_review.md`.
 - [x] Review World 4 page/cache/budget/profiler/visual/decor/nav/backend patterns and capture the WG9 borrowed-systems plan at `plans/world4_borrowed_systems_plan.md`.
-- [ ] Add WG9-native `TerrainPageRequest`, `TerrainPageResult`, and `TerrainPageCache` contracts with validation, deterministic keys, and protected-key eviction tests.
+- [x] Add WG9-native `TerrainPageRequest`, `TerrainPageResult`, and `TerrainPageCache` contracts with validation, deterministic keys, and protected-key eviction tests.
 - [ ] Add a WG9 terrain quality profile source of truth for near density/window, far level count, worker budget, camera far target, edge fog, hidden buffer, and budget gates.
 - [ ] Add a motion-profile runtime gate for live walk/fly movement that records p95/p99/peak frame time, hitches, pending terrain work, not-ready frames, draw/triangle estimates, and current quality profile.
 - [ ] Promote far-edge fog into a visibility contract report with loaded radius, camera far, hidden buffer, fog begin/end, transition length, and pass/fail reasons.
