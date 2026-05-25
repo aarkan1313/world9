@@ -39,6 +39,12 @@ func _start() -> void:
 		errors.append("far_missing_walk_contrast")
 	if not far_code.contains("shade = clamp(shade * 0.42, 0.035, 0.58);"):
 		errors.append("far_missing_walk_exposure")
+	if not near_code.contains("elevation_tint") or not far_code.contains("elevation_tint"):
+		errors.append("missing_elevation_tint_review_signal")
+	if far_code.contains("blend_mix"):
+		errors.append("far_opaque_edge_fog_uses_transparent_render_mode")
+	if not far_fade_code.contains("blend_mix"):
+		errors.append("far_transition_fade_missing_transparent_render_mode")
 	if not far_code.contains("edge_fog_square_enabled"):
 		errors.append("far_missing_square_edge_fog_toggle")
 	if not far_code.contains("max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y))"):

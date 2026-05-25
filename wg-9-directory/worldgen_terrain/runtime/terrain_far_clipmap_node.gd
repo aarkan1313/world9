@@ -1150,7 +1150,7 @@ func _material_for_level(level: int, alpha: float = 1.0) -> Material:
 		if descriptor.get("status", "fail") == "pass":
 			return _surface_texture_material_for_descriptor(descriptor, alpha)
 	var material := ShaderMaterial.new()
-	material.shader = _gray_material_shader(alpha < 0.999 or _level_uses_edge_fade(level))
+	material.shader = _gray_material_shader(alpha < 0.999)
 	material.set_shader_parameter("fade_alpha", alpha)
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
@@ -1161,7 +1161,7 @@ func _surface_texture_material_for_descriptor(descriptor: Dictionary, alpha: flo
 	var normal_texture: ImageTexture = ImageTexture.create_from_image(descriptor["normal_image"] as Image)
 	var material := ShaderMaterial.new()
 	var level: int = int(descriptor.get("level", 0))
-	material.shader = _surface_texture_material_shader(alpha < 0.999 or _level_uses_edge_fade(level))
+	material.shader = _surface_texture_material_shader(alpha < 0.999)
 	material.set_shader_parameter("height_texture", height_texture)
 	material.set_shader_parameter("normal_texture", normal_texture)
 	material.set_shader_parameter("height_min_m", float(descriptor["height_min_m"]))
@@ -1234,11 +1234,14 @@ void fragment() {
 	float shade = clamp(0.30 + lambert * 0.08 + compressed_height * 0.30 - slope_shadow, 0.16, 0.70);
 	shade = (shade - 0.5) * 1.42 + 0.5;
 	shade = clamp(shade * 0.42, 0.035, 0.58);
+	float height_t = clamp(compressed_height, 0.0, 1.0);
+	vec3 elevation_tint = mix(vec3(0.56, 0.62, 0.58), vec3(0.80, 0.74, 0.62), height_t);
+	vec3 color = vec3(shade) * mix(vec3(1.0), elevation_tint * 1.24, 0.28);
 	float camera_distance_m = distance(world_position.xz, CAMERA_POSITION_WORLD.xz);
 	float square_distance_m = max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y));
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
 	float fog_t = edge_fog_enabled ? smoothstep(edge_fog_begin_m, edge_fog_end_m, fog_distance_m) : 0.0;
-	ALBEDO = mix(vec3(shade), edge_fog_color, fog_t);
+	ALBEDO = mix(color, edge_fog_color, fog_t);
 	ALPHA = fade_alpha;
 }
 """ % render_mode
@@ -1302,11 +1305,14 @@ void fragment() {
 	float shade = clamp(0.30 + lambert * 0.08 + compressed_height * 0.30 - slope_shadow, 0.16, 0.70);
 	shade = (shade - 0.5) * 1.42 + 0.5;
 	shade = clamp(shade * 0.42, 0.035, 0.58);
+	float height_t = clamp(compressed_height, 0.0, 1.0);
+	vec3 elevation_tint = mix(vec3(0.56, 0.62, 0.58), vec3(0.80, 0.74, 0.62), height_t);
+	vec3 color = vec3(shade) * mix(vec3(1.0), elevation_tint * 1.24, 0.28);
 	float camera_distance_m = distance(world_position.xz, CAMERA_POSITION_WORLD.xz);
 	float square_distance_m = max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y));
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
 	float fog_t = edge_fog_enabled ? smoothstep(edge_fog_begin_m, edge_fog_end_m, fog_distance_m) : 0.0;
-	ALBEDO = mix(vec3(shade), edge_fog_color, fog_t);
+	ALBEDO = mix(color, edge_fog_color, fog_t);
 	ALPHA = fade_alpha;
 }
 """ % render_mode
