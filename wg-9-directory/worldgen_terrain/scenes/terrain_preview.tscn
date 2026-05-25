@@ -1,0 +1,12 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://worldgen_terrain/runtime/terrain_preview_scene.gd" id="1_terrain_preview_scene"]
+
+[node name="TerrainPreview" type="Node3D"]
+script = ExtResource("1_terrain_preview_scene")
+auto_setup_on_ready = true
+debug_mode = "gray"
+vertices_per_side = 33
+preview_radius_chunks = 1
+seed = 1337
+use_composite_gray_preview = true

@@ -1,0 +1,15 @@
+[package]
+name = "wg9_terrain_backend"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = { version = "0.5.3", features = ["api-4-6", "experimental-threads"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

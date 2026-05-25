@@ -1,0 +1,14 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = "4.6"
+reloadable = true
+
+[libraries]
+windows.debug.x86_64 = "res://bin/wg9_terrain_backend.dll"
+windows.release.x86_64 = "res://bin/wg9_terrain_backend.dll"
+linux.debug.x86_64 = "res://bin/libwg9_terrain_backend.so"
+linux.release.x86_64 = "res://bin/libwg9_terrain_backend.so"
+macos.debug.x86_64 = "res://bin/libwg9_terrain_backend.dylib"
+macos.release.x86_64 = "res://bin/libwg9_terrain_backend.dylib"
+macos.debug.arm64 = "res://bin/libwg9_terrain_backend.dylib"
+macos.release.arm64 = "res://bin/libwg9_terrain_backend.dylib"

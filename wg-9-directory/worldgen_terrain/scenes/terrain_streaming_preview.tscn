@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://worldgen_terrain/runtime/terrain_streaming_preview_scene.gd" id="1_streaming_preview"]
+
+[node name="TerrainStreamingPreview" type="Node3D"]
+script = ExtResource("1_streaming_preview")
+debug_mode = "gray"
+vertices_per_side = 33
+visible_radius_chunks = 1
+build_budget_per_frame = 1
+max_lod = 4
+warmup_build_steps = 1
+seed = 1337
+move_speed_mps = 1800.0
+camera_height_m = 1900.0
+camera_distance_m = 3300.0
+camera_yaw_deg = 42.0
+build_when_idle = false
+show_diagnostics_overlay = true

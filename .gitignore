@@ -1,0 +1,21 @@
+# Raw/generated terrain data
+/dems/
+/factory/
+/review_exports/
+/prototypes/
+
+# Python cache/output
+__pycache__/
+*.py[cod]
+
+# Rust build output
+/native/**/target/
+
+# Godot editor/build output
+/wg-9-directory/.godot/
+/wg-9-directory/bin/
+/wg-9-directory/.mono/
+
+# Local/editor noise
+.DS_Store
+Thumbs.db

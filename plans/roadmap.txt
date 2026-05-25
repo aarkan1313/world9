@@ -1,0 +1,3107 @@
+# WorldGen Terrain System — Spec Sheet + Implementation Plan
+
+**Project:** Modular 3D world generator  
+**Engine target:** Godot 4.6  
+**Approach:** Custom terrain architecture, not locked to one game and not dependent on Terrain3D  
+**Primary design goal:** Infinite terrain that can be shaped by real DEM data, then extended procedurally forever.
+
+---
+
+## 0. Core Direction
+
+This restart should be deliberately small at first.
+
+The first target is not a full world generator. The first target is:
+
+> Infinite terrain chunks using a clean height provider.
+
+Everything else hangs off that.
+
+The terrain system should be built as a reusable module that can be dropped into different projects. It should not know about player stats, quests, settlements, combat, vehicles, save systems, or any specific game rules.
+
+### 0.1 2026-05-24 Review Corrections
+
+The roadmap is directionally right, but the restart should be biased toward visible terrain quality sooner.
+
+Immediate corrections:
+
+```text
+use larger first chunks than 1024m
+solve seams with data/sample rules, not only visual skirts
+create a DEM kernel factory before betting on procedural fill
+keep DEM cache/catalog work as an offline track
+avoid rebuilding broad WG7 infrastructure unless it clearly helps the visible target
+```
+
+Current raw DEM cache location:
+
+```text
+D:/workflows/worldgen9/dems/
+D:/workflows/worldgen9/dems/opentopo/
+```
+
+### 0.2 2026-05-25 Runtime Position
+
+The live Godot preview is now past the first one-tile proof. Current direction:
+
+```text
+near terrain: 512m chunks, 129 vertices, 4m spacing, native worker payloads
+retained terrain: 7x7 walk chunk window with full-density near review by default, plus far 4L clipmap coverage for larger visible range
+LOD transition continuity: mixed-density shared edge samples are machine-checked at zero height/XZ delta; fine chunk edge bands now morph toward coarser neighbor sampling while inner samples stay raw
+far terrain: visual clipmap rings with a level-0 overlap band below authoritative chunk edges
+far clipmap continuity: levels share one base-snapped origin, with zero tested fine/coarse transition height deltas
+near/far handoff: walk-preview chunk boundary matches the far-clipmap heightfield at zero tested height delta; level 0 now overlaps just inside near chunk edges so no moat/black ring can appear without drawing a full square under the player
+walk preview stability: spawn and review jumps are chunk-centered to avoid first-move clipmap rebuild hitches
+chunk-boundary recenter: crossing one chunk edge no longer recenters far rings; the far anchor recenters only after meaningful travel, then schedules the far-ring rebuild through native workers instead of blocking the movement frame
+native clipmap payload: far levels use native centered vertex/normal/UV and hole-filtered index generation
+async far clipmap: walk/streaming preview schedules far level rebuilds on native workers instead of rebuilding in the movement frame
+rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
+visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
+far ring transition: completed far-ring rebuilds can crossfade old/new meshes when enabled, and finer clipmap outer bands now morph toward the next coarser grid while inner samples stay raw
+local detail: 257 x 257 native payloads are viable as a near-player tier, not a global default
+```
+
+The `257 x 257` probe showed exact-zero adjacent edge deltas at both 2m and 1m
+spacing. It should be treated as a targeted local/collision/edit tier until LOD,
+clipmap, collision, and GPU detail policy are explicit.
+
+The first local-detail policy is now explicit:
+
+```text
+patch size: 256m
+vertices: 257 x 257
+spacing: 1m
+snap: world-space patch coordinates using floor semantics
+alignment: every fourth local-detail sample lands on the current 4m base grid
+```
+
+This is intentionally not mounted into the live walk preview yet.
+
+That changed only as an opt-in path: `TerrainLocalDetailNode` can now mount from
+the streaming preview with `use_local_detail = true`. The saved walk preview
+keeps this disabled by default. Local detail patch build/retire/seam checks now
+prove the 1m layer can move independently of broad streaming chunks.
+
+The local detail layer now retains CPU-side heightfields for active patches:
+
+```text
+local query first: active 1m detail heightfield
+fallback query: authoritative world provider
+collision descriptor: origin, spacing, dimensions, height array, min/max height
+collision shape: on-demand HeightMapShape3D for active local patches
+physics collision: opt-in StaticBody3D per active local patch, disabled by default
+build path: native worker queue, scene thread only assigns mesh/collision
+stale worker rule: ignore completed work for patches no longer desired
+streaming perf gate: local patch transitions stay on the scene thread at ~1-4ms while dense builds finish in workers
+GPU prep: active local patches expose RF height images and RGBF normal images from authoritative heightfields
+GPU handoff test: local detail can optionally upload those height/normal images into a texture-backed material, disabled by default
+Far GPU prep: clipmap levels retain CPU heightfields and can optionally expose/upload RF height and RGBF normal images, disabled by default
+Far review controls: U toggles far-clipmap height/normal texture-material review in the live streaming/walk preview
+Far review performance: far texture-material review still uses async native clipmap workers during boundary recenters
+Far material cost: live far review builds lightweight height/normal material descriptors, while full debug/displacement descriptors remain on-demand
+Far material refresh: normal-strength-only far review changes reuse existing height/normal textures
+Far render review: far clipmap captures now include gray, level-color, height/normal texture-material, and 4-ring wide-area images
+Far clipmap controls: live level-count changes now rebuild actual clipmap nodes; H toggles 3-ring/4-ring coverage, J frames the current far-clipmap overview, and diagnostics report far 3L or far 4L
+Far overview review: live streaming 3-ring/4-ring overview contact sheet and deterministic live-scene budget/readability manifest are locked in the Godot review index
+Debug map prep: shared surface descriptors now include slope-degree, curvature, and RGBF slope/curvature/height heatmap images
+Visual displacement prep: shared descriptors include edge-locked residual displacement images, and local detail can opt into shader-only visual displacement
+Review controls: streaming preview exposes local detail texture-material and visual-displacement toggles while keeping them disabled by default
+Safety cap: visual displacement review clamps residual displacement by meters before applying strength
+Live review: T/Y toggle local detail texture material and visual displacement in the walk preview, refreshing active patch materials immediately
+Review perf: active local detail surface materials reuse existing textures for strength/limit-only changes
+Render review: local-detail base, texture-material, and bounded displacement captures plus manifest write to `factory/runtime/godot_local_detail_displacement/`; current metadata flags subtle displacement
+Production review perf: native backend now generates local-detail visual-displacement residuals; surface/displacement assignment is ~20ms instead of ~160ms in the perf gate
+Walk review captures: actual `TerrainWalkPreviewScene` base/texture/displacement frames plus manifest write to `factory/runtime/godot_walk_local_detail_review/`; current metadata flags subtle displacement
+Local detail release guard: runtime readiness checks local-detail review manifest schema, 257x257 / 1m patch budget, image stats, collision-off walk state, and subtle-displacement flags
+Review workflow gate: headless perf test now covers the normal T then Y toggle path; current displacement texture work is ~14ms
+Far handoff gate: headless test compares near chunk boundary vertices against far clipmap level 0 samples, requires overlap-band underlap policy, and keeps current max delta at 0.0
+Movement perf gate: chunk-centered walk spawn keeps small movement at ~2-3ms and confirms far clipmap build counts stay unchanged
+Boundary recenter gate: first real chunk-boundary crossing keeps far clipmap counts stable; larger travel schedules far rings asynchronously, then drains pending levels
+Rapid recenter gate: boundary ping-pong keeps counts unchanged; rapid larger recenter requests defer level 0 while the worker is active, and finish all levels at the newest origin
+Native clipmap payload gate: direct backend check verifies centered vertices, UVs, and hole-filtered indices
+Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 11 headless native/clipmap/walk checks in ~9.3s
+Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 23 headless native parity, renderer-boundary, far surface/review, LOD, and local-detail checks
+Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 7 landform, hydrology, debug performance, streaming performance, and 257-walk-density checks
+Hydrology/debug performance: cross-region height grids now split into per-region fast blocks, so padded hydrology windows avoid the slow scalar fallback; quality gate time is back in single-digit seconds on the current machine
+Renderer boundary: `TerrainChunkRenderer` now owns chunk MeshInstance lifecycle and bounded pooling, while `TerrainWorldNode` remains orchestration/build-policy glue
+Quality release guard: runtime readiness checks landform/hydrology report schemas, six-window coverage, relief/source-confidence thresholds, stable/window-limited hydrology field policy, and zero hydrology tile seam deltas
+Render Godot runtime gate: `python tools/godot_runtime_gate.py --suite render` runs 6 renderer-backed artifact captures without `--headless` in ~17.5s
+Review Godot runtime gate: `python tools/godot_runtime_gate.py --suite review` runs 4 non-headless multi-location/scale/far-overview/density contact-sheet captures in ~32.2s
+Godot review index: `python tools/build_godot_review_index.py` writes a deterministic HTML/JSON index for the current review artifacts; runtime readiness checks schema, section order, required review files, and PNG dimensions
+Far clipmap budget: scene-level clipmap sizing controls are explicit; standalone 3/4 rings cover 32.768km/65.536km diameter at ~2.569/~3.428 MiB, and the live walk preview now defaults to 4L for about 32.768km of far radius coverage.
+High-density walk probe: isolated `512m / 257v / 2m` walk preview with LOD rings keeps the 7x7 opt-in review window, averages ~20.6ms chunk builds, and keeps small movement steps around 2ms
+High-density visual review: `godot_walk_density_review/walk_density_contact_sheet.png` compares 129/4m and 257/2m walk views from the same camera
+High-density budget: current default 9x9 skirted walk window is ~572,416 triangles / 16.652 MiB at 129/4m with max LOD capped at 2; the 257/2m review remains a 7x7 opt-in window at ~1,947,648 triangles / 56.129 MiB
+Runtime budget release guard: runtime readiness now checks baseline 65/129/257 LOD totals, 129/4m versus 257/2m walk-density cost, standalone far clipmap budgets, and walk-preview far clipmap budgets
+Walk readability guard: live walk preview now starts closer to player-scale review height, uses a neutral background, caps gray/far-clipmap brightness, and locks a walk-density manifest that rejects washed-out frames
+Visual seam/readability guard: near fast-gray chunks and far clipmap gray review now use the same world-height shading response, guard degenerate rendered-geometry normals, de-emphasize vertical skirt walls, keep clipmap level 0 as a handoff overlap band below near chunk edges, overlap visual clipmap handoffs, and keep far anchors stable across chunk-edge ping-pong
+Walk review controls: `G` toggles free-fly versus ground-follow review mode; ground mode holds the camera at player eye height using the authoritative height provider while free-fly remains available for fast inspection
+Artifact policy: debug performance artifacts store deterministic pass/fail checks, raw measured milliseconds stay in stdout/gate output, and locked render captures avoid volatile diagnostic overlay text
+Live diagnostics: walk overlay now reports far clipmap level count, last build time, pending rebuild count, and active worker count
+Coverage guard: startup preloads the full 7x7 walk window; movement no longer does full-window synchronous hole filling, and full-density chunk ring retags update metadata/materials without rebuilding meshes.
+Near/far material guard: far clipmap gray and surface-review shaders now use the same gray review lighting response as near fast-gray chunks, with a fast gate to prevent the player-centered window from becoming a tonal square.
+Far-edge masking: walk/streaming preview fog is depth-edge only, with no global density haze; the gray terrain shaders also apply the same far-edge fog so unshaded review materials cannot bypass the outer pop-in mask.
+```
+
+This keeps the later collision path near-player only and separate from visual
+far terrain.
+
+The next useful output is not another subsystem. It is:
+
+```text
+plain gray infinite terrain
+larger contiguous readable landforms
+DEM-derived terrain character
+strict seam/determinism checks
+debug screenshots that prove the surface is improving
+```
+
+---
+
+## 1. Core Principles
+
+### 1.1 Terrain mesh is disposable
+
+The mesh is just the visible surface. It can be rebuilt, swapped, simplified, hidden, or replaced.
+
+The important thing is the terrain data model:
+
+```text
+height
+slope
+curvature
+source confidence
+DEM source information
+roughness
+flow direction
+flow accumulation
+river likelihood
+biome hints later
+```
+
+### 1.2 Height provider comes before features
+
+Every terrain chunk asks the same question:
+
+```text
+height = sample_height(world_x, world_z)
+```
+
+The chunk does not care whether the answer comes from noise, a DEM, a blended DEM pyramid, a river carving pass, erosion, or a future ML model.
+
+### 1.3 DEMs are informants, not the world itself
+
+OpenTopography DEMs should not become one-to-one game terrain chunks. They should become terrain facts and terrain examples.
+
+A DEM can provide:
+
+```text
+real height shape
+ridge/valley structure
+slope patterns
+roughness patterns
+watershed structure
+terrain kernels for procedural expansion
+```
+
+The infinite world uses those facts to make believable terrain beyond the DEM boundaries.
+
+### 1.4 Visual checkpoints over heavy test suites
+
+Use debug views, overlays, screenshots, and simple movement tests first.
+
+The project should avoid becoming a massive code-testing project too early.
+
+### 1.5 Add systems in order
+
+Do not build rivers before hydrology hints.  
+Do not build erosion before stable terrain and water flow.  
+Do not build textures before height terrain works.
+
+The order is:
+
+```text
+1. Infinite terrain chunks
+2. Clean height provider
+3. DEM sampling
+4. DEM resolution blending
+5. Procedural infinite fill
+6. Hydrology hints
+7. Rivers
+8. Erosion
+```
+
+---
+
+## 2. High-Level Architecture
+
+```text
+WorldGenTerrain
+│
+├── TerrainWorld
+│   ├── Owns the terrain system root
+│   ├── Tracks viewer/camera/player position
+│   ├── Updates streamer
+│   └── Exposes debug controls
+│
+├── TerrainStreamer
+│   ├── Decides which chunks should exist
+│   ├── Assigns LOD levels
+│   ├── Queues chunk builds
+│   ├── Recycles old chunks
+│   └── Keeps chunk count bounded
+│
+├── TerrainChunk
+│   ├── MeshInstance3D wrapper
+│   ├── Stores chunk coordinate and LOD
+│   ├── Receives generated mesh
+│   └── Optional debug metadata
+│
+├── TerrainMeshBuilder
+│   ├── Builds vertices
+│   ├── Builds normals
+│   ├── Builds index arrays
+│   ├── Builds skirts or seam helpers
+│   └── Returns mesh array data
+│
+├── TerrainHeightProvider
+│   ├── Samples height at world coordinates
+│   ├── Blends procedural terrain and DEM data
+│   ├── Provides source confidence
+│   └── Later provides slope/flow/river facts
+│
+├── DEM System
+│   ├── DEM importer / offline converter
+│   ├── DEM tile sets
+│   ├── DEM metadata
+│   ├── DEM pyramids
+│   └── DEM-derived terrain kernels
+│
+└── Hydrology / Rivers / Erosion
+    ├── Flow hints
+    ├── River graph
+    ├── Channel carving
+    └── Erosion passes
+```
+
+---
+
+## 3. Suggested Project Folder Layout
+
+```text
+res://worldgen_terrain/
+│
+├── core/
+│   ├── terrain_world.gd
+│   ├── terrain_streamer.gd
+│   ├── terrain_chunk.gd
+│   └── terrain_settings.gd
+│
+├── height/
+│   ├── terrain_height_provider.gd
+│   ├── flat_height_provider.gd
+│   ├── procedural_height_provider.gd
+│   ├── dem_height_provider.gd
+│   └── composite_height_provider.gd
+│
+├── mesh/
+│   ├── terrain_mesh_builder.gd
+│   ├── terrain_mesh_job.gd
+│   └── terrain_lod.gd
+│
+├── dem/
+│   ├── dem_tile.gd
+│   ├── dem_tile_set.gd
+│   ├── dem_source_metadata.gd
+│   ├── dem_sampler.gd
+│   └── dem_kernel.gd
+│
+├── hydrology/
+│   ├── flow_field.gd
+│   ├── hydrology_sampler.gd
+│   └── wetness_map.gd
+│
+├── rivers/
+│   ├── river_graph.gd
+│   ├── river_node.gd
+│   ├── river_segment.gd
+│   └── river_carver.gd
+│
+├── erosion/
+│   ├── erosion_settings.gd
+│   ├── thermal_erosion.gd
+│   ├── hydraulic_erosion.gd
+│   └── erosion_post_process.gd
+│
+└── debug/
+    ├── terrain_debug_material.tres
+    ├── terrain_debug_overlay.gd
+    └── terrain_debug_modes.gd
+```
+
+The early version only needs `core`, `height`, `mesh`, and `debug`.
+
+---
+
+## 4. Shared Runtime Concepts
+
+### 4.1 World coordinates
+
+Terrain uses meter-based coordinates:
+
+```text
+world_x = meters east/west
+world_z = meters north/south
+height_y = meters up/down
+```
+
+Do not render directly in latitude/longitude.
+
+DEM projection, CRS, vertical datum, and geospatial conversion should live in an offline import/conversion stage, not inside the terrain chunk renderer.
+
+### 4.2 Chunk coordinate
+
+Chunks are addressed by integer coordinates:
+
+```text
+chunk_coord = Vector2i(chunk_x, chunk_z)
+```
+
+Given a fixed chunk size:
+
+```text
+chunk_origin_x = chunk_coord.x * chunk_size_m
+chunk_origin_z = chunk_coord.y * chunk_size_m
+```
+
+### 4.3 Fixed chunk size, variable LOD density
+
+Use fixed world-size chunks. Change the number of vertices by LOD.
+
+Recommended first settings:
+
+```text
+chunk_size_m = 2048
+LOD 0: 129 x 129 vertices, 16m spacing
+LOD 1: 65 x 65 vertices, 32m spacing
+LOD 2: 33 x 33 vertices, 64m spacing
+LOD 3: 17 x 17 vertices, 128m spacing
+```
+
+This keeps chunk placement simple.
+
+Treat 257 x 257 LOD0 as the high-detail candidate after threaded/native mesh
+building is stable. Larger chunks make landforms read as continuous terrain
+instead of many small adjacent tiles, so lower vertex density before shrinking
+chunks.
+
+### 4.4 First seam strategy
+
+Use terrain skirts first.
+
+A skirt is a small vertical wall around the chunk edge that hides tiny cracks between different LODs.
+
+Do not start with complicated transition meshes. They can come later.
+
+Skirts are only a visual fallback. They are not the seam solution.
+
+The real seam contract is:
+
+```text
+shared edges sample identical world coordinates
+height providers are deterministic
+no per-chunk height normalization
+no per-chunk random offsets
+DEM/procedural blends are evaluated in world space
+chunks build from padded height grids when filters need neighbors
+only interior samples are modified by smoothing, erosion, or edge ramps
+automated seam checks compare neighbor edge heights directly
+```
+
+The first implementation can show skirts, but it still needs a seam metric.
+
+Current Godot status:
+
+```text
+opt-in mesh skirts exist on TerrainWorldNode
+walk preview now retains 7 x 7 chunks using skirted ring LOD density
+near 3 x 3 chunks stay at 129 x 129 vertices / 4m spacing
+outer rings use 65 x 65 and 33 x 33 vertices to keep broader terrain cheap
+height seam checks remain the real authority; skirts only hide renderer cracks
+```
+
+### 4.5 Terrain sample
+
+The height provider should eventually return more than a float.
+
+Early version:
+
+```gdscript
+height_provider.sample_height(world_x, world_z) -> float
+```
+
+Future version:
+
+```gdscript
+height_provider.sample(world_x, world_z) -> TerrainSample
+```
+
+Conceptual `TerrainSample`:
+
+```text
+height: float
+normal: Vector3 optional
+slope: float optional
+curvature: float optional
+source_confidence: float
+source_mask: int
+source_resolution_m: float
+flow_direction: Vector2 optional
+flow_accumulation: float optional
+river_likelihood: float optional
+```
+
+---
+
+# Phase 1 — Infinite Terrain Chunks
+
+## Goal
+
+Create an infinite chunked terrain surface that streams around the viewer.
+
+This phase proves:
+
+```text
+chunks load
+chunks unload
+chunks align
+LOD rings work
+camera can move forever
+mesh generation is stable
+```
+
+## Scope
+
+Included:
+
+```text
+TerrainWorld node
+TerrainStreamer
+TerrainChunk nodes
+TerrainMeshBuilder
+flat or simple procedural height
+LOD rings
+plain material
+chunk debug view
+basic performance sanity checks
+```
+
+Not included:
+
+```text
+DEM data
+textures
+biomes
+rivers
+erosion
+collision
+foliage
+roads
+settlements
+save system
+```
+
+## Implementation Steps
+
+### Step 1.1 — Create TerrainWorld
+
+`TerrainWorld` is the root node for the terrain module.
+
+Responsibilities:
+
+```text
+holds terrain settings
+holds height provider reference
+holds streamer reference
+tracks viewer position
+updates terrain streamer
+owns debug mode state
+```
+
+Suggested exported settings:
+
+```gdscript
+@export var viewer_path: NodePath
+@export var chunk_size_m: float = 2048.0
+@export var visible_radius_chunks: int = 4
+@export var max_lod: int = 4
+@export var build_budget_per_frame: int = 2
+@export var debug_enabled: bool = true
+```
+
+### Step 1.2 — Create TerrainStreamer
+
+`TerrainStreamer` calculates which chunk coordinates should exist.
+
+Each update:
+
+```text
+get viewer world position
+convert to current chunk coordinate
+calculate visible chunk square/radius
+assign LOD by distance
+create missing chunks
+queue mesh builds
+retire chunks outside radius
+```
+
+Basic LOD rule:
+
+```text
+distance 0-1 chunks: LOD 0
+distance 2 chunks:   LOD 1
+distance 3 chunks:   LOD 2
+distance 4 chunks:   LOD 3+
+```
+
+Use Chebyshev distance for a square ring:
+
+```gdscript
+var dx = abs(chunk_coord.x - viewer_chunk.x)
+var dz = abs(chunk_coord.y - viewer_chunk.y)
+var ring = max(dx, dz)
+```
+
+### Step 1.3 — Create TerrainChunk
+
+A chunk is a lightweight node containing:
+
+```text
+MeshInstance3D
+chunk coordinate
+LOD level
+current build state
+optional debug label/metadata
+```
+
+Chunk states:
+
+```text
+Missing
+Queued
+Building
+Ready
+Retiring
+```
+
+### Step 1.4 — Create TerrainMeshBuilder
+
+The mesh builder receives:
+
+```text
+chunk_coord
+LOD
+chunk_size_m
+height_provider
+settings
+```
+
+It returns mesh arrays:
+
+```text
+vertices
+normals
+uvs optional
+indices
+debug colors optional
+```
+
+Mesh generation loop:
+
+```gdscript
+for z_i in range(vertex_count):
+    for x_i in range(vertex_count):
+        var local_x = x_i * spacing
+        var local_z = z_i * spacing
+        var world_x = chunk_origin_x + local_x
+        var world_z = chunk_origin_z + local_z
+        var height = height_provider.sample_height(world_x, world_z)
+        vertices.append(Vector3(local_x, height, local_z))
+```
+
+Important rule:
+
+> Shared edges must sample identical world coordinates.
+
+### Step 1.5 — Add debug material
+
+Start with a plain material.
+
+Useful debug modes:
+
+```text
+solid gray
+chunk coordinate color
+LOD ring color
+height bands
+wireframe overlay
+seam view
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+you can move the viewer in any direction
+chunks appear ahead and disappear behind
+chunk count stays bounded
+LOD rings are visible in debug mode
+no huge cracks appear
+no obvious chunk origin mistakes happen
+```
+
+## Stop Condition
+
+Stop Phase 1 as soon as infinite chunks work with a simple height source.
+
+Do not add DEMs yet.
+
+---
+
+# Phase 2 — Clean Height Provider
+
+## Goal
+
+Separate terrain rendering from terrain generation.
+
+The mesh builder should not know where height comes from.
+
+## Scope
+
+Included:
+
+```text
+base height provider class/resource
+flat provider
+procedural provider
+composite provider shell
+sample_height API
+future sample API design
+```
+
+Not included:
+
+```text
+DEM import
+DEM blending
+hydrology
+rivers
+erosion
+```
+
+## Core Interface
+
+First-pass provider:
+
+```gdscript
+class_name TerrainHeightProvider
+extends Resource
+
+func sample_height(world_x: float, world_z: float) -> float:
+    return 0.0
+```
+
+Future provider:
+
+```gdscript
+func sample(world_x: float, world_z: float) -> Dictionary:
+    return {
+        "height": sample_height(world_x, world_z),
+        "source_confidence": 0.0,
+        "source_resolution_m": 0.0,
+    }
+```
+
+Use a dictionary first if a custom class feels heavy. Replace with a real `TerrainSample` resource later if needed.
+
+## Providers to Build
+
+### FlatHeightProvider
+
+Returns a constant height.
+
+Purpose:
+
+```text
+test chunk streaming
+test mesh generation
+test seams
+```
+
+### ProceduralHeightProvider
+
+Returns deterministic terrain from coordinates and seed.
+
+Purpose:
+
+```text
+test infinite terrain
+test visual terrain shape
+test LOD sampling
+```
+
+Early formula can be simple:
+
+```text
+macro hills + smaller detail noise
+```
+
+Do not overbuild the noise system yet.
+
+### CompositeHeightProvider
+
+Combines multiple height sources.
+
+Early structure:
+
+```text
+base procedural height
+optional DEM override/blend later
+optional river carve later
+optional erosion post-process later
+```
+
+Conceptual order:
+
+```text
+base_height
++ DEM residual detail
++ procedural infinite fill
+- river channel carving
++ erosion shaping
+= final height
+```
+
+## Rules
+
+The height provider must be:
+
+```text
+deterministic
+coordinate-based
+not dependent on chunk state
+not dependent on mesh state
+not dependent on player/game systems
+safe to call many times
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+switching height providers changes terrain without changing streamer code
+flat terrain works
+procedural terrain works
+LOD rings still work
+chunk seams are still acceptable
+```
+
+## Stop Condition
+
+Stop Phase 2 when mesh code only calls the height provider and no longer owns terrain logic.
+
+---
+
+# Phase 3 — DEM Sampling
+
+## Goal
+
+Bring real terrain data into the height provider.
+
+At this phase, the DEM does not need to be infinite. It only needs to prove that real-world height data can influence terrain.
+
+## Scope
+
+Included:
+
+```text
+one imported DEM area
+DEM metadata
+DEM tile resource
+DEM sampler
+DEM confidence mask
+DEM debug overlay
+blend into height provider
+```
+
+Not included:
+
+```text
+multiple DEM resolutions
+advanced geospatial tools inside Godot
+full OpenTopography downloader
+terrain kernels
+rivers
+erosion
+```
+
+## DEM Import Direction
+
+Do geospatial conversion offline.
+
+Godot should receive a simplified local terrain data format, not raw complicated geospatial responsibility.
+
+Offline conversion should produce:
+
+```text
+height grid
+bounds in local meters
+meters per sample
+no-data mask
+source metadata
+optional preview image
+```
+
+Suggested internal DEM tile format:
+
+```text
+DemTile
+├── origin_x_m
+├── origin_z_m
+├── sample_spacing_m
+├── width
+├── height
+├── min_height
+├── max_height
+├── no_data_value
+├── source_id
+├── source_resolution_m
+├── confidence_grid optional
+└── height_data
+```
+
+## DEM Sampler
+
+The DEM sampler exposes:
+
+```gdscript
+func has_data(world_x: float, world_z: float) -> bool
+func sample_height(world_x: float, world_z: float) -> float
+func sample_confidence(world_x: float, world_z: float) -> float
+```
+
+Sampling method:
+
+```text
+convert world position to DEM grid position
+sample nearby grid cells
+use bilinear interpolation first
+respect no-data values
+return confidence 0 if no valid data
+```
+
+## Blend Into Height Provider
+
+Early blend:
+
+```text
+procedural_height = procedural.sample_height(x, z)
+dem_height = dem.sample_height(x, z)
+confidence = dem.sample_confidence(x, z)
+final_height = lerp(procedural_height, dem_height, confidence)
+```
+
+Use a soft edge around DEM bounds:
+
+```text
+inside DEM center: confidence = 1
+near DEM edge: confidence fades toward 0
+outside DEM: confidence = 0
+```
+
+## Debug Views
+
+Add debug views for:
+
+```text
+DEM coverage
+DEM confidence
+DEM no-data holes
+source resolution
+height difference between procedural and DEM
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+a real DEM patch visibly shapes the terrain
+outside the DEM patch, procedural terrain continues
+DEM coverage can be seen in debug mode
+DEM edges fade instead of creating cliffs
+height provider still uses the same API
+```
+
+## Stop Condition
+
+Stop Phase 3 when one DEM area works reliably.
+
+Do not add multi-resolution DEM blending yet.
+
+---
+
+# Phase 4 — DEM Resolution Blending
+
+## Goal
+
+Make different-resolution DEM sources work together without ugly borders, cliffs, or mesh seams.
+
+This is one of the most important phases.
+
+## Scope
+
+Included:
+
+```text
+multiple DEM tile sources
+resolution metadata
+DEM pyramid concept
+source priority
+confidence blending
+edge fading
+residual detail blending
+debug comparison views
+```
+
+Not included:
+
+```text
+procedural terrain kernels
+rivers
+erosion
+biomes
+textures
+```
+
+## Problem
+
+Different DEMs may have different:
+
+```text
+sample spacing
+accuracy
+bounds
+vertical datum
+no-data areas
+noise level
+surface type: DTM vs DSM
+```
+
+Never let terrain chunks directly decide which DEM they are using.
+
+Chunks still only ask:
+
+```text
+height_provider.sample_height(world_x, world_z)
+```
+
+## Required Metadata
+
+Each DEM source should track:
+
+```text
+source_id
+source_name
+source_resolution_m
+source_priority
+is_dtm_or_dsm
+horizontal_units
+vertical_units
+bounds_m
+no_data_mask
+confidence
+import_date optional
+```
+
+## Blending Strategy
+
+### 4.1 Base height layer
+
+Use the broadest reliable terrain source as base height.
+
+Example:
+
+```text
+90m or 30m DEM gives broad landform
+```
+
+### 4.2 High-resolution residual layer
+
+High-res DEM should contribute detail, not completely fight the base.
+
+Concept:
+
+```text
+low_res_height = sample_low_res_source(x, z)
+high_res_height = sample_high_res_source(x, z)
+residual = high_res_height - low_res_height
+final = low_res_height + residual * high_res_confidence
+```
+
+This helps the high-resolution data fade naturally at its boundary.
+
+### 4.3 Confidence fade
+
+High-res confidence should fade near:
+
+```text
+source boundary
+no-data holes
+known bad data
+steep mismatch zones
+```
+
+Example:
+
+```text
+confidence = source_confidence * edge_fade * no_data_validity * quality_weight
+```
+
+### 4.4 Priority stack
+
+If two sources overlap:
+
+```text
+prefer cleaner DTM over DSM for bare earth
+prefer higher resolution if confidence is high
+prefer lower resolution if high-res data is noisy or partial
+```
+
+Do not always blindly choose highest resolution.
+
+## DEM Pyramid
+
+Create a pyramid for each source:
+
+```text
+LOD 0: native or near-native resolution
+LOD 1: 2x downsampled
+LOD 2: 4x downsampled
+LOD 3: 8x downsampled
+```
+
+The height provider chooses an appropriate sampling level based on requested terrain LOD or desired sample spacing.
+
+Important:
+
+> Terrain mesh LOD and DEM source LOD are related, but they are not the same thing.
+
+A far chunk can sample low-detail DEM data. A near chunk can sample high-detail data.
+
+## Seam Rule
+
+The same world coordinate must produce the same height regardless of which chunk asks for it.
+
+That means:
+
+```text
+sample_height(1000, 2000) returns the same value for every chunk, every time
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+a lower-resolution DEM and a higher-resolution DEM overlap
+high-res detail appears where available
+high-res detail fades out smoothly
+no obvious cliffs appear at DEM borders
+no-data holes do not create spikes
+chunk LOD changes remain acceptable
+```
+
+## Stop Condition
+
+Stop Phase 4 when mixed DEM resolutions look clean enough in plain gray terrain.
+
+Do not add biomes or textures to hide issues.
+
+---
+
+# Offline Track — DEM Kernel Factory
+
+This track should start before Phase 5 runtime procedural fill.
+
+The raw DEM cache is large enough now that the project should stop tuning terrain from a tiny hand-picked set.
+
+Input cache:
+
+```text
+D:/workflows/worldgen9/dems/
+D:/workflows/worldgen9/dems/opentopo/
+```
+
+## Goal
+
+Convert raw DEM examples into reusable terrain facts and terrain kernels.
+
+The runtime generator should not read raw GeoTIFFs directly. It should read compact, normalized, reviewed terrain artifacts.
+
+## Pipeline
+
+```text
+raw DEM GeoTIFF
+-> local meter grid
+-> no-data mask
+-> normalized height patch
+-> slope map
+-> curvature map
+-> roughness/local relief maps
+-> ridge/valley masks
+-> coarse flow/accumulation hints
+-> residual detail patch
+-> terrain-family stats
+-> preview and spectrum images
+-> kernel catalog entry
+```
+
+## Kernel Catalog Fields
+
+Each accepted kernel should record:
+
+```text
+kernel_id
+source_dem_path
+terrain_family
+center_lat_lon
+patch_size_km
+sample_spacing_m
+height_min_max
+height_range_m
+mean_slope
+slope_distribution
+curvature_distribution
+roughness_distribution
+local_relief_distribution
+ridge_density
+valley_density
+drainage_density_hint
+dominant_orientation
+anisotropy_score
+quality_score
+review_status
+```
+
+## Terrain Families to Score First
+
+Use the new OpenTopo batch to seed these families:
+
+```text
+mountain / alpine ridge
+glacial valley
+volcanic slope
+badlands / canyon
+karst
+desert dune / desert basin
+grassland / rolling plain
+wetland / delta / floodplain
+rainforest upland / dissected lowland
+coast / fjord / cliff coast
+```
+
+## Acceptance Rules
+
+A kernel is useful only if it survives plain-gray inspection.
+
+Accept kernels that have:
+
+```text
+clean no-data handling
+readable landform identity
+stable normalized height range
+non-broken slope/curvature maps
+usable ridge/valley structure
+no obvious projection/import artifacts
+preview image that matches the intended terrain family
+```
+
+Reject or quarantine kernels with:
+
+```text
+large voids
+water/sea flattening dominating the patch unless intentionally coastal
+city/building DSM artifacts where bare-earth terrain is needed
+bad edge spikes
+broken vertical units
+overly tiny patch character that cannot drive larger landforms
+```
+
+## First Deliverable
+
+Build a small reviewed kernel catalog before Phase 5:
+
+```text
+8 to 12 accepted kernels
+at least 5 terrain families
+preview PNG for each
+stats JSON for each
+one combined catalog JSON
+```
+
+Do not try to process the whole cache perfectly first. Get enough reviewed kernels to prove the infinite terrain can inherit real landform character.
+
+## Current Offline Status - 2026-05-24
+
+The offline track has moved past the first deliverable:
+
+```text
+raw DEM cache moved to D:/workflows/worldgen9/dems/
+780 GeoTIFFs cataloged
+779 kernel artifacts generated
+703 kernels passed automated validation
+36 kernels promoted for first heightfield shaping
+runtime kernel pack written to factory/runtime/kernel_pack_v1.json
+runtime height contract written to plans/runtime_height_contract.md
+runtime pack verifier written to factory/runtime/kernel_pack_verification.json
+province-aware region grammar report written to factory/runtime/region_grammar/
+aggregate runtime readiness report written to factory/runtime/runtime_readiness_report.json
+duplicate candidate report written to factory/catalog/kernel_duplicate_candidates.json
+metadata tag inference written to factory/catalog/kernel_inferred_tags.json
+filtered expansion review queue written to factory/catalog/kernel_expansion_review_queue.json
+full-neighbor seam verifier and TerrainSample reference written under factory/runtime/
+chunk-grid parity fixture written to factory/runtime/chunk_reference/
+mesh-builder parity fixture written to factory/runtime/mesh_reference/
+streamer parity fixture written to factory/runtime/streamer_reference/
+streamer priority/cancel policy compared against FIFO in factory/runtime/
+```
+
+The promoted runtime pack currently includes 4 kernels each from:
+
+```text
+mountain
+glacial
+badlands
+desert
+karst
+coast
+grassland
+rainforest
+volcanic
+```
+
+Wetland/delta kernels are intentionally held for hydrology/context work instead
+of first-pass heightfield shaping.
+
+---
+
+# Phase 5 — Procedural Infinite Fill
+
+## Goal
+
+Make the world continue forever beyond real DEM coverage while still looking like it was informed by real terrain.
+
+## Scope
+
+Included:
+
+```text
+procedural base terrain
+DEM-derived terrain kernels
+region-level terrain style selection
+smooth transition from DEM to procedural fill
+infinite deterministic generation
+```
+
+Not included:
+
+```text
+full biome system
+foliage
+roads
+cities
+rivers as meshes
+erosion simulation
+```
+
+## Core Idea
+
+DEMs provide examples of real terrain. The infinite generator uses those examples to create new believable terrain.
+
+A terrain kernel is a compact description of a terrain type.
+
+Example kernels:
+
+```text
+alpine ridge
+glacial valley
+volcanic slope
+rolling hills
+coastal plain
+desert mesa
+river canyon
+fjord-like terrain
+badlands
+```
+
+## Kernel Data
+
+A DEM-derived kernel can store:
+
+```text
+height range
+relative elevation distribution
+slope distribution
+curvature distribution
+roughness pattern
+ridge mask
+valley mask
+flow accumulation pattern
+local relief
+macro shape type
+residual detail texture
+```
+
+This does not need machine learning at first.
+
+A kernel can begin as:
+
+```text
+small height patch
+normalized height values
+slope map
+ridge/valley hints
+roughness values
+```
+
+## Procedural Fill Structure
+
+The infinite terrain generator can be layered:
+
+```text
+continental/macro shape
+regional terrain style
+kernel-shaped landform
+local detail
+DEM transition blend
+```
+
+Conceptual order:
+
+```text
+macro = large-scale noise or region graph
+style = choose terrain kernel family
+kernel_detail = terrain pattern from real DEM-derived examples
+local_detail = smaller procedural noise
+final = blended result
+```
+
+## Region Selection
+
+Divide infinite space into large regions:
+
+```text
+region_size_m = 8192 to 65536
+```
+
+Each region deterministically chooses terrain style weights:
+
+```text
+region A: 70% rolling hills, 30% river valleys
+region B: 60% alpine ridge, 40% glacial basin
+region C: 80% desert mesa, 20% canyon
+```
+
+Blend between neighboring regions.
+
+## DEM to Procedural Transition
+
+Near real DEM coverage:
+
+```text
+DEM confidence high: use DEM heavily
+DEM confidence fading: blend DEM shape with procedural terrain
+outside DEM: procedural fill takes over
+```
+
+Avoid this:
+
+```text
+real DEM abruptly ends, random noise begins
+```
+
+Preferred:
+
+```text
+DEM landform gradually becomes a matching procedural landform
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+you can walk far beyond the DEM area
+terrain remains believable
+DEM-to-procedural border is not obvious
+terrain regions vary at large scale
+the world is deterministic from seed
+```
+
+## Stop Condition
+
+Stop Phase 5 when infinite terrain works and looks decent in plain material.
+
+Still no textures.
+
+---
+
+# Phase 6 — Hydrology Hints
+
+## Goal
+
+Add water-related terrain analysis without building full rivers yet.
+
+This phase produces hints that later systems can use.
+
+## Scope
+
+Included:
+
+```text
+flow direction hints
+flow accumulation hints
+wetness hints
+depression handling at low resolution
+watershed-ish grouping optional
+hydrology debug overlay
+```
+
+Not included:
+
+```text
+river meshes
+water shaders
+river gameplay
+bridges
+boats
+full erosion
+```
+
+## Why This Comes Before Rivers
+
+Rivers need to know where water would naturally collect.
+
+Hydrology hints answer:
+
+```text
+Which way does water flow?
+Where does water accumulate?
+Where are likely channels?
+Where are wet lowlands?
+Where are divides/ridges?
+```
+
+## Input Data
+
+Hydrology can use:
+
+```text
+height
+slope
+curvature
+DEM confidence
+procedural terrain type
+roughness
+```
+
+## Chunk Padding Requirement
+
+Hydrology cannot only look at the visible chunk interior.
+
+It needs padded sampling around the chunk:
+
+```text
+chunk area + margin
+```
+
+Example:
+
+```text
+for a 2048m chunk, sample an extra 256m to 1024m border
+```
+
+This prevents flow from breaking at chunk boundaries.
+
+## First Algorithms
+
+Keep it simple.
+
+### Slope direction
+
+Calculate downhill direction from neighboring height samples.
+
+### Flow accumulation approximation
+
+At a low resolution, accumulate water from higher cells to lower cells.
+
+### Wetness score
+
+Concept:
+
+```text
+wetness = flow_accumulation / max(slope, small_value)
+```
+
+### Channel likelihood
+
+Concept:
+
+```text
+river_likelihood = high flow accumulation + suitable valley shape
+```
+
+## Debug Views
+
+Add debug modes:
+
+```text
+flow direction arrows
+flow accumulation heatmap
+wetness heatmap
+ridge/divide view
+potential river lines
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+flow hints generally follow valleys
+ridges act like divides
+accumulation lines form believable drainage paths
+debug overlay is understandable
+nothing visibly changes unless debug mode is enabled
+```
+
+## Stop Condition
+
+Stop Phase 6 when you can see believable water-flow hints.
+
+Do not build actual rivers yet.
+
+---
+
+# Phase 7 — Rivers
+
+## Goal
+
+Turn hydrology hints into persistent river paths and carved terrain channels.
+
+## Scope
+
+Included:
+
+```text
+river graph
+river source selection
+river path tracing
+confluences
+basic channel carving
+debug river curves
+optional simple water surface strips
+```
+
+Not included:
+
+```text
+advanced water simulation
+flooding
+boats
+bridges
+river ecology
+sediment simulation
+full erosion
+```
+
+## River System Structure
+
+```text
+RiverGraph
+├── RiverNode
+│   ├── position
+│   ├── flow amount
+│   ├── elevation
+│   └── type: source/confluence/mouth
+│
+└── RiverSegment
+    ├── start node
+    ├── end node
+    ├── polyline points
+    ├── width
+    ├── depth
+    ├── flow amount
+    └── river order
+```
+
+## River Generation
+
+Basic process:
+
+```text
+use hydrology flow accumulation
+select source points above threshold
+trace downhill paths
+merge paths at confluences
+remove tiny/noisy streams
+smooth river polylines
+store as river graph
+```
+
+## River Continuity
+
+Rivers must be generated in a way that survives chunk streaming.
+
+Do not generate rivers independently per visible chunk without coordination.
+
+Better options:
+
+```text
+generate by larger region tile
+generate with padded region bounds
+cache river graph per region
+connect rivers across region borders
+```
+
+Suggested river region size:
+
+```text
+8192m to 32768m
+```
+
+## Channel Carving
+
+Once river paths exist, the height provider can modify terrain:
+
+```text
+base_height = terrain_without_river
+river_distance = distance_to_nearest_river_path
+carve_amount = function(distance, river_width, river_depth)
+final_height = base_height - carve_amount
+```
+
+First carving profile:
+
+```text
+smooth U-shaped or V-shaped channel
+```
+
+Avoid deep canyons at first.
+
+## Water Surface
+
+Optional first visual:
+
+```text
+simple blue flat ribbon following river path
+```
+
+But the more important first goal is carved channels, not beautiful water.
+
+## Debug Views
+
+```text
+river source points
+river graph lines
+flow amount color
+river order color
+carve influence radius
+channel depth view
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+rivers appear in believable valleys
+small streams merge into larger rivers
+river paths persist when chunks stream
+terrain is gently carved around river paths
+rivers do not stop at chunk edges
+```
+
+## Stop Condition
+
+Stop Phase 7 when basic river paths and channel carving work.
+
+Do not build full erosion yet.
+
+---
+
+# Phase 8 — Erosion
+
+## Goal
+
+Improve terrain realism using erosion-style shaping after the terrain, hydrology, and rivers are already stable.
+
+## Scope
+
+Included:
+
+```text
+light erosion shaping
+thermal erosion pass
+simple hydraulic-inspired pass
+river-adjacent smoothing/deposition hints
+DEM-derived erosion residuals
+before/after debug toggle
+```
+
+Not included at first:
+
+```text
+expensive full-world simulation
+real-time fluid simulation
+sediment transport simulation
+geology simulator
+climate simulator
+```
+
+## Why Erosion Comes Late
+
+Erosion depends on:
+
+```text
+stable height terrain
+stable chunk sampling
+stable DEM/procedural blending
+hydrology hints
+river paths
+```
+
+If erosion comes too early, it can hide or complicate basic terrain problems.
+
+## Erosion Strategy
+
+Use three levels of erosion, in this order.
+
+### 8.1 DEM-derived erosion detail
+
+Extract erosion-like detail from real DEMs:
+
+```text
+small channels
+ridge roughness
+slope break patterns
+valley textures
+alluvial fan patterns if available
+```
+
+Use these as procedural residuals in similar terrain types.
+
+This makes terrain look eroded without running a heavy simulation.
+
+### 8.2 Thermal erosion
+
+Thermal erosion smooths slopes that are too steep.
+
+Useful for:
+
+```text
+talus slopes
+cliff bases
+mountain sides
+mesa edges
+```
+
+Simple rule:
+
+```text
+if slope is above talus angle:
+    move some height from high cell to low neighboring cell
+```
+
+Run on terrain tiles with padding so chunk edges stay consistent.
+
+### 8.3 Hydraulic-inspired erosion
+
+Do a simplified water-flow erosion pass using hydrology hints.
+
+Concept:
+
+```text
+where flow accumulation is high:
+    cut slightly into terrain
+where slope decreases near channels:
+    deposit slightly
+```
+
+This is not full fluid simulation. It is a shaping pass.
+
+## Runtime vs Offline
+
+Prefer erosion as an offline or cached generation pass.
+
+Runtime terrain chunks should sample the result, not run expensive erosion from scratch every frame.
+
+Potential approach:
+
+```text
+for each large terrain region:
+    build base height field
+    apply hydrology hints
+    apply river carving
+    apply erosion shaping
+    cache result
+chunks sample from cached region data
+```
+
+## Edge Safety
+
+Erosion must not break chunk seams.
+
+Rules:
+
+```text
+run erosion on larger region tiles, not individual visible chunks
+use padding around each region
+crop final result back to region bounds
+shared world coordinate must still return same height
+```
+
+## Debug Views
+
+```text
+before erosion / after erosion toggle
+erosion amount heatmap
+deposition amount heatmap
+thermal smoothing view
+hydraulic cut view
+```
+
+## Visual Checkpoint
+
+The phase passes when:
+
+```text
+terrain looks more naturally worn
+ridges and valleys improve
+river channels feel integrated
+no chunk-edge erosion artifacts appear
+before/after toggle shows useful improvement
+performance remains acceptable
+```
+
+## Stop Condition
+
+Stop Phase 8 when erosion improves the terrain without becoming the whole project.
+
+---
+
+# Implementation Milestones
+
+## Milestone A — Walking on endless gray terrain
+
+Phases covered:
+
+```text
+1. Infinite terrain chunks
+2. Clean height provider
+```
+
+Success:
+
+```text
+infinite streaming works
+LOD rings work
+plain terrain renders
+provider swapping works
+```
+
+## Milestone B — Real DEM patch in the world
+
+Phases covered:
+
+```text
+3. DEM sampling
+```
+
+Success:
+
+```text
+one real DEM area appears in terrain
+coverage/debug view works
+soft fade into procedural terrain works
+```
+
+## Milestone C — Mixed DEM sources
+
+Phases covered:
+
+```text
+4. DEM resolution blending
+```
+
+Success:
+
+```text
+multiple DEM resolutions blend cleanly
+high-res data adds detail
+low-res data provides continuity
+```
+
+## Milestone D — Infinite DEM-informed terrain
+
+Phases covered:
+
+```text
+5. Procedural infinite fill
+```
+
+Success:
+
+```text
+world continues beyond DEM bounds
+terrain still feels informed by real landforms
+```
+
+## Milestone E — Water logic foundation
+
+Phases covered:
+
+```text
+6. Hydrology hints
+7. Rivers
+```
+
+Success:
+
+```text
+flow hints appear
+river graph forms
+channels carve into terrain
+rivers persist across chunks
+```
+
+## Milestone F — Natural terrain shaping
+
+Phases covered:
+
+```text
+8. Erosion
+```
+
+Success:
+
+```text
+erosion pass improves terrain
+no seam issues
+before/after view proves value
+```
+
+---
+
+# Recommended Initial Settings
+
+```text
+chunk_size_m: 2048
+visible_radius_chunks: 4
+LOD 0 vertices: 129 x 129
+LOD 1 vertices: 65 x 65
+LOD 2 vertices: 33 x 33
+LOD 3 vertices: 17 x 17
+skirt_depth_m: 50
+build_budget_per_frame: 1 to 3 chunks
+collision_enabled_initially: false
+textures_enabled_initially: false
+biomes_enabled_initially: false
+debug_enabled: true
+```
+
+Fallback if build time is too high:
+
+```text
+keep chunk_size_m at 2048
+drop LOD 0 to 65 x 65
+use 32m near spacing temporarily
+optimize mesh layout/index reuse before shrinking chunks
+```
+
+High-detail candidate after the basic runtime is stable:
+
+```text
+LOD 0 vertices: 257 x 257
+LOD 1 vertices: 129 x 129
+LOD 2 vertices: 65 x 65
+LOD 3 vertices: 33 x 33
+```
+
+---
+
+# Early Debug Modes
+
+Implement debug modes early because they replace a lot of painful guessing.
+
+```text
+0. Normal shaded gray
+1. Chunk ID color
+2. LOD ring color
+3. Height bands
+4. Wireframe/seam view
+5. DEM coverage
+6. DEM confidence
+7. DEM source resolution
+8. Procedural vs DEM difference
+9. Flow accumulation
+10. River graph
+11. Erosion amount
+```
+
+Only the first four are needed for Phase 1.
+
+---
+
+# Hard Boundaries for the Restart
+
+Do not build these before Phase 5:
+
+```text
+biomes
+foliage
+ground textures
+splat maps
+roads
+settlements
+animals
+weather
+save/load
+quests
+resources
+```
+
+Do not build these before Phase 6:
+
+```text
+rivers
+lakes
+wetlands
+water shaders
+```
+
+Do not build these before Phase 8:
+
+```text
+full erosion
+sediment simulation
+complex geology
+```
+
+---
+
+# Minimum Viable Phase 1 Code Surface
+
+The first code pass should only need these classes:
+
+```text
+TerrainWorld
+TerrainStreamer
+TerrainChunk
+TerrainMeshBuilder
+TerrainHeightProvider
+FlatHeightProvider
+ProceduralHeightProvider
+TerrainSettings
+```
+
+That is enough to prove the restart direction.
+
+---
+
+# Success Definition for the Whole Plan
+
+This terrain system is successful when:
+
+```text
+it streams infinite chunks
+it uses a clean height provider
+it can sample real DEM data
+it can blend different DEM resolutions
+it can continue procedurally forever
+it can produce hydrology hints
+it can generate persistent rivers
+it can apply erosion-style shaping
+it remains modular and reusable
+```
+
+The system fails if:
+
+```text
+terrain logic becomes tied to one game
+chunks directly depend on raw DEM files
+DEM handling is mixed into mesh building
+features are added before the height pipeline is stable
+textures are used to hide terrain problems
+rivers are added before flow hints exist
+erosion becomes the project before terrain works
+```
+
+---
+
+---
+
+# Optimization Track — Clipmaps, Streaming, and Long-Term Performance
+
+This is not a new feature phase that should happen before terrain works. It is a parallel architecture track that keeps the system future-proof.
+
+The core rule is:
+
+```text
+Start with chunked terrain.
+Design so the renderer can later be swapped for clipmaps or hybrid terrain.
+```
+
+## Why Not Start With Clipmaps Immediately?
+
+Geometry clipmaps are powerful, but they combine several hard problems at once:
+
+```text
+LOD transitions
+height sampling
+viewer-centered ring updates
+GPU-friendly mesh reuse
+collision separation
+shader blending
+streaming/caching
+```
+
+That is too much for the first restart pass.
+
+The first pass should prove:
+
+```text
+height provider works
+infinite coordinates work
+chunks stream correctly
+DEM blending works
+terrain looks good in plain gray
+```
+
+Once that foundation works, clipmaps become much safer to add.
+
+## Renderer Abstraction
+
+Add a renderer interface so terrain generation is not locked to chunk meshes.
+
+Conceptual interface:
+
+```gdscript
+class_name TerrainRenderer
+extends Node
+
+func set_height_provider(provider: TerrainHeightProvider) -> void:
+    pass
+
+func set_settings(settings: TerrainSettings) -> void:
+    pass
+
+func sync_viewer(world_position: Vector3) -> void:
+    pass
+
+func set_debug_mode(debug_mode: int) -> void:
+    pass
+```
+
+Then the system can support multiple renderers:
+
+```text
+ChunkTerrainRenderer      # first implementation
+ClipmapTerrainRenderer    # later visual terrain renderer
+HybridTerrainRenderer     # likely long-term winner
+```
+
+`TerrainWorld` should talk to `TerrainRenderer`, not directly to chunk-specific code.
+
+## Renderer V1 — Chunked Terrain
+
+This is the first implementation.
+
+Characteristics:
+
+```text
+fixed-size chunks
+ArrayMesh per chunk
+LOD by chunk ring
+skirts for cracks
+CPU-built mesh arrays
+simple debug material
+```
+
+Strengths:
+
+```text
+easy to understand
+easy to debug
+works with collision chunks
+works with DEM sampling
+works with hydrology/rivers later
+modular and flexible
+```
+
+Weaknesses:
+
+```text
+many mesh rebuilds
+many nodes if radius gets large
+LOD transitions can be chunky
+far terrain can become expensive
+```
+
+Use this until the height system and DEM system are proven.
+
+## Renderer V2 — Geometry Clipmap
+
+A geometry clipmap uses nested square grids around the viewer.
+
+Concept:
+
+```text
+near ring: small spacing, high detail
+middle ring: larger spacing
+far ring: very large spacing
+```
+
+Example:
+
+```text
+Level 0: spacing 8m, covers nearby area
+Level 1: spacing 16m
+Level 2: spacing 32m
+Level 3: spacing 64m
+Level 4: spacing 128m
+```
+
+Each level is a grid or ring centered around the viewer. As the viewer moves, the grid origin snaps to that level's spacing and only the changed edge data needs to update.
+
+Clipmap goals:
+
+```text
+stable terrain vertex count
+fewer chunk rebuilds
+smoother far-distance LOD
+large visible terrain range
+better long-distance silhouettes
+```
+
+Clipmap challenge:
+
+```text
+collision, rivers, gameplay, and region data still need chunk/region logic
+```
+
+That means clipmap should be treated as a visual renderer, not the whole world system.
+
+## Recommended Long-Term Renderer: Hybrid
+
+The best long-term setup is probably hybrid:
+
+```text
+near gameplay area: chunked terrain
+far visual terrain: clipmap rings
+```
+
+Near chunks handle:
+
+```text
+collision
+foot placement
+physics
+rivers close to player
+interactive terrain queries
+debug chunk inspection
+```
+
+Far clipmap handles:
+
+```text
+mountain silhouettes
+large visible horizon
+far valleys
+low-cost distant terrain
+```
+
+This avoids forcing clipmaps to solve gameplay/collision problems.
+
+## Clipmap Design Requirements
+
+A future `ClipmapTerrainRenderer` should use the same height provider.
+
+The clipmap renderer should ask:
+
+```text
+sample = height_provider.sample(world_x, world_z)
+```
+
+It should not know about DEM files, biomes, rivers, or erosion internals.
+
+Required clipmap concepts:
+
+```text
+clipmap_level
+sample_spacing_m
+ring_extent_m
+viewer_snapped_origin
+transition_band_width
+height_texture_or_height_buffer
+normal_texture_or_shader_normals
+```
+
+Each clipmap level should snap its origin to its spacing:
+
+```text
+snapped_x = floor(viewer_x / spacing) * spacing
+snapped_z = floor(viewer_z / spacing) * spacing
+```
+
+This prevents constant tiny updates when the camera moves by fractions of a meter.
+
+## Clipmap Transition Strategy
+
+The transition between one clipmap level and the next should not pop.
+
+Use a transition band near the outer edge of each finer level:
+
+```text
+near center: use fine height
+near outer band: morph toward coarser height
+```
+
+Conceptual blend:
+
+```text
+fine_height = sample_height(x, z, fine_spacing)
+coarse_height = sample_height(x, z, coarse_spacing)
+t = transition_band_factor
+height = lerp(fine_height, coarse_height, t)
+```
+
+This is similar to the earlier DEM residual idea:
+
+```text
+coarse shape stays stable
+fine detail fades in/out smoothly
+```
+
+## Optimization Order
+
+Do not optimize everything at once.
+
+Use this order:
+
+```text
+1. Correct terrain
+2. Stable streaming
+3. Bounded chunk count
+4. Mesh build budget
+5. Cache repeated work
+6. Thread heavy generation
+7. Reduce draw calls
+8. Improve far terrain with clipmaps
+9. Move selected work to GPU if needed
+```
+
+## Performance Budgets to Track Early
+
+Add a simple debug stats overlay.
+
+Track:
+
+```text
+visible chunk count
+queued mesh jobs
+mesh builds per frame
+average mesh build time
+height samples per second
+height provider cache hit rate
+DEM tile cache hit rate
+active DEM tiles
+terrain memory usage
+terrain draw calls
+main thread frame time
+worker thread time
+stale/cancelled jobs
+```
+
+These numbers matter more than guessing.
+
+## CPU Optimization
+
+Early CPU wins:
+
+```text
+reuse chunk nodes
+reuse mesh arrays where possible
+cache index buffers per LOD
+cache UVs per LOD
+cache local vertex x/z positions per LOD
+build normals from height samples efficiently
+avoid per-vertex object churn where possible
+limit chunk builds per frame
+cancel jobs for chunks that are no longer needed
+prioritize nearby chunks first
+```
+
+The mesh builder should separate reusable layout data from per-chunk height data.
+
+Reusable per LOD:
+
+```text
+local x/z grid positions
+index buffer
+uvs
+debug layout
+skirt indices
+```
+
+Per chunk:
+
+```text
+world origin
+height values
+final vertex y values
+normals
+colors/debug data
+```
+
+## Threading Strategy
+
+Worker threads should generate data, not manipulate active scene nodes.
+
+Safe pattern:
+
+```text
+worker thread:
+    sample height provider
+    build height grid
+    build vertices
+    build normals
+    build index/color data
+    return mesh arrays
+
+main thread:
+    create/update ArrayMesh
+    assign to MeshInstance3D
+    add/remove/recycle nodes
+```
+
+Avoid having worker threads directly modify the active scene tree.
+
+## Streaming Optimization
+
+Streaming should become a priority queue.
+
+Priority factors:
+
+```text
+distance to viewer
+viewer movement direction
+LOD level
+whether chunk is currently visible
+whether old lower-LOD version already exists
+whether chunk is needed for collision
+```
+
+Useful behavior:
+
+```text
+build nearest missing chunks first
+keep old mesh visible until replacement is ready
+cancel far jobs when viewer changes direction
+preload ahead of fast-moving viewer
+throttle generation during frame spikes
+```
+
+## DEM / Data Cache Optimization
+
+DEM data should be cached separately from visual chunks.
+
+Caches:
+
+```text
+DEM tile cache
+DEM pyramid cache
+height sample cache
+region terrain cache
+hydrology cache
+river graph cache
+erosion result cache
+```
+
+Use LRU-style eviction for loaded DEM/region data.
+
+The renderer should be allowed to forget meshes without losing terrain facts.
+
+## Collision Optimization
+
+Do not create collision for every visible chunk.
+
+Use separate collision rules:
+
+```text
+collision radius smaller than visual radius
+collision LOD lower than visual near LOD if acceptable
+collision updates less often than visual terrain
+collision generated only around player/gameplay actors
+```
+
+Possible setup:
+
+```text
+visual radius: 4 to 8 chunks
+collision radius: 1 to 2 chunks
+far clipmap: visual only, no collision
+```
+
+## Floating Origin / Precision
+
+For a truly infinite world, add floating origin support later.
+
+Problem:
+
+```text
+very large world coordinates eventually reduce floating point precision
+```
+
+Solution:
+
+```text
+keep terrain sampling in stable world coordinates
+periodically shift visible scene nodes back near origin
+track global world position separately from local render position
+```
+
+Important distinction:
+
+```text
+global terrain coordinate: permanent, deterministic
+local render coordinate: shifted for precision
+```
+
+The height provider should use global coordinates. Mesh vertices can be local to shifted scene origin.
+
+## GPU Optimization Path
+
+Do not start here, but design toward it.
+
+Possible future path:
+
+```text
+CPU chunk meshes
+→ cached CPU meshes
+→ threaded CPU meshes
+→ hybrid chunk + clipmap
+→ clipmap height textures
+→ shader displacement / GPU normal generation
+→ compute-assisted terrain data if needed
+```
+
+GPU work makes sense when:
+
+```text
+CPU mesh building becomes the bottleneck
+far terrain needs huge draw distance
+height sampling can be represented as textures/buffers
+the terrain renderer is stable enough to justify complexity
+```
+
+## RenderingServer Path
+
+Godot's `RenderingServer` can bypass much of the Node system, but it should be treated as a later optimization.
+
+Use normal nodes first:
+
+```text
+TerrainChunk as Node3D
+MeshInstance3D child
+ArrayMesh resource
+```
+
+Consider `RenderingServer` later only if profiling shows that node overhead or scene-tree operations are the bottleneck.
+
+## HLOD and Visibility Ranges
+
+Use Godot visibility ranges mainly for non-terrain systems later:
+
+```text
+rocks
+foliage
+settlements
+props
+far impostors
+river detail meshes
+```
+
+For terrain itself, custom chunk/clipmap LOD is still the better core approach because terrain LOD must match height sampling, seams, collision, DEM confidence, rivers, and erosion.
+
+## Optimization Stop Rule
+
+Only optimize when one of these is true:
+
+```text
+frame time is bad
+chunk streaming stutters
+memory grows without bound
+terrain pops badly
+far terrain range is too small
+DEM sampling is too slow
+collision generation is too slow
+```
+
+Otherwise, keep building the core phases.
+
+## Best Practical Long-Term Plan
+
+Use this renderer evolution:
+
+```text
+V1: chunked terrain renderer
+V1.5: optimized chunk renderer with job queue + caches
+V2: hybrid renderer with chunks near player and clipmap far away
+V3: GPU-assisted clipmap if profiling proves it is needed
+```
+
+The architecture should prepare for clipmaps now, but implementation should wait until after the height provider, DEM sampling, and DEM blending are stable.
+
+# Immediate Next Step
+
+Current pre-Godot work should use the runtime kernel pack and height contract,
+not factory internals:
+
+Build:
+
+```text
+CPU reference sampler that reads factory/runtime/kernel_pack_v1.json
+seam/determinism verifier that samples shared chunk edges
+small visual review grids for multiple seeds and terrain mixes
+runtime budget report for active LOD triangle/memory estimates
+region grammar report for province coherence and kernel-usage uniqueness
+infinite-travel probe for far-window visual uniqueness and repetition checks
+provider-decision parity fixture for region/kernel/transform matching
+hash/noise parity fixture for deterministic runtime ports
+Godot Phase 1 port plan for parity-first implementation order
+runtime readiness validator that checks all current references together
+runtime artifact manifest that locks reference hashes after readiness passes
+runtime release gate that verifies readiness and artifact hashes without writing
+```
+
+Do not create Godot project files until the project shell exists.
+
+After the project shell exists, start with:
+
+```text
+TerrainSettings
+RuntimeKernelPack loader
+hash/noise parity checks
+TerrainHeightProvider
+TerrainSample parity checks
+TerrainMeshBuilder
+TerrainStreamer
+TerrainWorld
+TerrainChunk
+FlatHeightProvider
+ProceduralHeightProvider
+```
+
+Use `plans/godot_phase1_port_plan.md` as the implementation order. Match
+the no-write runtime release gate before porting, provider decisions before
+heights, heights before chunks, chunks before mesh, and streamer state before
+scene pooling or threaded build optimization.
+
+Target visual result:
+
+```text
+plain gray infinite terrain
+visible LOD debug rings
+stable chunk streaming
+larger 2048m contiguous chunks
+basic seam metric
+DEM-kernel-informed procedural height provider
+no textures
+no biomes
+no erosion
+```
+
+Keep the offline DEM factory in parallel for duplicate detection, family tagging,
+and visual curation, but runtime code should depend on the kernel pack schema.
+
+---
+
+# Biome Planning Track — Data Channels Now, Biomes Later
+
+Biomes should be planned for now, but not implemented as a full feature during the first terrain phases.
+
+The rule is:
+
+```text
+Reserve biome data channels early.
+Do not build biome visuals, ground textures, foliage, or ecology until terrain + hydrology are stable.
+```
+
+This keeps the system future-proof without turning Phase 1 into a full world simulation.
+
+## Main Decision
+
+Biomes should not live inside the terrain mesh builder.
+
+They should be resolved from reusable world facts:
+
+```text
+height terrain
++ slope/curvature
++ hydrology/wetness
++ climate fields
++ terrain region style
++ DEM/kernel hints
+= biome weights
+```
+
+The terrain renderer should not decide biomes. It should only display whatever debug or material data the biome system later provides.
+
+## When Biomes Actually Arrive
+
+Recommended order:
+
+```text
+Phase 1: no biomes
+Phase 2: reserve TerrainSample / WorldFact fields
+Phase 3: DEM can provide rough terrain facts
+Phase 4: DEM resolution blending stays height-focused
+Phase 5: add early climate/region placeholders
+Phase 6: hydrology creates real wetness/drainage data
+Phase 7: rivers create river, floodplain, wetland context
+Phase 7.5: biome resolver debug colors
+Phase 8: erosion improves terrain facts used by biomes
+After Phase 8: textures, foliage, ecology, gameplay spawning
+```
+
+A simple biome debug overlay can appear before erosion, but final biome presentation should wait until the world facts are better.
+
+## Why Not Build Biomes Immediately?
+
+Early biome work creates pressure to add:
+
+```text
+textures
+foliage
+ground cover
+weather
+animals
+resources
+settlements
+materials
+splat maps
+```
+
+That would pull the restart away from the main goal: stable infinite terrain.
+
+However, not planning for biomes at all would be a mistake because later systems need shared data channels.
+
+The safe compromise is:
+
+```text
+architect for biomes now
+implement biome visuals later
+```
+
+## Biome-Relevant World Facts
+
+The biome system should eventually read from a `WorldFactProvider`, `TerrainSample`, or similar structure.
+
+Useful facts:
+
+```text
+height_m
+normalized_elevation
+slope
+aspect
+curvature
+roughness
+local_relief
+terrain_kernel_type
+DEM_source_confidence
+DEM_source_resolution
+flow_direction
+flow_accumulation
+wetness
+river_likelihood
+distance_to_river
+distance_to_lake
+distance_to_ocean optional
+floodplain_score
+temperature
+moisture
+rain_shadow
+wind_exposure
+sun_exposure
+snowline_score
+soil_depth
+rockiness
+sediment/deposition_hint
+```
+
+Not all of these need to exist early. The important thing is that the architecture has somewhere for them to go.
+
+## TerrainSample Extension
+
+The future `TerrainSample` can grow into:
+
+```text
+height: float
+normal: Vector3
+slope: float
+aspect: float
+curvature: float
+roughness: float
+source_confidence: float
+source_resolution_m: float
+flow_direction: Vector2
+flow_accumulation: float
+wetness: float
+river_likelihood: float
+climate_temperature: float
+climate_moisture: float
+terrain_style_id: int
+biome_hint_mask: int
+```
+
+This does not mean all values are calculated in Phase 1.
+
+Early phases can return defaults:
+
+```text
+wetness = 0
+flow_accumulation = 0
+climate_temperature = simple placeholder
+climate_moisture = simple placeholder
+biome_hint_mask = 0
+```
+
+## Biome Resolver
+
+The biome resolver should be a separate module:
+
+```text
+BiomeResolver
+├── reads world facts
+├── calculates biome weights
+├── blends neighboring biome zones
+└── outputs biome IDs and weights
+```
+
+Conceptual API:
+
+```gdscript
+func sample_biome(world_x: float, world_z: float, facts: TerrainSample) -> BiomeSample:
+    pass
+```
+
+Conceptual output:
+
+```text
+primary_biome_id
+biome_weights
+transition_strength
+ground_material_hints
+foliage_set_hints
+wetland_flag
+snow_flag
+riverbank_flag
+```
+
+Early output can be debug-only:
+
+```text
+color terrain by biome category
+```
+
+## Biome Factors
+
+Elevation and moisture are useful, but not enough by themselves.
+
+A good first resolver can use:
+
+```text
+elevation
+temperature
+moisture
+slope
+wetness
+terrain style
+river/floodplain influence
+```
+
+Simple example:
+
+```text
+high elevation + low temperature = alpine / snow
+low elevation + high wetness = wetland / floodplain
+high slope + low soil = cliff / rocky slope
+medium elevation + medium moisture = forest / grassland blend
+low moisture + high temperature = dry scrub / desert
+```
+
+Later, this can be improved with:
+
+```text
+rain shadows
+prevailing wind
+latitude-like climate bands
+seasonality
+soil depth
+bedrock type
+fire/disturbance history
+human/settlement influence
+```
+
+## Climate Placeholder
+
+For an infinite fictional world, climate does not need to be true Earth climate at first.
+
+Start with deterministic broad fields:
+
+```text
+temperature = latitude-like gradient + elevation cooling + regional noise
+moisture = regional moisture noise + hydrology wetness + rain shadow placeholder
+```
+
+This gives enough structure for biome debug views without building a full climate simulator.
+
+## Moisture Model
+
+Use multiple moisture sources:
+
+```text
+macro moisture field
+river/wetland influence
+flow accumulation
+lowland/floodplain influence
+rain shadow later
+```
+
+Avoid using only random noise for moisture. It will make biomes feel arbitrary.
+
+## Biome Boundaries
+
+Biomes should blend.
+
+Avoid hard borders like:
+
+```text
+grassland instantly becomes desert at one coordinate
+```
+
+Prefer biome weights:
+
+```text
+grassland: 0.65
+dry_scrub: 0.25
+rocky: 0.10
+```
+
+Those weights can later drive:
+
+```text
+terrain material blending
+foliage density
+prop spawning
+animal spawning
+ambient sounds
+weather probability
+```
+
+## Folder Addition
+
+Add this folder later, but reserve the concept now:
+
+```text
+res://worldgen_terrain/biomes/
+│
+├── biome_resolver.gd
+├── biome_sample.gd
+├── biome_definition.gd
+├── biome_registry.gd
+├── climate_sampler.gd
+├── moisture_sampler.gd
+└── biome_debug_overlay.gd
+```
+
+Do not add this folder in Phase 1 unless it is just an empty placeholder or very small debug prototype.
+
+## Debug Views
+
+Useful biome debug modes:
+
+```text
+temperature
+moisture
+wetness
+slope class
+elevation band
+primary biome
+biome blend weights
+floodplain influence
+snowline
+rockiness
+```
+
+These should come before textures or foliage.
+
+## Biome Stop Rule
+
+Do not move from biome debug colors to full biome art until:
+
+```text
+infinite terrain works
+DEM blending works
+procedural fill works
+hydrology hints exist
+rivers are at least partially stable
+```
+
+Full biome art includes:
+
+```text
+ground textures
+splat maps
+foliage
+rocks
+props
+animals
+ambient effects
+```
+
+## Practical Takeaway
+
+Biomes are not hard to add separately if the terrain system already exposes world facts.
+
+Biomes become hard if:
+
+```text
+height is only a float forever
+moisture has no place to live
+hydrology is disconnected from terrain
+terrain regions are not deterministic
+materials are baked directly into chunks too early
+```
+
+So the plan is:
+
+```text
+now: design TerrainSample / world facts with biome fields
+later: implement BiomeResolver as a separate module
+much later: connect biomes to materials, foliage, props, and gameplay
+```
