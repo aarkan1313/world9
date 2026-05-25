@@ -19,6 +19,8 @@ func _start() -> void:
 	var far: Node3D = TerrainFarClipmapNodeScript.new()
 	var far_shader: Shader = far._gray_material_shader(false)
 	var far_code: String = far_shader.code
+	var far_fade_code: String = far._gray_material_shader(true).code
+	var far_surface_fade_code: String = far._surface_texture_material_shader(true).code
 	var required_snippets: Array[String] = [
 		"vec3 review_n = normalize(vec3(n.x * 0.65, n.y, n.z * 0.65));",
 		"float slope_shadow = clamp((1.0 - review_n.y) * 0.04, 0.0, 0.025);",
@@ -41,8 +43,10 @@ func _start() -> void:
 		errors.append("far_missing_square_edge_fog_toggle")
 	if not far_code.contains("max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y))"):
 		errors.append("far_missing_square_edge_fog_distance")
-	if not far_code.contains("ALPHA = fade_alpha * mix(1.0, 0.04, fog_t);"):
-		errors.append("far_missing_edge_alpha_fade")
+	if not far_fade_code.contains("ALPHA = fade_alpha;"):
+		errors.append("far_missing_opaque_edge_fog_alpha")
+	if far_fade_code.contains("fade_alpha * mix(1.0, 0.04, fog_t)") or far_surface_fade_code.contains("fade_alpha * mix(1.0, 0.04, fog_t)"):
+		errors.append("far_edge_fog_still_changes_alpha")
 	if far_code.contains("n.x * 3.0"):
 		errors.append("far_old_normal_scale")
 	if far_code.contains("n.x * 1.35") or near_code.contains("n.x * 1.35"):

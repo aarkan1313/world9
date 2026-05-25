@@ -1239,7 +1239,7 @@ void fragment() {
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
 	float fog_t = edge_fog_enabled ? smoothstep(edge_fog_begin_m, edge_fog_end_m, fog_distance_m) : 0.0;
 	ALBEDO = mix(vec3(shade), edge_fog_color, fog_t);
-	ALPHA = fade_alpha * mix(1.0, 0.04, fog_t);
+	ALPHA = fade_alpha;
 }
 """ % render_mode
 	if fade_enabled:
@@ -1307,7 +1307,7 @@ void fragment() {
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
 	float fog_t = edge_fog_enabled ? smoothstep(edge_fog_begin_m, edge_fog_end_m, fog_distance_m) : 0.0;
 	ALBEDO = mix(vec3(shade), edge_fog_color, fog_t);
-	ALPHA = fade_alpha * mix(1.0, 0.04, fog_t);
+	ALPHA = fade_alpha;
 }
 """ % render_mode
 	if fade_enabled:
