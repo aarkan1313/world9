@@ -58,7 +58,7 @@ func detach_until_done() -> void:
 		_detached_workers.append(self)
 
 
-static func cleanup_detached_workers(max_to_clean: int = 0) -> int:
+static func cleanup_detached_workers(max_to_clean: int = 0, wait_for_running: bool = false, timeout_msec: int = 5000) -> int:
 	var cleaned := 0
 	var limit: int = max_to_clean if max_to_clean > 0 else 2147483647
 	for index in range(_detached_workers.size() - 1, -1, -1):
@@ -67,8 +67,11 @@ static func cleanup_detached_workers(max_to_clean: int = 0) -> int:
 			_detached_workers.remove_at(index)
 			continue
 		if not worker.call("is_done"):
-			continue
-		worker.call("take_result")
+			if not wait_for_running:
+				continue
+			worker.call("wait_for_result", timeout_msec)
+		else:
+			worker.call("take_result")
 		_detached_workers.remove_at(index)
 		cleaned += 1
 		if cleaned >= limit:

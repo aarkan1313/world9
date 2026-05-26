@@ -77,6 +77,11 @@ var _page_cache: RefCounted
 var _gpu_page_residency: RefCounted
 
 
+func _exit_tree() -> void:
+	_clear_native_workers(true)
+	TerrainFarClipmapPayloadWorkerScript.cleanup_detached_workers(0, true, 5000)
+
+
 func setup(p_world: RefCounted) -> bool:
 	clear_levels()
 	world = p_world
@@ -1103,11 +1108,13 @@ func _poll_native_workers() -> void:
 	active_worker_count = _native_workers.size()
 
 
-func _clear_native_workers() -> void:
+func _clear_native_workers(wait_for_running: bool = false) -> void:
 	for worker_value in _native_workers.values():
 		var worker: RefCounted = worker_value as RefCounted
 		if worker.call("is_done"):
 			worker.call("take_result")
+		elif wait_for_running:
+			worker.call("wait_for_result", 5000)
 		else:
 			worker.call("detach_until_done")
 	_native_workers.clear()
@@ -2133,9 +2140,8 @@ void fragment() {
 		n = vec3(0.0, 1.0, 0.0);
 	}
 	float square_radius = max(abs(local_xz.x), abs(local_xz.y));
-	float inner_distance = inner_extent_m > 0.0 ? abs(square_radius - inner_extent_m) : boundary_blend_width_m;
 	float outer_distance = outer_extent_m > 0.0 ? max(0.0, outer_extent_m - square_radius) : boundary_blend_width_m;
-	float boundary_distance = min(inner_distance, outer_distance);
+	float boundary_distance = outer_distance;
 	float boundary_strength = smoothstep(0.0, max(1.0, boundary_blend_width_m), boundary_distance);
 	float level_strength = 1.0 / (1.0 + max(float(clipmap_level), 0.0) * 0.55);
 	float detail_strength = clamp(normal_strength, 0.0, 4.0) * boundary_strength * level_strength;

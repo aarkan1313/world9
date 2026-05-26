@@ -66,7 +66,8 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
-	_clear_native_chunk_workers()
+	_clear_native_chunk_workers(true)
+	TerrainNativeChunkPayloadWorkerScript.cleanup_detached_workers(0, true, 5000)
 
 
 func setup_world(mode: String = TerrainWorldScript.PROVIDER_PROCEDURAL, p_seed: int = 1337) -> bool:
@@ -625,11 +626,13 @@ func _native_request_matches_active_target(request: Dictionary, active_info: Dic
 	return true
 
 
-func _clear_native_chunk_workers() -> void:
+func _clear_native_chunk_workers(wait_for_running: bool = false) -> void:
 	for worker_value in _native_chunk_workers.values():
 		var worker: RefCounted = worker_value as RefCounted
 		if worker.call("is_done"):
 			worker.call("take_result")
+		elif wait_for_running:
+			worker.call("wait_for_result", 5000)
 		else:
 			worker.call("detach_until_done")
 	_native_chunk_workers.clear()

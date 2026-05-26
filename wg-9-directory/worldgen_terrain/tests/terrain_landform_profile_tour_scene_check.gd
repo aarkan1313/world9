@@ -16,8 +16,8 @@ func _init() -> void:
 		else:
 			if bool(packed_instance.get("auto_profile_cycle_enabled")):
 				errors.append("packed_auto_profile_cycle_enabled")
-			if bool(packed_instance.get("use_far_clipmap")):
-				errors.append("packed_far_clipmap_enabled")
+			if not bool(packed_instance.get("use_far_clipmap")):
+				errors.append("packed_far_clipmap_disabled")
 			packed_instance.queue_free()
 	var scene: Node3D = TerrainLandformProfileTourSceneScript.new()
 	scene.auto_setup_on_ready = false

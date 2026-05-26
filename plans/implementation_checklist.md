@@ -127,7 +127,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add landform tuning and erosion-order plan at `plans/landform_tuning_and_erosion_order.md`.
 - [x] Add review-only landform tuning profiles for current balance, stronger mountains, and compressed scale before changing defaults.
 - [x] Add same-site profile comparison probe/contact sheet/tour with height-range, p05/p95 relief, slope, local-relief, kernel-contribution, and seam checks.
-- [x] Add live `terrain_landform_profile_tour.tscn` review scene that exposes `balanced_current`, `strong_mountains`, and `compressed_scale` on representative sites. It now defaults to manual profile switching and near-terrain review only so tuned profiles do not trigger unsupported far-native recenter work while flying.
+- [x] Add live `terrain_landform_profile_tour.tscn` review scene that exposes `balanced_current`, `strong_mountains`, and `compressed_scale` on representative sites. It defaults to manual profile switching so tuned profiles do not rebuild unexpectedly while flying, while far coverage remains enabled for useful scale review.
 - [ ] Add deterministic pass/corridor world-fact placeholder after base scale/relief profiles are measurable.
 - [ ] Keep erosion after accepted base relief/scale, kernel influence tuning, useful hydrology hints, and first river/pass routing facts.
 - [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.

@@ -54,6 +54,8 @@ var _last_material_state_key: String = ""
 
 
 func _exit_tree() -> void:
+	_clear_native_workers(true)
+	TerrainNativeChunkPayloadWorkerScript.cleanup_detached_workers(0, true, 5000)
 	clear_patches()
 
 
@@ -471,11 +473,13 @@ func _cancel_retired_worker_work(desired_keys: Dictionary) -> void:
 	_native_worker_queue = filtered
 
 
-func _clear_native_workers() -> void:
+func _clear_native_workers(wait_for_running: bool = false) -> void:
 	for worker_value in _native_workers.values():
 		var worker: RefCounted = worker_value as RefCounted
 		if worker.call("is_done"):
 			worker.call("take_result")
+		elif wait_for_running:
+			worker.call("wait_for_result", 5000)
 		else:
 			worker.call("detach_until_done")
 	_native_workers.clear()

@@ -251,6 +251,5 @@ N/B moves to next/previous representative site
 Non-neutral landform profiles are review-only. They intentionally disable native
 prepared-grid/chunk payload support until the native/GPU backend consumes the
 same profile settings and passes parity. For that reason the live profile tour
-defaults to manual profile switching and disables far clipmap; it should prove
-generator-scale differences first, then the far backend can be brought up to the
-same profile contract deliberately.
+defaults to manual profile switching while keeping far coverage enabled for
+scale review.
