@@ -308,7 +308,7 @@ func _can_use_native_prepared_grid() -> bool:
 
 
 func _native_prepared_profile_supported() -> bool:
-	return _landform_profile_is_native_neutral()
+	return true
 
 
 func _landform_profile_is_native_neutral() -> bool:
@@ -375,6 +375,11 @@ func _grid_corner_entries(base_rx: int, base_rz: int, world_seed: int, region_si
 				"cols": int(shape[1]),
 				"scale_multiplier": float(transform["scale_multiplier"]),
 				"scale": float(transform["world_scale_m"]),
+				"profile_macro_relief_scale": macro_relief_scale,
+				"profile_kernel_relief_strength": kernel_relief_strength,
+				"profile_mountain_boost": mountain_boost,
+				"profile_regional_scale_multiplier": regional_scale_multiplier,
+				"profile_valley_bias_strength": valley_bias_strength,
 				"angle_i": int(transform["rotation_quadrants"]),
 				"offset_u": float(transform["offset_u"]),
 				"offset_v": float(transform["offset_v"]),

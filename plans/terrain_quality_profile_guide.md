@@ -248,8 +248,8 @@ P toggles automatic profile cycling
 N/B moves to next/previous representative site
 ```
 
-Non-neutral landform profiles are review-only. They intentionally disable native
-prepared-grid/chunk payload support until the native/GPU backend consumes the
-same profile settings and passes parity. For that reason the live profile tour
-defaults to manual profile switching while keeping far coverage enabled for
-scale review.
+Non-neutral landform profiles are review-only, but they now remain compatible
+with native prepared-grid/chunk payload support. Prepared requests carry the
+same profile settings consumed by the GDScript provider, and the live profile
+tour throttles far refresh to one level per frame so `V` profile switches do not
+fall back to slow synchronous GDScript rebuilds.

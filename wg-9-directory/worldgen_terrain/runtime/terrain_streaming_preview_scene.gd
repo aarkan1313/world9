@@ -73,6 +73,8 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export_range(0, 256, 1) var far_clipmap_gpu_page_residency_max_pages: int = 48
 @export var use_far_clipmap_surface_material: bool = false
 @export_range(0.0, 4.0, 0.05) var far_clipmap_surface_normal_strength: float = 1.0
+@export var allow_profile_fallback_sync_rebuilds: bool = false
+@export_range(1, 4, 1) var max_profile_fallback_far_levels_per_update: int = 1
 @export var use_local_detail: bool = false
 @export_range(0, 2, 1) var local_detail_radius_patches: int = 0
 @export_range(1, 25, 1) var local_detail_max_active_patches: int = 1
@@ -177,6 +179,7 @@ func setup() -> bool:
 	terrain.use_native_chunk_payloads = use_native_chunk_payloads
 	terrain.use_native_chunk_workers = use_native_chunk_workers
 	terrain.max_native_chunk_workers = max_native_chunk_workers
+	terrain.allow_profile_fallback_sync_rebuilds = allow_profile_fallback_sync_rebuilds
 	terrain.use_lod_mesh_density = use_lod_mesh_density
 	terrain.use_mesh_skirts = use_mesh_skirts
 	terrain.mesh_skirt_depth_m = mesh_skirt_depth_m
@@ -759,6 +762,8 @@ func _configure_far_clipmap_node() -> void:
 	far_clipmap.page_cache_max_pages = far_clipmap_page_cache_max_pages
 	far_clipmap.gpu_page_residency_max_pages = far_clipmap_gpu_page_residency_max_pages
 	far_clipmap.use_surface_texture_material = use_far_clipmap_surface_material
+	far_clipmap.allow_profile_fallback_sync_rebuilds = allow_profile_fallback_sync_rebuilds
+	far_clipmap.max_profile_fallback_rebuild_levels_per_update = max_profile_fallback_far_levels_per_update
 	far_clipmap.set_elevation_color_material(debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR)
 	far_clipmap.surface_texture_normal_strength = far_clipmap_surface_normal_strength
 	far_clipmap.visual_y_bias_per_level_m = far_clipmap_visual_y_bias_per_level_m
@@ -767,7 +772,7 @@ func _configure_far_clipmap_node() -> void:
 
 
 func _far_clipmap_config_key_for_current_settings() -> String:
-	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d" % [
+	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d:%d" % [
 		far_clipmap_level_count,
 		far_clipmap_base_spacing_m,
 		far_clipmap_base_outer_extent_m,
@@ -789,6 +794,8 @@ func _far_clipmap_config_key_for_current_settings() -> String:
 		distance_fog_color.g,
 		distance_fog_color.b,
 		1 if debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR else 0,
+		1 if allow_profile_fallback_sync_rebuilds else 0,
+		max_profile_fallback_far_levels_per_update,
 	]
 
 

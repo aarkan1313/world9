@@ -398,7 +398,12 @@ fn sample_prepared_height_grid(
             let wx0 = 1.0 - tx;
             let weights = [wx0 * wz0, tx * wz0, wx0 * wz1, tx * wz1];
             values.push(sample_height_with_corners(
-                x, z, world_seed, corners, &weights,
+                x,
+                z,
+                world_seed,
+                region_size_m,
+                corners,
+                &weights,
             ));
         }
     }
@@ -574,6 +579,7 @@ struct PreparedCorner {
 
 #[derive(Clone)]
 struct PreparedEntry {
+    family: String,
     bias: f64,
     runtime_weight: f64,
     moderation: f64,
@@ -584,9 +590,36 @@ struct PreparedEntry {
     rows: usize,
     cols: usize,
     scale: f64,
+    scale_multiplier: f64,
+    profile_macro_relief_scale: f64,
+    profile_kernel_relief_strength: f64,
+    profile_mountain_boost: f64,
+    profile_regional_scale_multiplier: f64,
+    profile_valley_bias_strength: f64,
     angle_i: i64,
     offset_u: f64,
     offset_v: f64,
+}
+
+#[derive(Clone, Copy)]
+struct NativeProfile {
+    macro_relief_scale: f64,
+    kernel_relief_strength: f64,
+    mountain_boost: f64,
+    regional_scale_multiplier: f64,
+    valley_bias_strength: f64,
+}
+
+impl Default for NativeProfile {
+    fn default() -> Self {
+        Self {
+            macro_relief_scale: 1.0,
+            kernel_relief_strength: 1.0,
+            mountain_boost: 1.0,
+            regional_scale_multiplier: 1.0,
+            valley_bias_strength: 1.0,
+        }
+    }
 }
 
 fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, String> {
@@ -632,6 +665,15 @@ fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, Strin
             let relief_scale_m = dict_f64(&entry, "relief_scale_m", 0.0);
             let detail_scale_m = dict_f64(&entry, "detail_scale_m", 0.0);
             let scale = dict_f64(&entry, "scale", 1.0);
+            let scale_multiplier = dict_f64(&entry, "scale_multiplier", 1.0);
+            let profile_macro_relief_scale = dict_f64(&entry, "profile_macro_relief_scale", 1.0);
+            let profile_kernel_relief_strength =
+                dict_f64(&entry, "profile_kernel_relief_strength", 1.0);
+            let profile_mountain_boost = dict_f64(&entry, "profile_mountain_boost", 1.0);
+            let profile_regional_scale_multiplier =
+                dict_f64(&entry, "profile_regional_scale_multiplier", 1.0);
+            let profile_valley_bias_strength =
+                dict_f64(&entry, "profile_valley_bias_strength", 1.0);
             let offset_u = dict_f64(&entry, "offset_u", 0.0);
             let offset_v = dict_f64(&entry, "offset_v", 0.0);
             let numeric_values = [
@@ -641,6 +683,12 @@ fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, Strin
                 relief_scale_m,
                 detail_scale_m,
                 scale,
+                scale_multiplier,
+                profile_macro_relief_scale,
+                profile_kernel_relief_strength,
+                profile_mountain_boost,
+                profile_regional_scale_multiplier,
+                profile_valley_bias_strength,
                 offset_u,
                 offset_v,
             ];
@@ -653,6 +701,7 @@ fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, Strin
                 ));
             }
             entries.push(PreparedEntry {
+                family: dict_string(&entry, "family", ""),
                 bias,
                 runtime_weight,
                 moderation,
@@ -663,6 +712,12 @@ fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, Strin
                 rows,
                 cols,
                 scale,
+                scale_multiplier,
+                profile_macro_relief_scale,
+                profile_kernel_relief_strength,
+                profile_mountain_boost,
+                profile_regional_scale_multiplier,
+                profile_valley_bias_strength,
                 angle_i: dict_i64(&entry, "angle_i", 0),
                 offset_u,
                 offset_v,
@@ -697,28 +752,46 @@ fn dict_f64(dict: &VarDictionary, key: &str, fallback: f64) -> f64 {
         .unwrap_or(fallback)
 }
 
+fn dict_string(dict: &VarDictionary, key: &str, fallback: &str) -> String {
+    dict.get(key)
+        .map(|value| value.to::<GString>().to_string())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
 fn sample_height_with_corners(
     x: f64,
     z: f64,
     world_seed: i64,
+    region_size_m: f64,
     corners: &[PreparedCorner],
     corner_weights: &[f64; 4],
 ) -> f32 {
-    let continent = fbm(x, z, 52000.0, world_seed + 3, 4);
+    let profile = profile_from_corners(corners);
+    let regional_scale = profile.regional_scale_multiplier.max(0.000001);
+    let sample_x = x / regional_scale;
+    let sample_z = z / regional_scale;
+    let continent = fbm(sample_x, sample_z, 52000.0, world_seed + 3, 4);
     let upland = smoothstep_unit((continent + 0.2) / 0.75);
     let basin = 1.0 - smoothstep_unit((continent + 0.05) / 0.55);
     let mut macro_height = continent * 560.0
-        + fbm(x, z, 26000.0, world_seed, 4) * 430.0
-        + fbm(x + 2300.0, z - 1100.0, 12000.0, world_seed + 11, 3) * 140.0;
+        + fbm(sample_x, sample_z, 26000.0, world_seed, 4) * 430.0
+        + fbm(
+            sample_x + 2300.0,
+            sample_z - 1100.0,
+            12000.0,
+            world_seed + 11,
+            3,
+        ) * 140.0;
     let ridge = ridged_noise(
-        x * 0.8 + z * 0.15,
-        z * 0.65 - x * 0.1,
+        sample_x * 0.8 + sample_z * 0.15,
+        sample_z * 0.65 - sample_x * 0.1,
         18000.0,
         world_seed + 37,
         3,
     );
     macro_height += ridge * (190.0 + upland * 230.0);
     macro_height -= basin * 170.0;
+    macro_height *= profile.macro_relief_scale;
 
     let mut detail = 0.0;
     let mut relief = 0.0;
@@ -729,14 +802,16 @@ fn sample_height_with_corners(
         }
         for entry in &corner.entries {
             let weight = corner_weight * entry.bias;
-            let sampled = sample_kernel_cached(entry, x, z);
+            let sampled = sample_kernel_cached(entry, x, z, region_size_m, regional_scale);
             relief += sampled
                 * weight
                 * entry.runtime_weight
                 * entry.moderation
                 * entry.relief_scale_m
-                * (0.58 + upland * 0.38);
-            detail += fbm(x, z, 3000.0, entry.detail_seed, 2)
+                * (0.58 + upland * 0.38)
+                * profile.kernel_relief_strength
+                * family_relief_boost(&entry.family, profile.mountain_boost);
+            detail += fbm(sample_x, sample_z, 3000.0, entry.detail_seed, 2)
                 * weight
                 * entry.runtime_weight
                 * entry.moderation
@@ -745,13 +820,44 @@ fn sample_height_with_corners(
         }
     }
 
-    let valleys = valley_mask(x, z, world_seed);
-    let valley_cut = valleys * (110.0 + upland * 130.0);
-    let valley_floor_noise = fbm(x, z, 4200.0, world_seed + 401, 2) * 24.0 * valleys;
+    let valleys = valley_mask(sample_x, sample_z, world_seed);
+    let valley_cut = valleys * (110.0 + upland * 130.0) * profile.valley_bias_strength;
+    let valley_floor_noise = fbm(sample_x, sample_z, 4200.0, world_seed + 401, 2) * 24.0 * valleys;
     (macro_height + relief + detail - valley_cut + valley_floor_noise) as f32
 }
 
-fn sample_kernel_cached(entry: &PreparedEntry, x: f64, z: f64) -> f64 {
+fn profile_from_corners(corners: &[PreparedCorner]) -> NativeProfile {
+    for corner in corners {
+        for entry in &corner.entries {
+            return NativeProfile {
+                macro_relief_scale: entry.profile_macro_relief_scale,
+                kernel_relief_strength: entry.profile_kernel_relief_strength,
+                mountain_boost: entry.profile_mountain_boost,
+                regional_scale_multiplier: entry.profile_regional_scale_multiplier,
+                valley_bias_strength: entry.profile_valley_bias_strength,
+            };
+        }
+    }
+    NativeProfile::default()
+}
+
+fn family_relief_boost(family: &str, mountain_boost: f64) -> f64 {
+    if (mountain_boost - 1.0).abs() <= 0.000001 {
+        return 1.0;
+    }
+    match family {
+        "mountain" | "glacial" | "volcanic" => mountain_boost,
+        _ => 1.0,
+    }
+}
+
+fn sample_kernel_cached(
+    entry: &PreparedEntry,
+    x: f64,
+    z: f64,
+    region_size_m: f64,
+    regional_scale_multiplier: f64,
+) -> f64 {
     if entry.rows < 2
         || entry.cols < 2
         || entry.values.len() != entry.rows * entry.cols
@@ -760,8 +866,12 @@ fn sample_kernel_cached(entry: &PreparedEntry, x: f64, z: f64) -> f64 {
     {
         return 0.0;
     }
-    let mut u = x / entry.scale;
-    let mut v = z / entry.scale;
+    let mut scale = entry.scale;
+    if (regional_scale_multiplier - 1.0).abs() > 0.000001 && entry.scale_multiplier > 0.0 {
+        scale = (region_size_m * regional_scale_multiplier).max(0.000001) * entry.scale_multiplier;
+    }
+    let mut u = x / scale;
+    let mut v = z / scale;
     match entry.angle_i {
         1 => {
             let old_u = u;

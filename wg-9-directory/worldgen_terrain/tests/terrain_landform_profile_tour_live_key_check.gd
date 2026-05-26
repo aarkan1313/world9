@@ -52,6 +52,8 @@ func _init() -> void:
 		var stats: Dictionary = scene.far_clipmap.stats()
 		if int(stats.get("levels", 0)) != int(scene.far_clipmap_level_count):
 			errors.append("far_levels_after_v:%s" % str(stats))
+		if str(stats.get("last_page_error", "")) == "profile_native_backend_required":
+			errors.append("far_profile_refresh_blocked:%s" % str(stats))
 	scene.queue_free()
 	_finish(errors, {
 		"schema": "worldgen9.landform_profile_tour_live_key.v1",

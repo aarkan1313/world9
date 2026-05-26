@@ -49,11 +49,10 @@ mountain, glacial, and volcanic families. `compressed_scale` samples macro and
 kernel terrain at a shorter effective world scale while leaving region IDs and
 family selection anchored to the normal world grid.
 
-Review profiles are opt-in. Non-neutral profiles currently disable native
-prepared-grid/chunk payload generation and fall back to the GDScript provider
-path so the Rust backend cannot silently generate the old neutral height field.
-If one of these profiles is promoted later, the native/GPU backend must receive
-the same profile parameters and parity gates.
+Review profiles are opt-in. The native prepared-grid/chunk payload path now
+receives the same profile parameters as the GDScript provider, so profile
+switches can use the normal native worker flow instead of blocking far/near
+refresh or falling back to multi-second synchronous GDScript generation.
 
 ## Acceptance Checks
 
@@ -99,7 +98,7 @@ neutral profile does not change default sampled heights
 strong_mountains increases relief on at least one selected mountain-family site
 compressed_scale changes local-relief/frequency on the same selected sites
 same-coordinate adjacent grid seams stay under 1cm
-non-neutral profiles do not claim native prepared-grid support
+non-neutral profiles keep native prepared-grid support
 live profile tour exposes the same profiles with manual profile switching and far coverage enabled
 ```
 
@@ -112,14 +111,11 @@ N/B: next/previous representative site
 WASD + mouse: normal walk/fly controls
 ```
 
-The live scene keeps automatic profile cycling disabled by default. Non-neutral
-profiles intentionally fall back to the GDScript provider path, so native/GPU
-profile parity belongs in a later backend pass rather than being assumed by the
-review scene. Until native/GPU profile parity exists, live non-neutral profile
-switches do not rebuild active near chunks or far pages through the slow
-GDScript fallback. Far clipmap page requests already include the active profile
-in their cache identity so replacement pages can be enabled safely once the
-backend accepts profile parameters.
+The live scene keeps automatic profile cycling disabled by default and throttles
+profile-tour far refresh to one level per frame. Far clipmap page requests
+include the active profile in their cache identity, and the native backend
+consumes the profile scalars so `V` profile changes do not create stale neutral
+pages or black/missing zones.
 
 ## Passes And Traversable Corridors
 

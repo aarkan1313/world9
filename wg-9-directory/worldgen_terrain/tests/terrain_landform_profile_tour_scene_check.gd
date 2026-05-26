@@ -57,8 +57,8 @@ func _init() -> void:
 	if str(strong_report.get("active_profile", "")) != TerrainLandformProfileScript.STRONG_MOUNTAINS:
 		errors.append("strong_profile:%s" % str(strong_report.get("active_profile", "")))
 	var strong_provider: Dictionary = strong_report.get("landform_profile", {}) as Dictionary
-	if bool(strong_provider.get("native_prepared_grid_enabled", true)):
-		errors.append("strong_native_should_be_disabled")
+	if not bool(strong_provider.get("native_prepared_grid_enabled", false)):
+		errors.append("strong_native_should_be_enabled")
 	scene.cycle_landform_profile(1)
 	var compressed_report: Dictionary = scene.profile_tour_report()
 	if str(compressed_report.get("active_profile", "")) != TerrainLandformProfileScript.COMPRESSED_SCALE:

@@ -169,10 +169,10 @@ func _validate_profile_effects(reports: Array[Dictionary], errors: Array[String]
 			strong_improved = true
 		if absf(float(compressed["mean_local_relief_m"]) - float(balanced["mean_local_relief_m"])) >= 1.0:
 			compressed_changed = true
-		if bool(strong.get("native_prepared_grid_enabled", true)):
-			errors.append("strong_profile_native_should_be_disabled")
-		if bool(compressed.get("native_prepared_grid_enabled", true)):
-			errors.append("compressed_profile_native_should_be_disabled")
+		if not bool(strong.get("native_prepared_grid_enabled", false)):
+			errors.append("strong_profile_native_disabled")
+		if not bool(compressed.get("native_prepared_grid_enabled", false)):
+			errors.append("compressed_profile_native_disabled")
 	if not strong_improved:
 		errors.append("strong_mountains_no_relief_increase")
 	if not compressed_changed:

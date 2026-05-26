@@ -20,6 +20,7 @@ func _init() -> void:
 	fly_start_height_m = 980.0
 	fly_min_ground_clearance_m = 100.0
 	look_pitch_deg = -36.0
+	far_clipmap_rebuild_levels_per_update = 1
 
 
 func setup() -> bool:
