@@ -112,12 +112,14 @@ func _start() -> void:
 		errors.append("walk_review_should_not_use_mixed_density_chunks")
 	if scene.far_clipmap_rebuild_levels_per_update < scene.far_clipmap_level_count:
 		errors.append("walk_review_far_async_budget_too_low:%d" % scene.far_clipmap_rebuild_levels_per_update)
-	if scene.far_clipmap_transition_fade_seconds > 0.001:
-		errors.append("walk_review_far_transition_fade_visible:%.3f" % scene.far_clipmap_transition_fade_seconds)
+	if not scene.use_persistent_page_clipmap:
+		errors.append("walk_review_page_clipmap_disabled")
+	if scene.far_clipmap_transition_fade_seconds < 0.2:
+		errors.append("walk_review_page_blend_too_short:%.3f" % scene.far_clipmap_transition_fade_seconds)
 	if scene.distance_fog_depth_begin_m < 29000.0:
 		errors.append("walk_review_fog_too_near:%.3f" % scene.distance_fog_depth_begin_m)
-	if not scene.use_far_clipmap_native_workers:
-		errors.append("walk_review_far_workers_disabled")
+	if scene.use_far_clipmap_native_workers:
+		errors.append("walk_review_page_clipmap_should_not_use_mesh_workers")
 	_check_far_fog_center_tracks_viewer(scene, errors)
 	_check_lod_mesh_counts(scene, errors)
 	scene.queue_free()

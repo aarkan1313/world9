@@ -64,6 +64,8 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export_range(1, 16, 1) var far_clipmap_rebuild_levels_per_update: int = 1
 @export_range(0.0, 3.0, 0.05) var far_clipmap_transition_fade_seconds: float = 0.45
 @export var use_far_clipmap_native_workers: bool = true
+@export var use_persistent_page_clipmap: bool = false
+@export_range(0, 256, 1) var far_clipmap_page_cache_max_pages: int = 48
 @export var use_far_clipmap_surface_material: bool = false
 @export_range(0.0, 4.0, 0.05) var far_clipmap_surface_normal_strength: float = 1.0
 @export var use_local_detail: bool = false
@@ -675,6 +677,8 @@ func _configure_far_clipmap_node() -> void:
 	far_clipmap.max_rebuild_levels_per_update = far_clipmap_rebuild_levels_per_update
 	far_clipmap.transition_fade_seconds = far_clipmap_transition_fade_seconds
 	far_clipmap.use_native_workers = use_far_clipmap_native_workers
+	far_clipmap.use_persistent_page_mesh = use_persistent_page_clipmap
+	far_clipmap.page_cache_max_pages = far_clipmap_page_cache_max_pages
 	far_clipmap.use_surface_texture_material = use_far_clipmap_surface_material
 	far_clipmap.surface_texture_normal_strength = far_clipmap_surface_normal_strength
 	far_clipmap.visual_y_bias_per_level_m = far_clipmap_visual_y_bias_per_level_m
@@ -683,7 +687,7 @@ func _configure_far_clipmap_node() -> void:
 
 
 func _far_clipmap_config_key_for_current_settings() -> String:
-	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f" % [
+	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f" % [
 		far_clipmap_level_count,
 		far_clipmap_base_spacing_m,
 		far_clipmap_base_outer_extent_m,
@@ -691,6 +695,8 @@ func _far_clipmap_config_key_for_current_settings() -> String:
 		far_clipmap_rebuild_levels_per_update,
 		far_clipmap_transition_fade_seconds,
 		1 if use_far_clipmap_native_workers else 0,
+		1 if use_persistent_page_clipmap else 0,
+		far_clipmap_page_cache_max_pages,
 		1 if use_far_clipmap_surface_material else 0,
 		far_clipmap_surface_normal_strength,
 		far_clipmap_visual_y_bias_per_level_m,

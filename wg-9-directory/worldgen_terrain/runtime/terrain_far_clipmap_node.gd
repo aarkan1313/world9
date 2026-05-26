@@ -4,6 +4,8 @@ extends Node3D
 const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_world.gd")
 const TerrainSurfaceTextureBuilderScript := preload("res://worldgen_terrain/runtime/terrain_surface_texture_builder.gd")
 const TerrainFarClipmapPayloadWorkerScript := preload("res://worldgen_terrain/mesh/terrain_far_clipmap_payload_worker.gd")
+const TerrainPageRequestScript := preload("res://worldgen_terrain/core/terrain_page_request.gd")
+const TerrainPageCacheScript := preload("res://worldgen_terrain/core/terrain_page_cache.gd")
 
 @export var level_count: int = 3
 @export var vertices_per_side: int = 129
@@ -17,6 +19,8 @@ const TerrainFarClipmapPayloadWorkerScript := preload("res://worldgen_terrain/me
 @export_range(0.0, 3.0, 0.05) var transition_fade_seconds: float = 0.45
 @export_range(1, 16, 1) var max_rebuild_levels_per_update: int = 16
 @export var use_native_workers: bool = false
+@export var use_persistent_page_mesh: bool = false
+@export_range(0, 256, 1) var page_cache_max_pages: int = 48
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export var use_edge_fog: bool = false
@@ -35,18 +39,21 @@ var level_surface_descriptors: Array[Dictionary] = []
 var level_material_descriptors: Array[Dictionary] = []
 var level_transition_nodes: Array = []
 var level_transition_start_ms: Array[int] = []
+var level_page_blend_start_ms: Array[int] = []
 var last_build_ms: int = 0
 var last_surface_texture_ms: int = 0
 var total_vertex_count: int = 0
 var total_index_count: int = 0
 var pending_rebuild_count: int = 0
 var active_transition_count: int = 0
+var active_page_blend_count: int = 0
 var last_rebuilt_levels: Array[int] = []
 var last_scheduled_levels: Array[int] = []
 var last_deferred_levels: Array[int] = []
 var active_worker_count: int = 0
 var last_worker_elapsed_ms: int = 0
 var last_worker_error: String = ""
+var last_page_error: String = ""
 var last_surface_material_reused: bool = false
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
@@ -59,6 +66,8 @@ var _gray_shader_opaque: Shader
 var _gray_shader_fade: Shader
 var _surface_texture_shader_opaque: Shader
 var _surface_texture_shader_fade: Shader
+var _page_height_shader: Shader
+var _page_cache: RefCounted
 
 
 func setup(p_world: RefCounted) -> bool:
@@ -82,6 +91,8 @@ func setup(p_world: RefCounted) -> bool:
 		level_material_descriptors.append({})
 		level_transition_nodes.append(null)
 		level_transition_start_ms.append(0)
+		level_page_blend_start_ms.append(0)
+	_ensure_page_cache()
 	return true
 
 
@@ -99,22 +110,27 @@ func clear_levels() -> void:
 	level_material_descriptors.clear()
 	level_transition_nodes.clear()
 	level_transition_start_ms.clear()
+	level_page_blend_start_ms.clear()
 	last_build_ms = 0
 	last_surface_texture_ms = 0
 	total_vertex_count = 0
 	total_index_count = 0
 	pending_rebuild_count = 0
 	active_transition_count = 0
+	active_page_blend_count = 0
 	last_rebuilt_levels.clear()
 	last_scheduled_levels.clear()
 	last_deferred_levels.clear()
 	active_worker_count = 0
 	last_worker_elapsed_ms = 0
 	last_worker_error = ""
+	last_page_error = ""
 	last_surface_material_reused = false
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
+	if _page_cache != null:
+		_page_cache.clear()
 
 
 func configure_geometry(p_level_count: int, p_base_spacing_m: float, p_base_outer_extent_m: float) -> bool:
@@ -211,6 +227,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	_poll_native_workers()
 	_commit_staged_payloads_if_ready()
 	_update_transition_fades()
+	_update_page_blends()
 	var rebuild_budget: int = max(1, max_rebuild_levels_per_update)
 	var rebuilt_count := 0
 	for level in range(level_nodes.size()):
@@ -248,13 +265,17 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"build_counts": level_build_counts.duplicate(),
 		"pending_rebuild_count": pending_rebuild_count,
 		"active_transition_count": active_transition_count,
+		"active_page_blend_count": active_page_blend_count,
 		"staged_native_payload_count": _staged_native_payloads.size(),
+		"use_persistent_page_mesh": use_persistent_page_mesh,
+		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
 		"last_scheduled_levels": last_scheduled_levels.duplicate(),
 		"last_deferred_levels": last_deferred_levels.duplicate(),
 		"active_worker_count": active_worker_count,
 		"last_worker_elapsed_ms": last_worker_elapsed_ms,
 		"last_worker_error": last_worker_error,
+		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
 	}
 
@@ -270,19 +291,23 @@ func stats() -> Dictionary:
 		"build_counts": level_build_counts.duplicate(),
 		"pending_rebuild_count": pending_rebuild_count,
 		"active_transition_count": active_transition_count,
+		"active_page_blend_count": active_page_blend_count,
 		"staged_native_payload_count": _staged_native_payloads.size(),
+		"use_persistent_page_mesh": use_persistent_page_mesh,
+		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
 		"last_scheduled_levels": last_scheduled_levels.duplicate(),
 		"last_deferred_levels": last_deferred_levels.duplicate(),
 		"active_worker_count": active_worker_count,
 		"last_worker_elapsed_ms": last_worker_elapsed_ms,
 		"last_worker_error": last_worker_error,
+		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
 	}
 
 
 func has_pending_rebuilds() -> bool:
-	return pending_rebuild_count > 0 or active_transition_count > 0 or not _native_workers.is_empty() or not _staged_native_payloads.is_empty()
+	return pending_rebuild_count > 0 or active_transition_count > 0 or active_page_blend_count > 0 or not _native_workers.is_empty() or not _staged_native_payloads.is_empty()
 
 
 func _set_level_geometry_counts(level: int, vertex_count: int, index_count: int) -> void:
@@ -371,7 +396,219 @@ func active_surface_texture_descriptors() -> Array[Dictionary]:
 	return descriptors
 
 
+func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = true) -> void:
+	var spacing: float = _level_spacing(level)
+	var outer_extent: float = _level_outer_extent(level)
+	var inner_extent: float = _inner_extent_for_level(level)
+	var side: int = _side_for_extent(outer_extent, spacing)
+	var result = _height_page_result_for_level(level, origin, outer_extent, spacing, side)
+	if typeof(result) != TYPE_DICTIONARY or str(result.get("status", "fail")) != "pass":
+		last_page_error = "level_%d:page_result_failed:%s" % [level, str(result.get("error", "null") if typeof(result) == TYPE_DICTIONARY else "null")]
+		last_worker_error = last_page_error
+		return
+	last_page_error = ""
+	var height: PackedFloat32Array = result["height_samples"] as PackedFloat32Array
+	height = _morph_outer_transition_band(level, origin, outer_extent, spacing, side, height)
+	var normals := PackedVector3Array()
+	normals.resize(side * side)
+	for z in range(side):
+		for x in range(side):
+			normals[z * side + x] = _normal_at(height, side, x, z, spacing)
+	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
+	level_heightfields[level] = heightfield
+	level_surface_descriptors[level] = {}
+	var descriptor: Dictionary = _material_descriptor_from_heightfield(heightfield)
+	level_material_descriptors[level] = descriptor
+	var mesh_instance: MeshInstance3D = level_nodes[level]
+	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
+	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
+	var previous_height_texture: Texture2D = null
+	var previous_normal_texture: Texture2D = null
+	if use_transition and previous_material != null:
+		previous_height_texture = previous_material.get_shader_parameter("height_texture") as Texture2D
+		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
+	mesh_instance.material_override = _page_height_material_for_descriptor(
+		descriptor,
+		level,
+		previous_height_texture,
+		previous_normal_texture,
+		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0
+	)
+	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
+	level_origins[level] = origin
+	level_build_counts[level] = int(level_build_counts[level]) + 1
+	_set_level_geometry_counts(level, side * side, _clipmap_index_count(side, spacing, outer_extent, inner_extent))
+	_start_page_blend(level, previous_height_texture != null and use_transition)
+	_protect_active_page_keys()
+
+
+func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true) -> void:
+	var level: int = int(payload.get("level", -1))
+	if level < 0 or level >= level_nodes.size():
+		return
+	var origin := Vector2(float(payload["origin_x"]), float(payload["origin_z"]))
+	var side: int = int(payload["side"])
+	var outer_extent: float = float(payload["outer_extent_m"])
+	var spacing: float = float(payload["spacing_m"])
+	var height: PackedFloat32Array = payload["height"] as PackedFloat32Array
+	height = _morph_outer_transition_band(level, origin, outer_extent, spacing, side, height)
+	var normals := PackedVector3Array()
+	normals.resize(side * side)
+	for z in range(side):
+		for x in range(side):
+			normals[z * side + x] = _normal_at(height, side, x, z, spacing)
+	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
+	level_heightfields[level] = heightfield
+	level_surface_descriptors[level] = {}
+	var descriptor: Dictionary = _material_descriptor_from_heightfield(heightfield)
+	level_material_descriptors[level] = descriptor
+	var mesh_instance: MeshInstance3D = level_nodes[level]
+	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
+	var previous_height_texture: Texture2D = null
+	var previous_normal_texture: Texture2D = null
+	if use_transition and previous_material != null:
+		previous_height_texture = previous_material.get_shader_parameter("height_texture") as Texture2D
+		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
+	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, float(payload["inner_extent_m"]))
+	mesh_instance.material_override = _page_height_material_for_descriptor(
+		descriptor,
+		level,
+		previous_height_texture,
+		previous_normal_texture,
+		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0
+	)
+	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
+	level_origins[level] = origin
+	level_build_counts[level] = int(level_build_counts[level]) + 1
+	_set_level_geometry_counts(level, side * side, (payload["indices"] as PackedInt32Array).size())
+	_start_page_blend(level, previous_height_texture != null and use_transition)
+	_protect_active_page_keys()
+	last_rebuilt_levels.append(level)
+
+
+func _height_page_result_for_level(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int):
+	_ensure_page_cache()
+	var request = _make_far_clipmap_page_request(level, origin, outer_extent, spacing, side)
+	var validation: String = request.validate()
+	if not validation.is_empty():
+		return _failed_page_dictionary(request, validation)
+	var cached = _page_cache.get_page(request.cache_key())
+	if cached != null:
+		return cached
+	var start_ms: int = Time.get_ticks_msec()
+	var height_samples: PackedFloat32Array = _sample_height_grid_split_by_region(origin, outer_extent, spacing, side)
+	var result := {
+		"status": "pass",
+		"error": "",
+		"request_key": request.deterministic_key(),
+		"cache_key": request.cache_key(),
+		"version_stamp": request.version_stamp(),
+		"origin_xz": request.origin_xz,
+		"count_x": request.count_x,
+		"count_z": request.count_z,
+		"step_m": request.step_m,
+		"world_seed": request.world_seed,
+		"purpose": request.purpose,
+		"quality_profile": request.quality_profile,
+		"provider_revision": request.provider_revision,
+		"runtime_pack_hash": request.runtime_pack_hash,
+		"height_samples": height_samples,
+		"timings_ms": {"sample_height_ms": Time.get_ticks_msec() - start_ms},
+		"metadata": request.metadata.duplicate(true),
+	}
+	var shape_error: String = _validate_page_dictionary_shape(result)
+	if not shape_error.is_empty():
+		result["status"] = "fail"
+		result["error"] = shape_error
+		return result
+	_page_cache.put_page(result)
+	return result
+
+
+func _failed_page_dictionary(request, error: String) -> Dictionary:
+	return {
+		"status": "fail",
+		"error": error,
+		"request_key": request.deterministic_key(),
+		"cache_key": request.cache_key(),
+		"version_stamp": request.version_stamp(),
+		"origin_xz": request.origin_xz,
+		"count_x": request.count_x,
+		"count_z": request.count_z,
+		"step_m": request.step_m,
+		"world_seed": request.world_seed,
+		"purpose": request.purpose,
+		"quality_profile": request.quality_profile,
+		"provider_revision": request.provider_revision,
+		"runtime_pack_hash": request.runtime_pack_hash,
+		"height_samples": PackedFloat32Array(),
+		"timings_ms": {},
+		"metadata": request.metadata.duplicate(true),
+	}
+
+
+func _validate_page_dictionary_shape(result: Dictionary) -> String:
+	var count_x: int = int(result.get("count_x", 0))
+	var count_z: int = int(result.get("count_z", 0))
+	var expected: int = max(0, count_x) * max(0, count_z)
+	if expected <= 0:
+		return "expected_sample_count:%d" % expected
+	var height_samples: PackedFloat32Array = result.get("height_samples", PackedFloat32Array()) as PackedFloat32Array
+	if height_samples.size() != expected:
+		return "height_samples:%d expected:%d" % [height_samples.size(), expected]
+	return ""
+
+
+func _ensure_page_cache() -> void:
+	if _page_cache == null:
+		_page_cache = TerrainPageCacheScript.new()
+	_page_cache.configure(page_cache_max_pages)
+
+
+func _protect_active_page_keys() -> void:
+	if _page_cache == null:
+		return
+	var protected: Array[String] = []
+	for descriptor_value in level_heightfields:
+		var heightfield: Dictionary = descriptor_value as Dictionary
+		if heightfield.is_empty():
+			continue
+		var level: int = int(heightfield.get("level", -1))
+		var outer_extent: float = float(heightfield.get("outer_extent_m", 0.0))
+		var spacing: float = float(heightfield.get("spacing_m", 0.0))
+		var side: int = int(heightfield.get("vertices_per_side", 0))
+		var origin := Vector2(float(heightfield.get("origin_x", 0.0)), float(heightfield.get("origin_z", 0.0)))
+		var request = _make_far_clipmap_page_request(level, origin, outer_extent, spacing, side)
+		protected.append(request.cache_key())
+	_page_cache.set_protected_keys(protected)
+
+
+func _make_far_clipmap_page_request(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int):
+	var request = TerrainPageRequestScript.new()
+	request.origin_xz = Vector2(origin.x - outer_extent, origin.y - outer_extent)
+	request.count_x = side
+	request.count_z = side
+	request.step_m = spacing
+	request.world_seed = world.seed
+	request.purpose = "far_clipmap_height"
+	request.quality_profile = "level_%d" % level
+	request.feature_flags = {
+		"level": level,
+		"outer_extent_m": outer_extent,
+		"inner_extent_m": _inner_extent_for_level(level),
+		"persistent_page_mesh": use_persistent_page_mesh,
+	}
+	request.metadata = {
+		"clipmap_origin_x": origin.x,
+		"clipmap_origin_z": origin.y,
+	}
+	return request
+
+
 func _rebuild_level(level: int, origin: Vector2, use_transition: bool = true) -> void:
+	if use_persistent_page_mesh:
+		_rebuild_level_page(level, origin, use_transition)
+		return
 	var spacing: float = _level_spacing(level)
 	var outer_extent: float = _level_outer_extent(level)
 	var inner_extent: float = _inner_extent_for_level(level)
@@ -436,6 +673,9 @@ func _rebuild_level(level: int, origin: Vector2, use_transition: bool = true) ->
 
 func _assign_level_payload(payload: Dictionary, use_transition: bool = true) -> void:
 	if payload.get("status", "fail") != "pass":
+		return
+	if use_persistent_page_mesh:
+		_assign_level_page_payload(payload, use_transition)
 		return
 	var level: int = int(payload["level"])
 	if level < 0 or level >= level_nodes.size():
@@ -547,6 +787,61 @@ func _update_transition_fades() -> void:
 	active_transition_count = _count_active_transitions()
 
 
+func _start_page_blend(level: int, has_previous_page: bool) -> void:
+	if level < 0 or level >= level_page_blend_start_ms.size():
+		return
+	if not use_persistent_page_mesh or not has_previous_page or transition_fade_seconds <= 0.0:
+		level_page_blend_start_ms[level] = 0
+		_set_page_material_blend_alpha(level, 1.0)
+	else:
+		level_page_blend_start_ms[level] = Time.get_ticks_msec()
+		_set_page_material_blend_alpha(level, 0.0)
+	active_page_blend_count = _count_active_page_blends()
+
+
+func _update_page_blends() -> void:
+	if not use_persistent_page_mesh:
+		active_page_blend_count = 0
+		return
+	var fade_ms: float = max(0.0, transition_fade_seconds) * 1000.0
+	if fade_ms <= 0.0:
+		for level in range(level_page_blend_start_ms.size()):
+			level_page_blend_start_ms[level] = 0
+			_set_page_material_blend_alpha(level, 1.0)
+		active_page_blend_count = 0
+		return
+	var now_ms: int = Time.get_ticks_msec()
+	for level in range(level_page_blend_start_ms.size()):
+		var start_ms: int = int(level_page_blend_start_ms[level])
+		if start_ms <= 0:
+			continue
+		var t: float = clampf(float(now_ms - start_ms) / fade_ms, 0.0, 1.0)
+		_set_page_material_blend_alpha(level, t)
+		if t >= 1.0:
+			level_page_blend_start_ms[level] = 0
+	active_page_blend_count = _count_active_page_blends()
+
+
+func _set_page_material_blend_alpha(level: int, alpha: float) -> void:
+	if level < 0 or level >= level_nodes.size():
+		return
+	var mesh_instance: MeshInstance3D = level_nodes[level] as MeshInstance3D
+	if mesh_instance == null:
+		return
+	var material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
+	if material == null:
+		return
+	material.set_shader_parameter("height_blend_alpha", clampf(alpha, 0.0, 1.0))
+
+
+func _count_active_page_blends() -> int:
+	var count := 0
+	for start_ms in level_page_blend_start_ms:
+		if int(start_ms) > 0:
+			count += 1
+	return count
+
+
 func _remove_transition_node(level: int) -> void:
 	if level < 0 or level >= level_transition_nodes.size():
 		return
@@ -628,6 +923,7 @@ func _native_backend_available() -> bool:
 func _can_use_native_workers() -> bool:
 	return (
 		use_native_workers
+		and not use_persistent_page_mesh
 		and ClassDB.class_exists("Wg9TerrainNativeBackend")
 		and world != null
 		and world.provider != null
@@ -1131,6 +1427,61 @@ func _material_descriptor_from_heightfield(heightfield: Dictionary) -> Dictionar
 	return _surface_descriptor_from_heightfield(heightfield, false, false)
 
 
+func _ensure_persistent_page_mesh(level: int, side: int, spacing: float, outer_extent: float, inner_extent: float) -> void:
+	if level < 0 or level >= level_nodes.size():
+		return
+	var mesh_instance: MeshInstance3D = level_nodes[level] as MeshInstance3D
+	var mesh_key: String = "%d:%.9f:%.9f:%.9f" % [side, spacing, outer_extent, inner_extent]
+	if mesh_instance.mesh != null and str(mesh_instance.get_meta("persistent_page_mesh_key", "")) == mesh_key:
+		return
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	vertices.resize(side * side)
+	normals.resize(side * side)
+	uvs.resize(side * side)
+	var denom: float = float(max(1, side - 1))
+	for z in range(side):
+		var local_z: float = -outer_extent + float(z) * spacing
+		for x in range(side):
+			var local_x: float = -outer_extent + float(x) * spacing
+			var index: int = z * side + x
+			vertices[index] = Vector3(local_x, 0.0, local_z)
+			normals[index] = Vector3.UP
+			uvs[index] = Vector2(float(x) / denom, float(z) / denom)
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = _clipmap_indices(side, spacing, outer_extent, inner_extent)
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh_instance.mesh = mesh
+	mesh_instance.set_meta("persistent_page_mesh_key", mesh_key)
+
+
+func _page_height_material_for_descriptor(
+	descriptor: Dictionary,
+	level: int,
+	previous_height_texture: Texture2D = null,
+	previous_normal_texture: Texture2D = null,
+	blend_alpha: float = 1.0
+) -> ShaderMaterial:
+	var height_texture: ImageTexture = ImageTexture.create_from_image(descriptor["height_image"] as Image)
+	var normal_texture: ImageTexture = ImageTexture.create_from_image(descriptor["normal_image"] as Image)
+	var material := ShaderMaterial.new()
+	material.shader = _page_height_material_shader()
+	material.set_shader_parameter("height_texture", height_texture)
+	material.set_shader_parameter("normal_texture", normal_texture)
+	material.set_shader_parameter("previous_height_texture", previous_height_texture if previous_height_texture != null else height_texture)
+	material.set_shader_parameter("previous_normal_texture", previous_normal_texture if previous_normal_texture != null else normal_texture)
+	material.set_shader_parameter("height_blend_alpha", clampf(blend_alpha, 0.0, 1.0))
+	material.set_shader_parameter("normal_strength", surface_texture_normal_strength)
+	_apply_level_edge_fog_shader_parameters(level, material)
+	return material
+
+
 func _material_for_level(level: int, alpha: float = 1.0) -> Material:
 	if debug_level_colors:
 		var material := StandardMaterial3D.new()
@@ -1320,6 +1671,74 @@ void fragment() {
 		_surface_texture_shader_fade = shader
 	else:
 		_surface_texture_shader_opaque = shader
+	return shader
+
+
+func _page_height_material_shader() -> Shader:
+	if _page_height_shader != null:
+		return _page_height_shader
+	var shader := Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+
+uniform sampler2D height_texture : filter_linear;
+uniform sampler2D normal_texture : filter_linear;
+uniform sampler2D previous_height_texture : filter_linear;
+uniform sampler2D previous_normal_texture : filter_linear;
+uniform float height_blend_alpha = 1.0;
+uniform float normal_strength = 1.0;
+uniform bool edge_fog_enabled = false;
+uniform float edge_fog_begin_m = 24000.0;
+uniform float edge_fog_end_m = 33000.0;
+uniform vec3 edge_fog_color = vec3(0.18, 0.18, 0.18);
+uniform bool edge_fog_square_enabled = true;
+uniform vec2 edge_fog_center_xz = vec2(0.0, 0.0);
+
+varying vec2 local_uv;
+varying float height_m;
+varying vec3 terrain_normal;
+varying vec3 world_position;
+
+void vertex() {
+	local_uv = UV;
+	float previous_height_m = texture(previous_height_texture, UV).r;
+	float current_height_m = texture(height_texture, UV).r;
+	height_m = mix(previous_height_m, current_height_m, clamp(height_blend_alpha, 0.0, 1.0));
+	VERTEX.y = height_m;
+	terrain_normal = NORMAL;
+	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	vec3 previous_n = normalize(texture(previous_normal_texture, local_uv).rgb * 2.0 - 1.0);
+	vec3 current_n = normalize(texture(normal_texture, local_uv).rgb * 2.0 - 1.0);
+	vec3 n = normalize(mix(previous_n, current_n, clamp(height_blend_alpha, 0.0, 1.0)));
+	if (n.y < 0.0) {
+		n = -n;
+	}
+	if (n.y < 0.25) {
+		n = vec3(0.0, 1.0, 0.0);
+	}
+	vec3 review_n = normalize(vec3(n.x * 0.65, n.y, n.z * 0.65));
+	vec3 light_dir = normalize(vec3(-0.42, 0.74, -0.52));
+	float lambert = dot(review_n, light_dir) * 0.5 + 0.5;
+	float compressed_height = 0.5 + atan(height_m / 1800.0) / 3.14159265;
+	float slope_shadow = clamp((1.0 - review_n.y) * 0.04, 0.0, 0.025);
+	float shade = clamp(0.30 + lambert * 0.08 + compressed_height * 0.30 - slope_shadow, 0.16, 0.70);
+	shade = (shade - 0.5) * 1.42 + 0.5;
+	shade = clamp(shade * 0.42, 0.035, 0.58);
+	float height_t = clamp(compressed_height, 0.0, 1.0);
+	vec3 elevation_tint = mix(vec3(0.56, 0.62, 0.58), vec3(0.80, 0.74, 0.62), height_t);
+	vec3 color = vec3(shade) * mix(vec3(1.0), elevation_tint * 1.24, 0.28);
+	float camera_distance_m = distance(world_position.xz, CAMERA_POSITION_WORLD.xz);
+	float square_distance_m = max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y));
+	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
+	float fog_t = edge_fog_enabled ? smoothstep(edge_fog_begin_m, edge_fog_end_m, fog_distance_m) : 0.0;
+	ALBEDO = mix(color, edge_fog_color, fog_t);
+}
+"""
+	_page_height_shader = shader
 	return shader
 
 

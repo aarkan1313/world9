@@ -27,6 +27,7 @@ func _start() -> void:
 	var counts_after_boundary: Array = _far_counts(scene)
 	var expected_level_count: int = _expected_level_count(scene)
 	var expected_latest_recenter: int = expected_level_count
+	var page_mode: bool = bool(boundary_stats.get("use_persistent_page_mesh", false))
 	if _count_delta(counts_before, counts_after_boundary) != 0:
 		errors.append("boundary_recenter_rebuilt:%s before:%s" % [str(counts_after_boundary), str(counts_before)])
 	if not (boundary_stats.get("last_scheduled_levels", []) as Array).is_empty():
@@ -40,16 +41,29 @@ func _start() -> void:
 	var expected_latest_origin: Vector2 = scene._far_clipmap_center_xz()
 	var second_stats: Dictionary = scene.far_clipmap.stats()
 	var counts_after_second: Array = _far_counts(scene)
-	if _count_delta(counts_before, counts_after_first) != 0:
-		errors.append("first_rapid_recenter_partially_committed:%s before:%s" % [str(counts_after_first), str(counts_before)])
-	if _count_delta(counts_before, counts_after_second) != 0:
-		errors.append("second_rapid_recenter_partially_committed:%s before:%s" % [str(counts_after_second), str(counts_before)])
-	if not (first_stats.get("last_rebuilt_levels", []) as Array).is_empty():
-		errors.append("first_rebuilt_synchronously:%s" % str(first_stats))
-	if (first_stats.get("last_scheduled_levels", []) as Array).is_empty():
-		errors.append("first_scheduled_empty:%s" % str(first_stats))
-	if int(second_stats.get("active_worker_count", 0)) <= 0 and int(second_stats.get("pending_rebuild_count", 0)) <= 0:
-		errors.append("second_no_async_work:%s" % str(second_stats))
+	if page_mode:
+		expected_latest_recenter = expected_level_count * 2
+		if _count_delta(counts_before, counts_after_first) != expected_level_count:
+			errors.append("first_page_recenter_not_committed:%s before:%s" % [str(counts_after_first), str(counts_before)])
+		if _count_delta(counts_before, counts_after_second) != expected_latest_recenter:
+			errors.append("second_page_recenter_not_committed:%s before:%s" % [str(counts_after_second), str(counts_before)])
+		if (first_stats.get("last_rebuilt_levels", []) as Array) != _expected_levels(scene):
+			errors.append("first_page_rebuilt_levels:%s" % str(first_stats))
+		if (second_stats.get("last_rebuilt_levels", []) as Array) != _expected_levels(scene):
+			errors.append("second_page_rebuilt_levels:%s" % str(second_stats))
+		if int(second_stats.get("pending_rebuild_count", 0)) != 0:
+			errors.append("second_page_pending:%s" % str(second_stats))
+	else:
+		if _count_delta(counts_before, counts_after_first) != 0:
+			errors.append("first_rapid_recenter_partially_committed:%s before:%s" % [str(counts_after_first), str(counts_before)])
+		if _count_delta(counts_before, counts_after_second) != 0:
+			errors.append("second_rapid_recenter_partially_committed:%s before:%s" % [str(counts_after_second), str(counts_before)])
+		if not (first_stats.get("last_rebuilt_levels", []) as Array).is_empty():
+			errors.append("first_rebuilt_synchronously:%s" % str(first_stats))
+		if (first_stats.get("last_scheduled_levels", []) as Array).is_empty():
+			errors.append("first_scheduled_empty:%s" % str(first_stats))
+		if int(second_stats.get("active_worker_count", 0)) <= 0 and int(second_stats.get("pending_rebuild_count", 0)) <= 0:
+			errors.append("second_no_async_work:%s" % str(second_stats))
 	_drain_queue(scene, errors)
 	var counts_after_drain: Array = _far_counts(scene)
 	var origins_after_drain: Array = _far_origins(scene)

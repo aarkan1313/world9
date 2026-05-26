@@ -24,20 +24,6 @@ var normal_samples: PackedVector3Array = PackedVector3Array()
 var timings_ms: Dictionary = {}
 var metadata: Dictionary = {}
 
-
-static func from_request(request):
-	var result := TerrainPageResult.new()
-	result.copy_request_metadata(request)
-	return result
-
-
-static func failed(request, message: String):
-	var result := from_request(request)
-	result.status = STATUS_FAIL
-	result.error = message
-	return result
-
-
 func copy_request_metadata(request) -> void:
 	request_key = request.deterministic_key()
 	cache_key = request.cache_key()

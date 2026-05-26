@@ -51,20 +51,29 @@ func _start() -> void:
 	var first_cross_ms: int = Time.get_ticks_msec() - start_ms
 	var stats_after_first: Dictionary = scene.far_clipmap.stats()
 	var counts_after_first: Array = _far_counts(scene)
+	var page_mode: bool = bool(stats_after_first.get("use_persistent_page_mesh", false))
 	var rebuilt_after_first: Array = stats_after_first.get("last_rebuilt_levels", []) as Array
 	var scheduled_after_first: Array = stats_after_first.get("last_scheduled_levels", []) as Array
 	var pending_after_first: int = int(stats_after_first.get("pending_rebuild_count", 0))
 	var workers_after_first: int = int(stats_after_first.get("active_worker_count", 0))
-	if _count_delta(counts_before_cross, counts_after_first) != 0:
-		errors.append("surface_first_cross_partially_committed:%s before:%s" % [str(counts_after_first), str(counts_before_cross)])
-	if not rebuilt_after_first.is_empty():
-		errors.append("surface_first_rebuilt_synchronously:%s" % str(rebuilt_after_first))
-	if scheduled_after_first.is_empty():
-		errors.append("surface_first_scheduled_empty:%s" % str(stats_after_first))
-	if pending_after_first <= 0:
-		errors.append("surface_pending_after_first_missing:%d" % pending_after_first)
-	if workers_after_first <= 0:
-		errors.append("surface_workers_after_first_missing:%d" % workers_after_first)
+	if page_mode:
+		if _count_delta(counts_before_cross, counts_after_first) != expected_level_count:
+			errors.append("surface_page_recenter_not_committed:%s before:%s" % [str(counts_after_first), str(counts_before_cross)])
+		if rebuilt_after_first != _expected_levels(scene):
+			errors.append("surface_page_rebuilt_levels:%s" % str(rebuilt_after_first))
+		if pending_after_first != 0:
+			errors.append("surface_page_pending:%d" % pending_after_first)
+	else:
+		if _count_delta(counts_before_cross, counts_after_first) != 0:
+			errors.append("surface_first_cross_partially_committed:%s before:%s" % [str(counts_after_first), str(counts_before_cross)])
+		if not rebuilt_after_first.is_empty():
+			errors.append("surface_first_rebuilt_synchronously:%s" % str(rebuilt_after_first))
+		if scheduled_after_first.is_empty():
+			errors.append("surface_first_scheduled_empty:%s" % str(stats_after_first))
+		if pending_after_first <= 0:
+			errors.append("surface_pending_after_first_missing:%d" % pending_after_first)
+		if workers_after_first <= 0:
+			errors.append("surface_workers_after_first_missing:%d" % workers_after_first)
 
 	_drain_queue(scene, errors)
 	var stats_after_drain: Dictionary = scene.far_clipmap.stats()

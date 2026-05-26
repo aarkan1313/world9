@@ -44,10 +44,18 @@ func put_page(page) -> bool:
 	if max_pages <= 0 or page == null:
 		_rejected += 1
 		return false
-	if not page.has_method("is_ready") or not page.is_ready():
-		_rejected += 1
-		return false
-	var key := str(page.cache_key)
+	var key := ""
+	if typeof(page) == TYPE_DICTIONARY:
+		var page_dict: Dictionary = page
+		if str(page_dict.get("status", "fail")) != "pass":
+			_rejected += 1
+			return false
+		key = str(page_dict.get("cache_key", ""))
+	else:
+		if not page.has_method("is_ready") or not page.is_ready():
+			_rejected += 1
+			return false
+		key = str(page.cache_key)
 	if key.is_empty():
 		_rejected += 1
 		return false
