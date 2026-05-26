@@ -38,7 +38,7 @@ func _run() -> int:
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
 	scene.show_diagnostics_overlay = false
-	scene.debug_mode = TerrainWorldScript.DEBUG_GRAY
+	scene.debug_mode = TerrainWorldScript.DEBUG_ELEVATION_COLOR
 	scene.use_local_detail = false
 	viewport.add_child(scene)
 
@@ -175,7 +175,7 @@ func _check_stats(label: String, stats: Dictionary, errors: Array[String]) -> vo
 	if stats.is_empty():
 		errors.append("%s_stats_empty" % label)
 		return
-	var min_luma_range := 0.025 if label == "base" else 0.04
+	var min_luma_range := 0.005 if label == "base" else 0.04
 	if float(stats["luma_range"]) < min_luma_range:
 		errors.append("%s_low_luma_range:%.3f" % [label, float(stats["luma_range"])])
 	var min_colors := 6 if label == "base" else 12

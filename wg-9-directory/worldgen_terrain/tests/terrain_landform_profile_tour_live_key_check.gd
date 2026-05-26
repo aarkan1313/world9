@@ -26,11 +26,28 @@ func _init() -> void:
 	v_event.pressed = true
 	scene._unhandled_input(v_event)
 	var elapsed_ms: int = Time.get_ticks_msec() - before_ms
+	var max_followup_step_ms := 0
+	var max_followup_rebuilt_levels := 0
+	for _i in range(6):
+		var step_start_ms: int = Time.get_ticks_msec()
+		scene._process(1.0 / 60.0)
+		var step_elapsed_ms: int = Time.get_ticks_msec() - step_start_ms
+		max_followup_step_ms = max(max_followup_step_ms, step_elapsed_ms)
+		if scene.far_clipmap != null:
+			var step_stats: Dictionary = scene.far_clipmap.stats()
+			max_followup_rebuilt_levels = max(
+				max_followup_rebuilt_levels,
+				(step_stats.get("last_rebuilt_levels", []) as Array).size()
+			)
 	var report: Dictionary = scene.profile_tour_report()
 	if str(report.get("active_profile", "")) != TerrainLandformProfileScript.STRONG_MOUNTAINS:
 		errors.append("v_profile:%s" % str(report.get("active_profile", "")))
 	if elapsed_ms > 1000:
 		errors.append("v_key_elapsed_ms:%d" % elapsed_ms)
+	if max_followup_step_ms > 1000:
+		errors.append("v_followup_step_elapsed_ms:%d" % max_followup_step_ms)
+	if max_followup_rebuilt_levels > 1:
+		errors.append("v_followup_far_rebuild_burst:%d" % max_followup_rebuilt_levels)
 	if scene.far_clipmap != null:
 		var stats: Dictionary = scene.far_clipmap.stats()
 		if int(stats.get("levels", 0)) != int(scene.far_clipmap_level_count):
@@ -39,6 +56,8 @@ func _init() -> void:
 	_finish(errors, {
 		"schema": "worldgen9.landform_profile_tour_live_key.v1",
 		"v_key_elapsed_ms": elapsed_ms,
+		"max_followup_step_ms": max_followup_step_ms,
+		"max_followup_rebuilt_levels": max_followup_rebuilt_levels,
 		"profile": str(report.get("active_profile", "")),
 	})
 

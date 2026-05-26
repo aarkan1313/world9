@@ -115,7 +115,11 @@ WASD + mouse: normal walk/fly controls
 The live scene keeps automatic profile cycling disabled by default. Non-neutral
 profiles intentionally fall back to the GDScript provider path, so native/GPU
 profile parity belongs in a later backend pass rather than being assumed by the
-review scene.
+review scene. Until native/GPU profile parity exists, live non-neutral profile
+switches do not rebuild active near chunks or far pages through the slow
+GDScript fallback. Far clipmap page requests already include the active profile
+in their cache identity so replacement pages can be enabled safely once the
+backend accepts profile parameters.
 
 ## Passes And Traversable Corridors
 

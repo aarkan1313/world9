@@ -26,6 +26,8 @@ const TerrainGpuPageResidencyScript := preload("res://worldgen_terrain/core/terr
 @export_range(0, 256, 1) var gpu_page_residency_max_pages: int = 48
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
+@export_range(1, 4, 1) var max_profile_fallback_rebuild_levels_per_update: int = 1
+@export var allow_profile_fallback_sync_rebuilds: bool = false
 @export var use_edge_fog: bool = false
 @export var edge_fog_begin_m: float = 24000.0
 @export var edge_fog_end_m: float = 33000.0
@@ -248,6 +250,10 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_page_descriptor_image_builds = 0
 	last_page_descriptor_texture_hits = 0
 	var shared_origin := _shared_origin(viewer_xz)
+	var profile_blocks_far_refresh := _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds
+	if profile_blocks_far_refresh and is_finite(_pending_origin.x) and is_finite(_pending_origin.y):
+		shared_origin = _pending_origin
+		last_page_error = "profile_native_backend_required"
 	if shared_origin != _pending_origin:
 		_pending_origin = shared_origin
 		_clear_staged_payloads_for_other_origin(_pending_origin)
@@ -256,6 +262,10 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	_update_transition_fades()
 	_update_page_blends()
 	var rebuild_budget: int = max(1, max_rebuild_levels_per_update)
+	if profile_blocks_far_refresh:
+		rebuild_budget = 0
+	elif _provider_profile_disables_native_grid():
+		rebuild_budget = min(rebuild_budget, max(1, max_profile_fallback_rebuild_levels_per_update))
 	var rebuilt_count := 0
 	for level in range(level_nodes.size()):
 		if _pending_origin != level_origins[level] and rebuilt_count < rebuild_budget:
@@ -349,6 +359,26 @@ func stats() -> Dictionary:
 
 func has_pending_rebuilds() -> bool:
 	return pending_rebuild_count > 0 or active_transition_count > 0 or active_page_blend_count > 0 or not _native_workers.is_empty() or not _staged_native_payloads.is_empty()
+
+
+func invalidate_pages_for_profile_change() -> void:
+	_clear_native_workers(true)
+	if _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds:
+		_staged_native_payloads.clear()
+		_staged_native_origin = Vector2(INF, INF)
+		last_page_error = "profile_native_backend_required"
+		pending_rebuild_count = 0
+		return
+	for level in range(level_origins.size()):
+		level_origins[level] = Vector2(INF, INF)
+	_pending_origin = Vector2(INF, INF)
+	_staged_native_payloads.clear()
+	_staged_native_origin = Vector2(INF, INF)
+	if _page_cache != null:
+		_page_cache.clear()
+	if _gpu_page_residency != null:
+		_gpu_page_residency.clear()
+	pending_rebuild_count = _count_pending_rebuilds()
 
 
 func _set_level_geometry_counts(level: int, vertex_count: int, index_count: int) -> void:
@@ -699,6 +729,7 @@ func _protect_active_page_keys() -> void:
 
 func _make_far_clipmap_page_request(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int):
 	var request = TerrainPageRequestScript.new()
+	var profile_id: String = _active_landform_profile_id()
 	request.origin_xz = Vector2(origin.x - outer_extent, origin.y - outer_extent)
 	request.count_x = side
 	request.count_z = side
@@ -711,10 +742,12 @@ func _make_far_clipmap_page_request(level: int, origin: Vector2, outer_extent: f
 		"outer_extent_m": outer_extent,
 		"inner_extent_m": _inner_extent_for_level(level),
 		"persistent_page_mesh": use_persistent_page_mesh,
+		"landform_profile": profile_id,
 	}
 	request.metadata = {
 		"clipmap_origin_x": origin.x,
 		"clipmap_origin_z": origin.y,
+		"landform_profile": profile_id,
 	}
 	return request
 
@@ -1037,6 +1070,28 @@ func _native_backend_available() -> bool:
 	return _native_backend != null
 
 
+func _landform_profile_report() -> Dictionary:
+	if world == null:
+		return {}
+	if world.has_method("landform_profile_report"):
+		return world.call("landform_profile_report") as Dictionary
+	if world.provider != null and world.provider.has_method("landform_profile_report"):
+		return world.provider.call("landform_profile_report") as Dictionary
+	return {}
+
+
+func _active_landform_profile_id() -> String:
+	var profile_report: Dictionary = _landform_profile_report()
+	return str(profile_report.get("id", ""))
+
+
+func _provider_profile_disables_native_grid() -> bool:
+	var profile_report: Dictionary = _landform_profile_report()
+	if profile_report.is_empty():
+		return false
+	return not bool(profile_report.get("native_prepared_grid_enabled", true))
+
+
 func _can_use_native_workers() -> bool:
 	if not use_native_workers:
 		return false
@@ -1046,10 +1101,8 @@ func _can_use_native_workers() -> bool:
 		return false
 	if not world.provider.has_method("native_prepared_height_grid_request"):
 		return false
-	if world.provider.has_method("landform_profile_report"):
-		var profile_report: Dictionary = world.provider.call("landform_profile_report") as Dictionary
-		if not bool(profile_report.get("native_prepared_grid_enabled", true)):
-			return false
+	if _provider_profile_disables_native_grid():
+		return false
 	return true
 
 

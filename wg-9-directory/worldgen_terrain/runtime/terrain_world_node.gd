@@ -34,6 +34,7 @@ const HydrologyTileCacheScript := preload("res://worldgen_terrain/hydrology/hydr
 @export var edge_fog_begin_m: float = 24000.0
 @export var edge_fog_end_m: float = 33000.0
 @export var edge_fog_color: Color = Color(0.18, 0.18, 0.18)
+@export var allow_profile_fallback_sync_rebuilds: bool = false
 
 var world: RefCounted
 var chunk_nodes: Dictionary = {}
@@ -98,6 +99,11 @@ func update_viewer(position_xz: Vector2) -> Dictionary:
 	last_report = world.update_viewer(position_xz)
 	if last_report.get("status", "pass") != "pass":
 		return last_report
+	if _profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds:
+		_refresh_active_info_index()
+		_prune_native_worker_queue()
+		_poll_native_chunk_workers()
+		return last_report
 	_refresh_active_info_index()
 	_retag_full_density_chunk_nodes()
 	_retire_inactive_chunk_nodes()
@@ -133,8 +139,9 @@ func apply_landform_profile(profile: Variant, rebuild_existing: bool = true) -> 
 	if ok:
 		_clear_native_chunk_workers(true)
 		if rebuild_existing:
-			_rebuild_existing_chunk_meshes()
-		else:
+			if not _profile_disables_native_grid() or allow_profile_fallback_sync_rebuilds:
+				_rebuild_existing_chunk_meshes()
+		elif not _profile_disables_native_grid() or allow_profile_fallback_sync_rebuilds:
 			_queue_active_chunks_for_rebuild()
 	return ok
 
@@ -1261,6 +1268,13 @@ func _rebuild_existing_chunk_meshes() -> void:
 		var ring: int = int(mesh_instance.get_meta("ring"))
 		var lod: int = int(mesh_instance.get_meta("lod"))
 		mesh_instance.mesh = _build_chunk_mesh(chunk_x, chunk_z, ring, lod)
+
+
+func _profile_disables_native_grid() -> bool:
+	if world == null or world.provider == null or not world.provider.has_method("landform_profile_report"):
+		return false
+	var report: Dictionary = world.provider.call("landform_profile_report") as Dictionary
+	return not bool(report.get("native_prepared_grid_enabled", true))
 
 
 func _queue_active_chunks_for_rebuild() -> void:

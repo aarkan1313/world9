@@ -294,7 +294,9 @@ func apply_landform_profile(profile_id: String, rebuild_existing: bool = true) -
 		_update_diagnostics()
 	else:
 		if far_clipmap != null:
-			if not far_clipmap.setup(terrain.world):
+			if far_clipmap.has_method("invalidate_pages_for_profile_change"):
+				far_clipmap.call("invalidate_pages_for_profile_change")
+			elif not far_clipmap.setup(terrain.world):
 				errors.append("far_clipmap_profile_queue_failed:%s" % profile_id)
 				return false
 		if local_detail != null:
