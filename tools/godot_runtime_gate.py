@@ -73,6 +73,7 @@ EXTENDED_HEADLESS_CHECKS = FAST_HEADLESS_CHECKS + [
     "terrain_page_contract_check.gd",
     "streamer_reference_parity_check.gd",
     "terrain_chunk_renderer_check.gd",
+    "terrain_runtime_modularity_check.gd",
     "native_prepared_height_grid_check.gd",
     "native_mesh_payload_from_height_check.gd",
     "native_chunk_payload_prepared_check.gd",
