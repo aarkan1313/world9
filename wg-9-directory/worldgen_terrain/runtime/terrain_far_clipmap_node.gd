@@ -58,6 +58,7 @@ var last_worker_elapsed_ms: int = 0
 var last_worker_error: String = ""
 var last_page_error: String = ""
 var last_surface_material_reused: bool = false
+var last_page_material_reused: bool = false
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
 var _native_backend: Object
@@ -131,6 +132,7 @@ func clear_levels() -> void:
 	last_worker_error = ""
 	last_page_error = ""
 	last_surface_material_reused = false
+	last_page_material_reused = false
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
@@ -298,6 +300,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_worker_error": last_worker_error,
 		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
+		"last_page_material_reused": last_page_material_reused,
 	}
 
 
@@ -325,6 +328,7 @@ func stats() -> Dictionary:
 		"last_worker_error": last_worker_error,
 		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
+		"last_page_material_reused": last_page_material_reused,
 	}
 
 
@@ -460,7 +464,8 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		previous_normal_texture,
 		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0,
 		previous_page_origin,
-		previous_page_extent
+		previous_page_extent,
+		previous_material
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
@@ -512,7 +517,8 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 		previous_normal_texture,
 		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0,
 		previous_page_origin,
-		previous_page_extent
+		previous_page_extent,
+		previous_material
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
@@ -1605,7 +1611,8 @@ func _page_height_material_for_descriptor(
 	previous_normal_texture: Texture2D = null,
 	blend_alpha: float = 1.0,
 	previous_page_origin_m: Vector2 = Vector2(INF, INF),
-	previous_page_extent_m: float = 0.0
+	previous_page_extent_m: float = 0.0,
+	reusable_material: ShaderMaterial = null
 ) -> ShaderMaterial:
 	var texture_entry: Dictionary = _gpu_page_textures_for_descriptor(descriptor)
 	var height_texture: Texture2D = texture_entry["height_texture"] as Texture2D
@@ -1616,8 +1623,14 @@ func _page_height_material_for_descriptor(
 		previous_page_origin_m = page_origin
 	if previous_page_extent_m <= 0.0:
 		previous_page_extent_m = page_extent
-	var material := ShaderMaterial.new()
-	material.shader = _page_height_material_shader()
+	var page_shader: Shader = _page_height_material_shader()
+	var material: ShaderMaterial = null
+	if reusable_material != null and reusable_material.shader == page_shader:
+		material = reusable_material
+	if material == null:
+		material = ShaderMaterial.new()
+		material.shader = page_shader
+	last_page_material_reused = material == reusable_material and reusable_material != null
 	material.set_shader_parameter("height_texture", height_texture)
 	material.set_shader_parameter("normal_texture", normal_texture)
 	material.set_shader_parameter("previous_height_texture", previous_height_texture if previous_height_texture != null else height_texture)

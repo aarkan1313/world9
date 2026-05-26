@@ -74,6 +74,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 	var max_gpu_pages := 0
 	var max_gpu_page_mib := 0.0
 	var max_gpu_evictions := 0
+	var page_material_reuse_frames := 0
 	var max_step_ms := 0
 	var total_chunk_created := 0
 	var total_chunk_retired := 0
@@ -121,6 +122,8 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		max_gpu_pages = max(max_gpu_pages, int(gpu_state.get("count", 0)))
 		max_gpu_page_mib = maxf(max_gpu_page_mib, float(gpu_state.get("total_mib", 0.0)))
 		max_gpu_evictions = max(max_gpu_evictions, int(gpu_state.get("evictions", 0)))
+		if bool(far_stats.get("last_page_material_reused", false)):
+			page_material_reuse_frames += 1
 		if queued + native_queued > WARN_QUEUE_BACKLOG:
 			queue_backlog_frames += 1
 		frame_reports.append({
@@ -141,6 +144,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"gpu_pages": int(gpu_state.get("count", 0)),
 			"gpu_page_uploads": int(gpu_state.get("uploads", 0)),
 			"gpu_page_evictions": int(gpu_state.get("evictions", 0)),
+			"page_material_reused": bool(far_stats.get("last_page_material_reused", false)),
 			"far_rebuild_delta": far_delta,
 			"anchor_moved": anchor_moved,
 			"far_rebuilt_levels": (far_stats.get("last_rebuilt_levels", []) as Array).duplicate(),
@@ -190,6 +194,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"max_gpu_pages": max_gpu_pages,
 			"max_gpu_page_mib": max_gpu_page_mib,
 			"max_gpu_evictions": max_gpu_evictions,
+			"page_material_reuse_frames": page_material_reuse_frames,
 			"total_chunk_created": total_chunk_created,
 			"total_chunk_retired": total_chunk_retired,
 			"total_far_rebuild_delta": total_far_rebuild_delta,

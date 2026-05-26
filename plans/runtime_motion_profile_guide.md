@@ -57,6 +57,7 @@ far page rebuild deltas
 far page blend activity
 far GPU page residency hits/uploads/evictions/MiB
 far page displacement bounds
+far page material reuse
 anchor/recenter frames
 near/far draw and triangle estimates
 current quality profile report
@@ -107,6 +108,11 @@ visibility bounds that cover the current and previous height pages during a
 blend. Without that, the renderer can cull a visually displaced page as though
 it were still a flat mesh at y=0, which reads as angle-dependent holes or
 approach pop-in rather than a generation bug.
+
+Page commits should also reuse the existing ShaderMaterial where possible.
+The height/normal texture parameters change, but the material object should not
+churn every time a page recenters; previous/current texture parameters keep the
+blend valid.
 
 ```text
 queue_backlog_frames

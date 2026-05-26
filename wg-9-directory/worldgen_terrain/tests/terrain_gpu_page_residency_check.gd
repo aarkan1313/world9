@@ -77,7 +77,27 @@ func _check_far_clipmap_residency_integration(errors: Array[String]) -> void:
 	if float(gpu_state.get("total_mib", 0.0)) <= 0.0:
 		errors.append("clipmap_gpu_total_mib:%s" % str(gpu_state))
 	_check_persistent_page_bounds(node, errors)
+	_check_persistent_page_material_reuse(node, errors)
 	node.queue_free()
+
+
+func _check_persistent_page_material_reuse(node: Node3D, errors: Array[String]) -> void:
+	var mesh_instance: MeshInstance3D = node.level_nodes[0] as MeshInstance3D
+	var first_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
+	if first_material == null:
+		errors.append("clipmap_material_missing_initial")
+		return
+	var first_height_texture: Texture2D = first_material.get_shader_parameter("height_texture") as Texture2D
+	node.update_viewer(Vector2(node.base_spacing_m * 2.0, 0.0))
+	var second_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
+	if second_material != first_material:
+		errors.append("clipmap_page_material_not_reused")
+	var stats: Dictionary = node.stats()
+	if not bool(stats.get("last_page_material_reused", false)):
+		errors.append("clipmap_page_material_reuse_stat:%s" % str(stats))
+	var previous_height_texture: Texture2D = second_material.get_shader_parameter("previous_height_texture") as Texture2D
+	if first_height_texture != null and previous_height_texture != first_height_texture:
+		errors.append("clipmap_previous_texture_not_preserved")
 
 
 func _check_persistent_page_bounds(node: Node3D, errors: Array[String]) -> void:
