@@ -85,6 +85,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 45. [x] Add streaming-preview far-clipmap overview camera helper for inspecting larger coverage.
 46. [x] Add live streaming 3-ring/4-ring far-overview contact sheet and deterministic manifest to the review index.
 47. [ ] Human-review local-detail texture/displacement in the live walk preview before default enabling.
+48. [x] Add a walk motion/recenter profile gate and guide for diagnosing frame-time, residency, and visual recenter causes before more clipmap tuning.
 
 ## First Backend Shape
 
@@ -191,8 +192,9 @@ walk preview with far clipmap mounted: setup ~217ms, movement step ~2-3ms after 
 walk small-move perf: far clipmap build counts remain unchanged instead of rebuilding on first movement
 walk chunk-boundary recenter: first edge crossing keeps far rings stable; larger travel schedules far rings asynchronously through native workers, then finishes pending levels without blocking the movement frame
 rapid far recenter: boundary ping-pong keeps counts unchanged; rapid larger recenter while level 0 is in flight defers instead of synchronously rebuilding, then all levels finish at the newest origin
-fast Godot runtime gate: 13 checks, pass on the current machine
-extended Godot runtime gate: 27 checks, pass on the current machine
+fast Godot runtime gate: 14 checks, pass on the current machine, including the walk motion/recenter profile
+extended Godot runtime gate: 28 checks, pass on the current machine
+walk motion profile: high-speed forward profile writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass proves recenter/page-blend coverage and reports warning-level fast-flight chunk residency gaps plus expensive page recenter frames for the next optimization slice
 quality Godot runtime gate: 7 checks, pass on the current machine; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
 render Godot runtime gate: 6 non-headless capture checks, pass in ~17.5s on the current machine; static preview capture uses native/fast-gray chunk payloads where possible, and locked render artifacts avoid volatile diagnostic overlay text
 review Godot runtime gate: 4 non-headless contact-sheet checks, pass in ~32.2s on the current machine; release gate remains pass after repeated review runs
