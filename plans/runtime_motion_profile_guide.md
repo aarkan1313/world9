@@ -48,6 +48,7 @@ and records per-frame runtime facts:
 ```text
 step update milliseconds
 active vs built chunk count
+base-window vs prefetch-window residency
 chunk queue and native worker backlog
 chunk create/retire churn
 far clipmap pending rebuilds
@@ -81,8 +82,10 @@ before changing visuals.
 not_full_frames
 ```
 
-The near chunk window is not resident during the motion profile. Investigate
-prefetch direction, queue prioritization, worker count, and preload policy.
+The near chunk window is not resident during the motion profile. The current
+report splits this into base-window and prefetch-window readiness. Base-window
+misses are visual-risk failures; prefetch-window misses mean the optional next
+row is still building and should be treated as scheduling pressure.
 The first locked fast-flight residency budget is one forward prefetch step:
 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal-forward chunks after
 movement direction is known.

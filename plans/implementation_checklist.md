@@ -112,6 +112,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add a basic elevation-color debug/review material, make it the walk-review default, and keep grayscale available as a toggle.
 - [x] Add a worldgen capability gate/report that samples diverse regions and fails if palettes, families, kernels, or DEM-kernel relief collapse to one repeated geography.
 - [x] Move persistent far-page clipmap recenter payloads onto native workers, cache completed page heights, and keep previous/current height-page blend active on worker commits.
+- [x] Preload the walk profile's initial movement-biased chunk row and split motion-profile residency diagnostics into base-window readiness versus optional prefetch-row readiness.
 - [ ] Implement GPU-resident far height pages behind the current provider contract before promoting texture-displaced persistent clipmap rings.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.

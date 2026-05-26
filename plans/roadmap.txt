@@ -49,6 +49,7 @@ near terrain: 512m chunks, 129 vertices, 4m spacing, native worker payloads
 review surface: default walk preview now uses an elevation-color debug material so low/mid/high landforms are visually distinct before real biome textures exist
 retained terrain: 7x7 walk chunk window with full-density near review by default, plus far 4L clipmap coverage for larger visible range
 fast-flight residency: the walk profile prefetches one movement-biased near chunk row ahead of the viewer, gated as 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal-forward chunks
+startup residency: the walk preview seeds stream priority from the initial camera yaw, so the first movement direction has its forward row preloaded before review starts
 worldgen capability proof: `terrain_worldgen_capability_check.gd` samples 12 diverse region sites and currently reports 6 palettes, 9 families, 20 unique kernels, and DEM-kernel relief active at all 12 sites
 LOD transition continuity: mixed-density shared edge samples are machine-checked at zero height/XZ delta; fine chunk edge bands now morph toward coarser neighbor sampling while inner samples stay raw
 far terrain: visual clipmap rings with a level-0 overlap band below authoritative chunk edges
@@ -149,6 +150,7 @@ Far-edge masking: walk/streaming preview fog is depth-edge only, with no global 
 Visibility contract gate: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and validates loaded radius, camera far, hidden buffer, fog begin/end, fog transition length, edge shader fog settings, and viewer-tracked fog center against the `walk_review` profile.
 Motion profile gate: `terrain_walk_motion_profile_check.gd` drives the live walk preview at high-speed forward motion and writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass shows page-blend/recenter coverage working while the new forward-prefetch gate covers the first near-residency optimization slice.
 Forward-prefetch residency gate: `terrain_walk_prefetch_residency_check.gd` verifies that the walk profile's one-step movement-biased prefetch is resident after workers drain, instead of waiting for the viewer to cross into the next chunk row.
+Motion residency diagnostics: the motion profile now splits base-window readiness from optional prefetch-row readiness; visible pop-in risk belongs to base-window misses, while prefetch misses indicate scheduling pressure.
 Worldgen capability gate: `terrain_worldgen_capability_check.gd` writes `factory/runtime/godot_worldgen_capability/worldgen_capability_report.json` and a contact sheet, proving that the runtime provider is selecting multiple DEM-kernel families and not repeating one starting geography everywhere.
 Persistent far-page worker gate: the fast walk recenter, far-surface recenter, rapid recenter, motion-profile, and smoke checks now expect the page-backed clipmap path to schedule far native workers, keep pending pages off the scene-thread rebuild path, and still report page-height blend activity after commit.
 ```

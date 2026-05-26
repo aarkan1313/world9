@@ -92,6 +92,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 52. [x] Add an elevation-color review material for near/far terrain and make it the default walk-review surface before real biome textures.
 53. [x] Add a worldgen capability gate proving diverse palettes, families, kernels, and active DEM-kernel relief across review regions.
 54. [x] Allow persistent far-page clipmap recenter payloads to use native workers, cache worker-completed height pages, and preserve previous/current page-height blend on commit.
+55. [x] Seed initial walk-review stream priority from camera direction and split motion-profile residency into base-window versus prefetch-window readiness.
 
 ## First Backend Shape
 
@@ -203,6 +204,7 @@ extended Godot runtime gate: 32 checks, pass on the current machine
 quality Godot runtime gate: 8 checks, including the worldgen capability proof
 walk motion profile: high-speed forward profile writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass proves recenter/page-blend coverage, and the first near-residency optimization slice now prefetches the next movement-biased chunk row
 forward-prefetch residency: the walk profile keeps 49 base chunks plus one movement-biased overlap row resident after motion is known, with the fast gate proving 56 cardinal-forward chunks after workers drain
+startup prefetch residency: walk setup now preloads the initial camera-forward row; the motion profile reports base-window misses separately from still-building optional prefetch rows
 page-backed far workers: persistent far clipmap recentering now schedules native page payload workers, keeps old pages visible while the full level set is pending, caches completed height pages, and starts previous/current height-page blending when the worker set commits
 elevation-color review: near chunks and far clipmap shaders can use the same dark-low/rainbow-mid/white-high height ramp; gray remains available for old review captures
 worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samples 12 diverse region sites and reports 6 palettes, 9 families, 20 unique kernels, with DEM-kernel relief active at all sites

@@ -22,6 +22,7 @@ func _start() -> void:
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
 	scene.show_diagnostics_overlay = false
+	scene.camera_yaw_deg = 0.0
 	get_root().add_child(scene)
 	if not scene.setup():
 		errors.append("setup_failed:%s" % str(scene.errors))
@@ -61,7 +62,8 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 	var step_ms_values: Array[int] = []
 	var frame_reports: Array[Dictionary] = []
 	var warnings: Array[String] = []
-	var not_full_frames := 0
+	var base_not_full_frames := 0
+	var prefetch_not_full_frames := 0
 	var recenter_frames := 0
 	var chunk_churn_frames := 0
 	var queue_backlog_frames := 0
@@ -82,6 +84,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		var terrain_stats: Dictionary = scene.terrain.build_stats()
 		var far_stats: Dictionary = scene.far_clipmap.stats() if scene.far_clipmap != null else {}
 		var active_count: int = int(stream_report.get("active_count", 0))
+		var base_active_count: int = int(stream_report.get("base_active_count", active_count))
 		var built_count: int = scene.built_chunk_count()
 		var queued: int = int(stream_report.get("queued_build_count", 0))
 		var native_queued: int = int(terrain_stats.get("queued_native_worker_builds", 0))
@@ -97,8 +100,10 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		total_chunk_created += created
 		total_chunk_retired += retired
 		total_far_rebuild_delta += far_delta
-		if built_count < active_count:
-			not_full_frames += 1
+		if built_count < base_active_count:
+			base_not_full_frames += 1
+		elif built_count < active_count:
+			prefetch_not_full_frames += 1
 		if far_delta > 0 or anchor_moved:
 			recenter_frames += 1
 		if created > 0 or retired > 0:
@@ -115,6 +120,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"pos": [scene.viewer_position_xz.x, scene.viewer_position_xz.y],
 			"built_chunks": built_count,
 			"active_chunks": active_count,
+			"base_active_chunks": base_active_count,
 			"queued_chunks": queued,
 			"native_queue": native_queued,
 			"native_workers": native_workers,
@@ -134,8 +140,10 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		errors.append("motion_step_ms:%d limit:%d" % [max_step_ms, MAX_HARD_STEP_MS])
 	if queue_backlog_frames > 0:
 		warnings.append("queue_backlog_frames:%d max_queue:%d" % [queue_backlog_frames, max_queue])
-	if not_full_frames > WARN_NOT_FULL_FRAMES:
-		warnings.append("not_full_frames:%d warning_limit:%d" % [not_full_frames, WARN_NOT_FULL_FRAMES])
+	if base_not_full_frames > WARN_NOT_FULL_FRAMES:
+		warnings.append("base_not_full_frames:%d warning_limit:%d" % [base_not_full_frames, WARN_NOT_FULL_FRAMES])
+	if prefetch_not_full_frames > WARN_NOT_FULL_FRAMES:
+		warnings.append("prefetch_not_full_frames:%d warning_limit:%d" % [prefetch_not_full_frames, WARN_NOT_FULL_FRAMES])
 	if recenter_frames <= 0:
 		errors.append("no_recenter_frames_observed")
 	if max_page_blends <= 0:
@@ -159,7 +167,8 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		"summary": {
 			"step_ms": _timing_summary(step_ms_values),
 			"render_budget": _render_budget_summary(scene),
-			"not_full_frames": not_full_frames,
+			"base_not_full_frames": base_not_full_frames,
+			"prefetch_not_full_frames": prefetch_not_full_frames,
 			"recenter_frames": recenter_frames,
 			"chunk_churn_frames": chunk_churn_frames,
 			"max_queue": max_queue,

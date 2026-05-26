@@ -161,6 +161,8 @@ func setup() -> bool:
 	clear_preview()
 	errors.clear()
 	camera_yaw_rad = deg_to_rad(camera_yaw_deg)
+	if prefetch_forward_chunks > 0:
+		_stream_priority_direction = Vector2(sin(camera_yaw_rad), cos(camera_yaw_rad)).normalized()
 	terrain = TerrainWorldNodeScript.new()
 	terrain.name = "StreamingTerrainWorldNode"
 	terrain.auto_setup_on_ready = false

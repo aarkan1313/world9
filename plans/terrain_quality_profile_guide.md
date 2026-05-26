@@ -62,7 +62,9 @@ base retained window in all directions; it keeps one extra row or diagonal
 corner fan ahead of the current movement vector so fast flight has terrain
 resident before the viewer reaches the next chunk boundary. The current walk
 profile expects 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal
-forward chunks after movement direction is known.
+forward chunks after movement direction is known. The walk preview now seeds
+that direction from the initial camera yaw during setup, so the first visible
+movement already has the forward row preloaded.
 
 `elevation_color` is the default walk-review mode so landform changes are not
 hidden by a flat white/gray surface. It is still a debug material, not final
@@ -109,6 +111,9 @@ viewer-tracked fog center.
 The prefetch residency check starts the walk scene, applies forward movement,
 drains terrain workers, and verifies the movement-biased active set is resident:
 49 base chunks plus the expected forward prefetch row for the profile.
+The motion profile separately reports base-window misses and prefetch-row
+misses so a still-building optional row is not confused with visible terrain
+pop-in.
 
 The page-backed far clipmap now uses native workers for recenter payloads. The
 old CPU page path remains as a fallback/cache-hit path, but normal motion should
