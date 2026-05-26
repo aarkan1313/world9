@@ -104,6 +104,7 @@ static func _walk_review_profile() -> Dictionary:
 			"use_far_clipmap_native_workers": true,
 			"use_persistent_page_clipmap": true,
 			"far_clipmap_page_cache_max_pages": 64,
+			"far_clipmap_gpu_page_residency_max_pages": 64,
 			"distance_fog_depth_begin_m": 30000.0,
 			"distance_fog_depth_end_m": 33000.0,
 			"camera_far_m": 120000.0,

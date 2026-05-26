@@ -1,6 +1,6 @@
 # Runtime Motion Profile Guide
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 ## Purpose
 
@@ -55,6 +55,7 @@ far clipmap pending rebuilds
 far clipmap worker activity
 far page rebuild deltas
 far page blend activity
+far GPU page residency hits/uploads/evictions/MiB
 anchor/recenter frames
 near/far draw and triangle estimates
 current quality profile report
@@ -95,6 +96,10 @@ recenter payloads. A healthy recenter frame can show pending far work and active
 far workers without immediately increasing build counts; the commit should
 happen after the full page set is ready, then height-page blend activity should
 be observed.
+
+The same far stats now include GPU page residency. A healthy profile should not
+show runaway uploads or evictions for active pages; those indicate page churn or
+an undersized residency budget before they become visible stutter.
 
 ```text
 queue_backlog_frames

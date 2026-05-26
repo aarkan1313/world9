@@ -1,6 +1,6 @@
 # Terrain Quality Profile Guide
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 ## Purpose
 
@@ -47,6 +47,7 @@ near window: 7x7 chunks
 near forward prefetch: 1 movement-biased overlap window
 far terrain: 4 page-backed clipmap levels
 far radius: 32768m
+far GPU page residency: 64 height/normal page textures
 camera far: 120000m
 fog begin/end: 30000m / 33000m
 page recenter: opaque geometry with previous/current height blend
@@ -95,6 +96,7 @@ visibility loaded radius matches far clipmap budget
 fog begin/end/camera far form a sane edge-only visibility contract
 walk profile carries the forward-prefetch setting
 walk profile uses elevation-color review by default
+walk profile carries the far GPU page residency budget
 ```
 
 The visibility contract check writes:
@@ -120,6 +122,13 @@ old CPU page path remains as a fallback/cache-hit path, but normal motion should
 schedule page payloads off the scene thread, commit the full level set together,
 and start the previous/current height-page blend on assignment.
 
+Persistent far page height/normal textures now pass through a bounded GPU page
+residency cache. The cache is keyed by the same page request contract as the CPU
+page cache, protects currently active page keys from ordinary eviction, and
+reports hits, uploads, evictions, page count, and MiB usage through far clipmap
+stats. This is still a texture-backed page residency step; the final renderer
+promotion is persistent ring geometry displaced from resident height pages.
+
 ## Roadmap Use
 
 When the distant edge, motion profile, or residency budget needs tuning, change
@@ -131,6 +140,6 @@ Next profile work:
 ```text
 1. Add profile-specific motion thresholds now that the first fast-flight residency policy is gated.
 2. Add high-density/local-detail profiles after the default walk profile is stable.
-3. Add future GPU page profile fields behind the same profile id.
+3. Promote persistent texture-displaced far rings once GPU page residency and motion gates stay stable.
 4. Add optional profile tiers for review-only far radius and hidden-edge buffer tuning.
 ```

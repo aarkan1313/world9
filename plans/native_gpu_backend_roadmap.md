@@ -1,6 +1,6 @@
 # WorldGen9 Native/GPU Backend Roadmap
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 ## Decision
 
@@ -93,6 +93,8 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 53. [x] Add a worldgen capability gate proving diverse palettes, families, kernels, and active DEM-kernel relief across review regions.
 54. [x] Allow persistent far-page clipmap recenter payloads to use native workers, cache worker-completed height pages, and preserve previous/current page-height blend on commit.
 55. [x] Seed initial walk-review stream priority from camera direction and split motion-profile residency into base-window versus prefetch-window readiness.
+56. [x] Add first GPU-resident far page texture residency cache with protected-key eviction, live budget diagnostics, walk-profile control, and fast gate coverage.
+57. [ ] Promote far clipmap rendering from CPU-built page meshes to persistent texture-displaced rings once residency, motion, and visual transition gates stay stable.
 
 ## First Backend Shape
 
@@ -199,13 +201,14 @@ walk preview with far clipmap mounted: setup ~217ms, movement step ~2-3ms after 
 walk small-move perf: far clipmap build counts remain unchanged instead of rebuilding on first movement
 walk chunk-boundary recenter: first edge crossing keeps far rings stable; larger travel schedules far rings asynchronously through native workers, then finishes pending levels without blocking the movement frame
 rapid far recenter: boundary ping-pong keeps counts unchanged; rapid larger recenter while level 0 is in flight defers instead of synchronously rebuilding, then all levels finish at the newest origin
-fast Godot runtime gate: 18 checks, pass on the current machine, including the quality-profile, visibility-contract, elevation-color material, walk motion/recenter profile, and forward-prefetch residency gates
-extended Godot runtime gate: 32 checks, pass on the current machine
+fast Godot runtime gate: 19 checks, pass on the current machine, including the quality-profile, visibility-contract, elevation-color material, GPU page residency, walk motion/recenter profile, and forward-prefetch residency gates
+extended Godot runtime gate: 33 checks, pass on the current machine
 quality Godot runtime gate: 8 checks, including the worldgen capability proof
 walk motion profile: high-speed forward profile writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass proves recenter/page-blend coverage, and the first near-residency optimization slice now prefetches the next movement-biased chunk row
 forward-prefetch residency: the walk profile keeps 49 base chunks plus one movement-biased overlap row resident after motion is known, with the fast gate proving 56 cardinal-forward chunks after workers drain
 startup prefetch residency: walk setup now preloads the initial camera-forward row; the motion profile reports base-window misses separately from still-building optional prefetch rows
 page-backed far workers: persistent far clipmap recentering now schedules native page payload workers, keeps old pages visible while the full level set is pending, caches completed height pages, and starts previous/current height-page blending when the worker set commits
+GPU page residency: persistent far page height/normal textures now flow through a bounded residency cache with protected active page keys, upload/hit/eviction/MiB diagnostics, and a walk-profile page limit. This is the first GPU-resident page step; persistent texture-displaced rings remain the next renderer promotion.
 elevation-color review: near chunks and far clipmap shaders can use the same dark-low/rainbow-mid/white-high height ramp; gray remains available for old review captures
 worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samples 12 diverse region sites and reports 6 palettes, 9 families, 20 unique kernels, with DEM-kernel relief active at all sites
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up
@@ -614,14 +617,14 @@ New roadmap gates from that review:
 1. terrain quality profile source of truth
 2. live motion-profile budget gate
 3. first-class visibility/fog contract
-4. GPU-resident far height pages
+4. GPU-resident far page texture residency cache
 5. persistent texture-displaced clipmap rings
 6. previous/current height-page blend
 7. shader coarse/fine morph against neighboring height pages
 8. stable world-space biome/material masks after terrain-family material rules
 ```
 
-### Current Clipmap Discipline (2026-05-25)
+### Current Clipmap Discipline (2026-05-26)
 
 The current page-backed far clipmap is an intermediate renderer, but its
 transition rules should already match the long-term GPU direction:

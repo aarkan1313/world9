@@ -40,7 +40,7 @@ D:/workflows/worldgen9/dems/
 D:/workflows/worldgen9/dems/opentopo/
 ```
 
-### 0.2 2026-05-25 Runtime Position
+### 0.2 2026-05-26 Runtime Position
 
 The live Godot preview is now past the first one-tile proof. Current direction:
 
@@ -60,6 +60,7 @@ chunk-boundary recenter: crossing one chunk edge no longer recenters far rings; 
 native clipmap payload: far levels use native centered vertex/normal/UV and hole-filtered index generation
 async far clipmap: walk/streaming preview schedules far level rebuilds on native workers instead of rebuilding in the movement frame
 page-backed far workers: persistent page-mode clipmap recentering now uses native workers, caches worker-completed height pages, and commits only when the full page set is ready so previous/current height-page blend remains the transition mechanism
+GPU page residency: persistent far page height/normal textures now use a bounded residency cache with protected active page keys and upload/hit/eviction/MiB diagnostics; this is the first GPU-resident page step, not the final texture-displaced ring renderer
 rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
 visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
 far clipmap transition policy: page-backed clipmap geometry stays opaque; do not alpha-crossfade whole square pages/rings, and smooth recenter/LOD only through world-space previous/current height-page blend, coarse/fine morph bands, and outer-edge-only visibility masking
@@ -124,8 +125,8 @@ Movement perf gate: chunk-centered walk spawn keeps small movement at ~2-3ms and
 Boundary recenter gate: first real chunk-boundary crossing keeps far clipmap counts stable; larger travel schedules far rings asynchronously, then drains pending levels
 Rapid recenter gate: boundary ping-pong keeps counts unchanged; rapid larger recenter requests defer level 0 while the worker is active, and finish all levels at the newest origin
 Native clipmap payload gate: direct backend check verifies centered vertices, UVs, and hole-filtered indices
-Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 18 headless native/clipmap/walk checks, including the quality-profile, visibility-contract, elevation-color material, walk motion/recenter profile, and forward-prefetch residency gates
-Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 32 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, quality-profile, visibility-contract, elevation-color material, motion-profile, and forward-prefetch residency checks
+Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 19 headless native/clipmap/walk checks, including the quality-profile, visibility-contract, elevation-color material, GPU page residency, walk motion/recenter profile, and forward-prefetch residency gates
+Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 33 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, quality-profile, visibility-contract, elevation-color material, GPU page residency, motion-profile, and forward-prefetch residency checks
 Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 8 worldgen-capability, landform, hydrology, debug performance, streaming performance, and 257-walk-density checks
 Hydrology/debug performance: cross-region height grids now split into per-region fast blocks, so padded hydrology windows avoid the slow scalar fallback; quality gate time is back in single-digit seconds on the current machine
 Renderer boundary: `TerrainChunkRenderer` now owns chunk MeshInstance lifecycle and bounded pooling, while `TerrainWorldNode` remains orchestration/build-policy glue
@@ -153,6 +154,7 @@ Forward-prefetch residency gate: `terrain_walk_prefetch_residency_check.gd` veri
 Motion residency diagnostics: the motion profile now splits base-window readiness from optional prefetch-row readiness; visible pop-in risk belongs to base-window misses, while prefetch misses indicate scheduling pressure.
 Worldgen capability gate: `terrain_worldgen_capability_check.gd` writes `factory/runtime/godot_worldgen_capability/worldgen_capability_report.json` and a contact sheet, proving that the runtime provider is selecting multiple DEM-kernel families and not repeating one starting geography everywhere.
 Persistent far-page worker gate: the fast walk recenter, far-surface recenter, rapid recenter, motion-profile, and smoke checks now expect the page-backed clipmap path to schedule far native workers, keep pending pages off the scene-thread rebuild path, and still report page-height blend activity after commit.
+GPU page residency gate: `terrain_gpu_page_residency_check.gd` proves bounded far page texture residency, protected active page eviction behavior, live far clipmap integration, and nonzero GPU texture budget reporting.
 ```
 
 This keeps the later collision path near-player only and separate from visual

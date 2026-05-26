@@ -6,6 +6,7 @@ const TerrainSurfaceTextureBuilderScript := preload("res://worldgen_terrain/runt
 const TerrainFarClipmapPayloadWorkerScript := preload("res://worldgen_terrain/mesh/terrain_far_clipmap_payload_worker.gd")
 const TerrainPageRequestScript := preload("res://worldgen_terrain/core/terrain_page_request.gd")
 const TerrainPageCacheScript := preload("res://worldgen_terrain/core/terrain_page_cache.gd")
+const TerrainGpuPageResidencyScript := preload("res://worldgen_terrain/core/terrain_gpu_page_residency.gd")
 
 @export var level_count: int = 3
 @export var vertices_per_side: int = 129
@@ -22,6 +23,7 @@ const TerrainPageCacheScript := preload("res://worldgen_terrain/core/terrain_pag
 @export var use_native_workers: bool = false
 @export var use_persistent_page_mesh: bool = false
 @export_range(0, 256, 1) var page_cache_max_pages: int = 48
+@export_range(0, 256, 1) var gpu_page_residency_max_pages: int = 48
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export var use_edge_fog: bool = false
@@ -69,6 +71,7 @@ var _surface_texture_shader_opaque: Shader
 var _surface_texture_shader_fade: Shader
 var _page_height_shader: Shader
 var _page_cache: RefCounted
+var _gpu_page_residency: RefCounted
 
 
 func setup(p_world: RefCounted) -> bool:
@@ -94,6 +97,7 @@ func setup(p_world: RefCounted) -> bool:
 		level_transition_start_ms.append(0)
 		level_page_blend_start_ms.append(0)
 	_ensure_page_cache()
+	_ensure_gpu_page_residency()
 	return true
 
 
@@ -132,6 +136,8 @@ func clear_levels() -> void:
 	_staged_native_origin = Vector2(INF, INF)
 	if _page_cache != null:
 		_page_cache.clear()
+	if _gpu_page_residency != null:
+		_gpu_page_residency.clear()
 
 
 func configure_geometry(p_level_count: int, p_base_spacing_m: float, p_base_outer_extent_m: float) -> bool:
@@ -283,6 +289,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"staged_native_payload_count": _staged_native_payloads.size(),
 		"use_persistent_page_mesh": use_persistent_page_mesh,
 		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
+		"gpu_page_residency": _gpu_page_residency.debug_state() if _gpu_page_residency != null else {},
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
 		"last_scheduled_levels": last_scheduled_levels.duplicate(),
 		"last_deferred_levels": last_deferred_levels.duplicate(),
@@ -309,6 +316,7 @@ func stats() -> Dictionary:
 		"staged_native_payload_count": _staged_native_payloads.size(),
 		"use_persistent_page_mesh": use_persistent_page_mesh,
 		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
+		"gpu_page_residency": _gpu_page_residency.debug_state() if _gpu_page_residency != null else {},
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
 		"last_scheduled_levels": last_scheduled_levels.duplicate(),
 		"last_deferred_levels": last_deferred_levels.duplicate(),
@@ -640,6 +648,12 @@ func _ensure_page_cache() -> void:
 	_page_cache.configure(page_cache_max_pages)
 
 
+func _ensure_gpu_page_residency() -> void:
+	if _gpu_page_residency == null:
+		_gpu_page_residency = TerrainGpuPageResidencyScript.new()
+	_gpu_page_residency.configure(gpu_page_residency_max_pages)
+
+
 func _protect_active_page_keys() -> void:
 	if _page_cache == null:
 		return
@@ -656,6 +670,8 @@ func _protect_active_page_keys() -> void:
 		var request = _make_far_clipmap_page_request(level, origin, outer_extent, spacing, side)
 		protected.append(request.cache_key())
 	_page_cache.set_protected_keys(protected)
+	if _gpu_page_residency != null:
+		_gpu_page_residency.set_protected_keys(protected)
 
 
 func _make_far_clipmap_page_request(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int):
@@ -1465,9 +1481,19 @@ func _heightfield_for_level(
 		"vertices_per_side": side,
 		"height": height,
 		"normals": normals,
+		"cache_key": _page_cache_key_for_level(level, origin, outer_extent, spacing, side),
 		"height_min_m": float(range["min"]),
 		"height_max_m": float(range["max"]),
 	}
+
+
+func _page_cache_key_for_level(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int) -> String:
+	if world == null:
+		return ""
+	var request = _make_far_clipmap_page_request(level, origin, outer_extent, spacing, side)
+	if not request.validate().is_empty():
+		return ""
+	return request.cache_key()
 
 
 func _surface_descriptor_from_heightfield(
@@ -1490,6 +1516,7 @@ func _surface_descriptor_from_heightfield(
 	descriptor["origin_x"] = float(heightfield["origin_x"])
 	descriptor["origin_z"] = float(heightfield["origin_z"])
 	descriptor["outer_extent_m"] = float(heightfield["outer_extent_m"])
+	descriptor["cache_key"] = str(heightfield.get("cache_key", ""))
 	if descriptor.get("status", "fail") != "pass":
 		return descriptor
 	var level: int = int(heightfield["level"])
@@ -1544,8 +1571,9 @@ func _page_height_material_for_descriptor(
 	previous_page_origin_m: Vector2 = Vector2(INF, INF),
 	previous_page_extent_m: float = 0.0
 ) -> ShaderMaterial:
-	var height_texture: ImageTexture = ImageTexture.create_from_image(descriptor["height_image"] as Image)
-	var normal_texture: ImageTexture = ImageTexture.create_from_image(descriptor["normal_image"] as Image)
+	var texture_entry: Dictionary = _gpu_page_textures_for_descriptor(descriptor)
+	var height_texture: Texture2D = texture_entry["height_texture"] as Texture2D
+	var normal_texture: Texture2D = texture_entry["normal_texture"] as Texture2D
 	var page_origin := Vector2(float(descriptor.get("origin_x", 0.0)), float(descriptor.get("origin_z", 0.0)))
 	var page_extent: float = float(descriptor.get("outer_extent_m", 0.0))
 	if not is_finite(previous_page_origin_m.x) or not is_finite(previous_page_origin_m.y):
@@ -1576,6 +1604,21 @@ func _page_height_material_for_descriptor(
 	material.set_shader_parameter("elevation_color_enabled", use_elevation_color_material)
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
+
+
+func _gpu_page_textures_for_descriptor(descriptor: Dictionary) -> Dictionary:
+	var cache_key: String = str(descriptor.get("cache_key", ""))
+	if use_persistent_page_mesh:
+		_ensure_gpu_page_residency()
+		var resident: Dictionary = _gpu_page_residency.get_or_create_textures(cache_key, descriptor) as Dictionary
+		if resident.get("status", "fail") == "pass":
+			return resident
+	return {
+		"status": "pass",
+		"cache_key": cache_key,
+		"height_texture": ImageTexture.create_from_image(descriptor["height_image"] as Image),
+		"normal_texture": ImageTexture.create_from_image(descriptor["normal_image"] as Image),
+	}
 
 
 func _refresh_page_morph_sources() -> void:

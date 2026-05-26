@@ -75,6 +75,7 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		"far_clipmap_base_outer_extent_m",
 		"far_clipmap_rebuild_levels_per_update",
 		"use_persistent_page_clipmap",
+		"far_clipmap_gpu_page_residency_max_pages",
 		"distance_fog_depth_begin_m",
 		"distance_fog_depth_end_m",
 		"camera_far_m",

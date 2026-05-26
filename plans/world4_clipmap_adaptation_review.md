@@ -185,8 +185,8 @@ contract instead of tuned by eye.
 3. Promote current edge fog into a visibility contract with pass/fail reporting.
 4. Lock the current page-backed clipmap rules: opaque geometry, world-space height-page blend, and coarse/fine morph.
 5. Keep fixing current CPU/native clipmap visual issues only where the profiler proves a real problem.
-6. Implement GPU-resident far height pages behind the existing provider contract.
-7. Switch far clipmap rendering from rebuilt meshes to persistent rings/pages with height texture displacement.
+6. Add the first GPU-resident far page texture residency cache behind the existing provider contract.
+7. Switch far clipmap rendering from CPU-built page meshes to persistent rings/pages with height texture displacement.
 8. Add world-space biome/material masks only after terrain families/material rules are ready.
 9. Add material micro detail after the mask/material path is stable.
 

@@ -1,6 +1,6 @@
 # WorldGen9 Implementation Checklist
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 The Godot project shell now exists at `D:/workflows/worldgen9/wg-9-directory/`.
 Runtime code can be added there, but it should continue following the parity
@@ -113,7 +113,8 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add a worldgen capability gate/report that samples diverse regions and fails if palettes, families, kernels, or DEM-kernel relief collapse to one repeated geography.
 - [x] Move persistent far-page clipmap recenter payloads onto native workers, cache completed page heights, and keep previous/current height-page blend active on worker commits.
 - [x] Preload the walk profile's initial movement-biased chunk row and split motion-profile residency diagnostics into base-window readiness versus optional prefetch-row readiness.
-- [ ] Implement GPU-resident far height pages behind the current provider contract before promoting texture-displaced persistent clipmap rings.
+- [x] Add first GPU-resident far page texture residency cache behind the current provider contract, with protected-key eviction, live diagnostics, walk-profile budget knobs, and a fast gate.
+- [ ] Promote the far clipmap from CPU-built page meshes to persistent texture-displaced rings after GPU page residency, motion, and visual review stay stable.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.
 - [x] Add `TerrainChunkRenderer` as the first renderer boundary for chunk MeshInstance lifecycle, active-node ownership, and bounded pooling.
