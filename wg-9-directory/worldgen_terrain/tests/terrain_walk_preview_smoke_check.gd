@@ -26,10 +26,10 @@ func _start() -> void:
 			scene.expected_active_count(),
 			scene.diagnostics_text(),
 		])
-	if scene.review_sync_hole_fill_radius_chunks != 0:
-		errors.append("walk_review_sync_fill_should_be_disabled:%d" % scene.review_sync_hole_fill_radius_chunks)
-	if scene.review_sync_hole_fill_max_chunks_per_frame != 0:
-		errors.append("walk_review_sync_fill_cap_should_be_zero:%d" % scene.review_sync_hole_fill_max_chunks_per_frame)
+	if scene.review_sync_hole_fill_radius_chunks < 1:
+		errors.append("walk_review_sync_fill_radius_too_low:%d" % scene.review_sync_hole_fill_radius_chunks)
+	if scene.review_sync_hole_fill_max_chunks_per_frame < 2:
+		errors.append("walk_review_sync_fill_cap_too_low:%d" % scene.review_sync_hole_fill_max_chunks_per_frame)
 	_drain_queue(scene, errors)
 	scene.camera_yaw_rad = 0.0
 	scene.look_pitch_rad = 0.0
@@ -160,11 +160,11 @@ func _check_saved_scene_defaults(errors: Array[String]) -> void:
 		errors.append("walk_scene_preload_disabled")
 	if int(scene.get("max_native_chunk_workers")) < 6:
 		errors.append("walk_scene_native_workers:%d" % int(scene.get("max_native_chunk_workers")))
-	if int(scene.get("review_sync_hole_fill_radius_chunks")) != 0:
+	if int(scene.get("review_sync_hole_fill_radius_chunks")) < 1:
 		errors.append("walk_scene_hole_fill_radius:%d" % int(scene.get("review_sync_hole_fill_radius_chunks")))
 	if bool(scene.get("use_mesh_skirts")):
 		errors.append("walk_scene_skirts_enabled")
-	if int(scene.get("review_sync_hole_fill_max_chunks_per_frame")) != 0:
+	if int(scene.get("review_sync_hole_fill_max_chunks_per_frame")) < 2:
 		errors.append("walk_scene_hole_fill_cap:%d" % int(scene.get("review_sync_hole_fill_max_chunks_per_frame")))
 	if not bool(scene.get("use_persistent_page_clipmap")):
 		errors.append("walk_scene_page_clipmap_disabled")

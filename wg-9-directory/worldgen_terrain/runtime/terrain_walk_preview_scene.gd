@@ -59,15 +59,15 @@ func _apply_walk_review_runtime_minimums() -> void:
 		warmup_build_steps = max(warmup_build_steps, 4)
 		preload_active_chunks_before_start = true
 		max_native_chunk_workers = max(max_native_chunk_workers, 6)
-		review_sync_hole_fill_radius_chunks = 0
-		review_sync_hole_fill_max_chunks_per_frame = 0
+		review_sync_hole_fill_radius_chunks = max(review_sync_hole_fill_radius_chunks, 1)
+		review_sync_hole_fill_max_chunks_per_frame = max(review_sync_hole_fill_max_chunks_per_frame, 2)
 	else:
 		build_budget_per_frame = min(build_budget_per_frame, 2)
 		warmup_build_steps = min(warmup_build_steps, 1)
 		preload_active_chunks_before_start = false
 		max_native_chunk_workers = max(max_native_chunk_workers, 4)
-		review_sync_hole_fill_radius_chunks = 0
-		review_sync_hole_fill_max_chunks_per_frame = 0
+		review_sync_hole_fill_radius_chunks = max(review_sync_hole_fill_radius_chunks, 1)
+		review_sync_hole_fill_max_chunks_per_frame = max(review_sync_hole_fill_max_chunks_per_frame, 1)
 
 
 func _exit_tree() -> void:

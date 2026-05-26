@@ -112,6 +112,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add a motion-profile runtime gate for live walk/fly movement that records p95/p99/peak frame time, hitches, pending terrain work, not-ready frames, draw/triangle estimates, and current quality profile.
 - [x] Promote far-edge fog into a visibility contract report with loaded radius, camera far, hidden buffer, fog begin/end, transition length, and pass/fail reasons.
 - [x] Add movement-direction forward prefetch for the walk profile plus a fast residency gate so fast flight can keep the next near chunk row resident before the viewer reaches it.
+- [x] Add a small center-first residency guard for walk/profile review so missing or stale viewer-neighborhood chunks are filled before the far clipmap center hole can show through.
 - [x] Add a basic elevation-color debug/review material, make it the walk-review default, and keep grayscale available as a toggle.
 - [x] Add a worldgen capability gate/report that samples diverse regions and fails if palettes, families, kernels, or DEM-kernel relief collapse to one repeated geography.
 - [x] Move persistent far-page clipmap recenter payloads onto native workers, cache completed page heights, and keep previous/current height-page blend active on worker commits.
@@ -123,9 +124,11 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Skip persistent far page descriptor image rebuilds when the target page already has GPU-resident height/normal textures.
 - [x] Add motion-profile hard budgets for far page GPU uploads and evictions so page residency regressions fail before they become visible stutter.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
+- [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.
 - [x] Add high-camera kernel-tour review scene that advances through diverse selected kernel sites using the normal walk-preview streaming stack.
 - [x] Add landform tuning and erosion-order plan at `plans/landform_tuning_and_erosion_order.md`.
 - [x] Add review-only landform tuning profiles for current balance, stronger mountains, and compressed scale before changing defaults.
+- [x] Increase review-only profile contrast so `strong_mountains` and `compressed_scale` are visually distinguishable in the live profile tour.
 - [x] Add same-site profile comparison probe/contact sheet/tour with height-range, p05/p95 relief, slope, local-relief, kernel-contribution, and seam checks.
 - [x] Add live `terrain_landform_profile_tour.tscn` review scene that exposes `balanced_current`, `strong_mountains`, and `compressed_scale` on representative sites. It defaults to manual profile switching so tuned profiles do not rebuild unexpectedly while flying, while far coverage remains enabled for useful scale review.
 - [x] Add deterministic pass/corridor world-fact placeholder after base scale/relief profiles are measurable.

@@ -52,6 +52,7 @@ near terrain: 512m chunks, 129 vertices, 4m spacing
 review color: elevation_color
 near window: 7x7 chunks
 near forward prefetch: 1 movement-biased overlap window
+near center residency guard: fill missing/stale 3x3 viewer-neighborhood chunks first, max 2 sync fills per frame
 far terrain: 4 page-backed clipmap levels
 far radius: 32768m
 far GPU page residency: 64 height/normal page textures
@@ -73,6 +74,13 @@ profile expects 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal
 forward chunks after movement direction is known. The walk preview now seeds
 that direction from the initial camera yaw during setup, so the first visible
 movement already has the forward row preloaded.
+
+The center residency guard is intentionally smaller than the old full-window
+sync fill. It exists because the far clipmap has a deliberate center hole under
+the authoritative near chunks. If native workers lag or a profile/site switch
+makes the viewer-neighborhood stale, the review scene must fill the closest
+3x3 chunks first instead of exposing the far clipmap hole as a black/blank
+square. This is a runtime residency rule, not a fog or material workaround.
 
 `elevation_color` is the default walk-review mode so landform changes are not
 hidden by a flat white/gray surface. It is still a debug material, not final
@@ -104,6 +112,7 @@ camera far matches the profile
 visibility loaded radius matches far clipmap budget
 fog begin/end/camera far form a sane edge-only visibility contract
 walk profile carries the forward-prefetch setting
+walk profile carries the center residency guard setting
 walk profile uses elevation-color review by default
 walk profile carries the far GPU page residency budget
 ```
@@ -125,6 +134,10 @@ drains terrain workers, and verifies the movement-biased active set is resident:
 The motion profile separately reports base-window misses and prefetch-row
 misses so a still-building optional row is not confused with visible terrain
 pop-in.
+
+The walk-preview smoke check also guards the center residency settings so saved
+scene files and runtime minimums cannot drift back to a state where the far
+clipmap center hole is visible during fast movement or profile review.
 
 The page-backed far clipmap now uses native workers for recenter payloads. The
 old CPU page path remains as a fallback/cache-hit path, but normal motion should
@@ -181,6 +194,7 @@ build budget: 2 chunks per frame
 preload before start: off
 native chunk workers: 4
 forward prefetch: off
+center residency guard: 1-chunk radius, max 1 sync fill per frame
 ```
 
 The profile owns the 257v probe budgets consumed by
@@ -252,4 +266,7 @@ Non-neutral landform profiles are review-only, but they now remain compatible
 with native prepared-grid/chunk payload support. Prepared requests carry the
 same profile settings consumed by the GDScript provider, and the live profile
 tour throttles far refresh to one level per frame so `V` profile switches do not
-fall back to slow synchronous GDScript rebuilds.
+fall back to slow synchronous GDScript rebuilds. The review profiles are
+deliberately high-contrast now: `strong_mountains` should visibly raise
+mountain/glacial/volcanic relief, while `compressed_scale` should show more
+variation per travel distance without changing region IDs.

@@ -47,11 +47,11 @@ static func _strong_mountains() -> Dictionary:
 	profile_data["id"] = STRONG_MOUNTAINS
 	profile_data["description"] = "Review-only profile for taller mountain/glacial/volcanic relief without changing region layout."
 	profile_data["settings"] = {
-		"macro_relief_scale": 1.08,
-		"kernel_relief_strength": 1.18,
-		"mountain_boost": 1.32,
+		"macro_relief_scale": 1.22,
+		"kernel_relief_strength": 1.45,
+		"mountain_boost": 1.80,
 		"regional_scale_multiplier": 1.0,
-		"valley_bias_strength": 1.04,
+		"valley_bias_strength": 1.18,
 		"pass_corridor_strength": 0.0,
 	}
 	profile_data["review_only"] = true
@@ -64,9 +64,9 @@ static func _compressed_scale() -> Dictionary:
 	profile_data["description"] = "Review-only profile that compresses sampled landform frequency so variation appears over shorter travel distance."
 	profile_data["settings"] = {
 		"macro_relief_scale": 1.0,
-		"kernel_relief_strength": 1.10,
-		"mountain_boost": 1.08,
-		"regional_scale_multiplier": 0.70,
+		"kernel_relief_strength": 1.25,
+		"mountain_boost": 1.18,
+		"regional_scale_multiplier": 0.45,
 		"valley_bias_strength": 1.0,
 		"pass_corridor_strength": 0.0,
 	}

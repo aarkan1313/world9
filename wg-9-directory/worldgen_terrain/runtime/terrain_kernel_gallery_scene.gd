@@ -335,8 +335,11 @@ func _add_camera() -> void:
 	var view_width: float = float(min(gallery_columns, selected_sites.size())) * (display_tile_size_m + display_gap_m)
 	var view_depth: float = float(max(1, rows)) * (display_tile_size_m + display_gap_m)
 	var distance: float = max(view_width, view_depth) * 1.05
-	camera.position = Vector3(0.0, distance * 0.78, center_z + distance * 0.72)
-	camera.look_at(Vector3(0.0, 0.0, center_z), Vector3.UP)
 	camera.far = max(10000.0, distance * 4.0)
 	camera.current = true
 	add_child(camera)
+	camera.look_at_from_position(
+		Vector3(0.0, distance * 0.78, center_z + distance * 0.72),
+		Vector3(0.0, 0.0, center_z),
+		Vector3.UP
+	)

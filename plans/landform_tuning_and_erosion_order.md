@@ -44,10 +44,12 @@ pass_corridor_strength, disabled by default
 ```
 
 `balanced_current` is the neutral default and is gated to match unprofiled
-terrain. `strong_mountains` raises macro/kernel relief with extra boost for
-mountain, glacial, and volcanic families. `compressed_scale` samples macro and
-kernel terrain at a shorter effective world scale while leaving region IDs and
-family selection anchored to the normal world grid.
+terrain. `strong_mountains` is now intentionally high-contrast for review: it
+raises macro/kernel relief with extra boost for mountain, glacial, and volcanic
+families so profile switching is visually obvious before final art/textures.
+`compressed_scale` samples macro and kernel terrain at a shorter effective
+world scale while leaving region IDs and family selection anchored to the normal
+world grid.
 
 Review profiles are opt-in. The native prepared-grid/chunk payload path now
 receives the same base-relief profile parameters as the GDScript provider, so
@@ -83,6 +85,7 @@ large landforms are visible at walk/tour scale
 compressed-scale profile shows more variation per travel distance
 terrain does not become noisy, stamped, or obviously tiled
 no new chunk/clipmap seams appear
+no center blank/black square appears while switching profile/site or flying fast
 ```
 
 Current proof:

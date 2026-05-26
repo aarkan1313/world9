@@ -94,8 +94,8 @@ static func _walk_review_profile() -> Dictionary:
 			"fast_multiplier": 60.0,
 			"slow_multiplier": 0.25,
 			"max_native_chunk_workers": 6,
-			"review_sync_hole_fill_radius_chunks": 0,
-			"review_sync_hole_fill_max_chunks_per_frame": 0,
+			"review_sync_hole_fill_radius_chunks": 1,
+			"review_sync_hole_fill_max_chunks_per_frame": 2,
 			"use_lod_mesh_density": false,
 			"use_mesh_skirts": false,
 			"mesh_skirt_depth_m": 48.0,
@@ -167,8 +167,8 @@ static func _high_density_257_review_profile() -> Dictionary:
 		"preload_active_chunk_limit": 0,
 		"max_native_chunk_workers": 4,
 		"prefetch_forward_chunks": 0,
-		"review_sync_hole_fill_radius_chunks": 0,
-		"review_sync_hole_fill_max_chunks_per_frame": 0,
+		"review_sync_hole_fill_radius_chunks": 1,
+		"review_sync_hole_fill_max_chunks_per_frame": 1,
 	}, true)
 	profile_data["settings"] = settings
 	profile_data["budgets"] = {
