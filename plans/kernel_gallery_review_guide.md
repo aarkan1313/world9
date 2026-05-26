@@ -11,6 +11,7 @@ as a compact grid so the current kernel range can be inspected in one place.
 
 ```text
 res://worldgen_terrain/scenes/terrain_kernel_gallery.tscn
+res://worldgen_terrain/scenes/terrain_mountain_kernel_gallery.tscn
 ```
 
 The scene builds one small colored terrain tile per selected kernel. The current
@@ -30,6 +31,12 @@ sampled from the real world provider, but each tile is vertically centered and
 scaled so one high mountain kernel does not make nearby lower-relief kernels
 unreadable.
 
+The mountain gallery is the same review tool with `family_filter = "mountain"`
+and multiple variants per kernel. It is meant to answer a different question:
+whether mountain kernels are being selected as distinct runtime sources and
+whether repeated use of a kernel appears transformed by world-region placement
+rather than stamped identically.
+
 ## Generated Review Artifacts
 
 ```text
@@ -45,6 +52,7 @@ index inclusion.
 
 ```text
 python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_kernel_gallery_scene_check.gd
+python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_mountain_kernel_gallery_scene_check.gd
 python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_kernel_gallery_contact_sheet_check.gd
 ```
 
@@ -56,6 +64,7 @@ Current contract:
 at least 8 families
 at least 5 palettes
 0 missing kernel IDs
+mountain gallery: at least 4 mountain kernels and more tiles than unique kernels
 ```
 
 ## Review Use

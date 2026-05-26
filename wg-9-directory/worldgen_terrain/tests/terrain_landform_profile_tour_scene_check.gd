@@ -28,7 +28,10 @@ func _init() -> void:
 	scene.visible_radius_chunks = 1
 	scene.build_budget_per_frame = 9
 	scene.preload_active_chunks_before_start = true
-	scene.use_far_clipmap = false
+	scene.use_far_clipmap = true
+	scene.far_clipmap_level_count = 2
+	scene.far_clipmap_rebuild_levels_per_update = 2
+	scene.use_far_clipmap_native_workers = true
 	get_root().add_child(scene)
 	if not scene.setup():
 		errors.append("setup_failed:%s" % str(scene.errors))
@@ -41,6 +44,14 @@ func _init() -> void:
 		errors.append("site_count:%d" % int(report.get("review_site_count", 0)))
 	if str(report.get("active_profile", "")) != TerrainLandformProfileScript.BALANCED_CURRENT:
 		errors.append("initial_profile:%s" % str(report.get("active_profile", "")))
+	var v_event := InputEventKey.new()
+	v_event.keycode = KEY_V
+	v_event.pressed = true
+	scene._unhandled_input(v_event)
+	var event_report: Dictionary = scene.profile_tour_report()
+	if str(event_report.get("active_profile", "")) != TerrainLandformProfileScript.STRONG_MOUNTAINS:
+		errors.append("v_profile:%s" % str(event_report.get("active_profile", "")))
+	scene.cycle_landform_profile(-1)
 	scene.cycle_landform_profile(1)
 	var strong_report: Dictionary = scene.profile_tour_report()
 	if str(strong_report.get("active_profile", "")) != TerrainLandformProfileScript.STRONG_MOUNTAINS:

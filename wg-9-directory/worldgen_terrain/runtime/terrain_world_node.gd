@@ -115,7 +115,7 @@ func apply_debug_mode(mode: String) -> void:
 	if world != null:
 		world.set_debug_mode(mode)
 	if not _can_use_native_chunk_workers():
-		_clear_native_chunk_workers()
+		_clear_native_chunk_workers(true)
 	if _mode_requires_vertex_rebuild(previous_mode) or _mode_requires_vertex_rebuild(mode):
 		_rebuild_existing_chunk_meshes()
 	refresh_debug_materials()
@@ -131,13 +131,13 @@ func apply_landform_profile(profile: Variant) -> bool:
 		return false
 	var ok: bool = bool(world.call("apply_landform_profile", profile))
 	if ok:
-		_clear_native_chunk_workers()
+		_clear_native_chunk_workers(true)
 		_rebuild_existing_chunk_meshes()
 	return ok
 
 
 func clear_native_worker_backlog_for_preview() -> void:
-	_clear_native_chunk_workers()
+	_clear_native_chunk_workers(true)
 
 
 func rebuild_all_active_for_preview(max_chunks: int = 0) -> int:

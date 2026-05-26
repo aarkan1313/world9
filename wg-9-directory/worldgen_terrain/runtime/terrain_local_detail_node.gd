@@ -56,11 +56,11 @@ var _last_material_state_key: String = ""
 func _exit_tree() -> void:
 	_clear_native_workers(true)
 	TerrainNativeChunkPayloadWorkerScript.cleanup_detached_workers(0, true, 5000)
-	clear_patches()
+	clear_patches(true)
 
 
 func setup(p_world: RefCounted) -> bool:
-	clear_patches()
+	clear_patches(true)
 	errors.clear()
 	world = p_world
 	if world == null:
@@ -139,7 +139,7 @@ func settings() -> Dictionary:
 	)
 
 
-func clear_patches() -> void:
+func clear_patches(wait_for_running: bool = false) -> void:
 	for node_value in patch_nodes.values():
 		var mesh_instance: MeshInstance3D = node_value as MeshInstance3D
 		if mesh_instance != null:
@@ -147,7 +147,7 @@ func clear_patches() -> void:
 	patch_nodes.clear()
 	patch_heightfields.clear()
 	_clear_collision_bodies()
-	_clear_native_workers()
+	_clear_native_workers(wait_for_running)
 	_recent_build_ms.clear()
 	_recent_patch_assign_ms.clear()
 	_total_builds = 0

@@ -10,6 +10,8 @@ const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_worl
 @export_range(4, 32, 1) var scan_radius_regions: int = 18
 @export_range(33, 129, 16) var vertices_per_tile_side: int = 65
 @export_range(2, 12, 1) var gallery_columns: int = 6
+@export var family_filter: String = ""
+@export_range(1, 4, 1) var variants_per_kernel: int = 1
 @export var sample_span_m: float = TerrainSettingsScript.REGION_SIZE_M * 0.42
 @export var display_tile_size_m: float = 320.0
 @export var display_gap_m: float = 90.0
@@ -72,6 +74,8 @@ func gallery_report() -> Dictionary:
 		palettes[str(site.get("palette", ""))] = true
 	return {
 		"status": "pass" if errors.is_empty() else "fail",
+		"family_filter": family_filter,
+		"variants_per_kernel": variants_per_kernel,
 		"tile_count": selected_sites.size(),
 		"unique_kernel_count": kernels.size(),
 		"unique_family_count": families.size(),
@@ -87,7 +91,7 @@ func _select_kernel_sites() -> Array[Dictionary]:
 	for kernel_value in world.runtime_pack.kernels:
 		var kernel: Dictionary = kernel_value as Dictionary
 		var kernel_id: String = str(kernel.get("id", ""))
-		if not kernel_id.is_empty():
+		if not kernel_id.is_empty() and _kernel_family_matches(kernel):
 			expected_kernel_ids[kernel_id] = true
 
 	var candidates_by_kernel: Dictionary = {}
@@ -98,8 +102,8 @@ func _select_kernel_sites() -> Array[Dictionary]:
 			var center := Vector2((float(rx) + 0.5) * region_size, (float(rz) + 0.5) * region_size)
 			var sample: Dictionary = world.sample(center.x, center.y)
 			var palette: Dictionary = world.provider.decisions.region_info(rx, rz, world.seed)
-			_add_kernel_candidate(candidates_by_kernel, used_region_keys, rx, rz, center, sample, palette, str(sample.get("kernel_a", "")), "a")
-			_add_kernel_candidate(candidates_by_kernel, used_region_keys, rx, rz, center, sample, palette, str(sample.get("kernel_b", "")), "b")
+			_add_kernel_candidate(candidates_by_kernel, expected_kernel_ids, used_region_keys, rx, rz, center, sample, palette, str(sample.get("kernel_a", "")), "a")
+			_add_kernel_candidate(candidates_by_kernel, expected_kernel_ids, used_region_keys, rx, rz, center, sample, palette, str(sample.get("kernel_b", "")), "b")
 
 	var selected: Array[Dictionary] = []
 	var sorted_kernel_ids: Array = expected_kernel_ids.keys()
@@ -121,14 +125,29 @@ func _select_kernel_sites() -> Array[Dictionary]:
 				return ar.y < br.y
 			return ar.x < br.x
 		)
-		selected.append(candidates[0] as Dictionary)
-	if selected.size() < min(target_tile_count, expected_kernel_ids.size()):
-		errors.append("kernel_gallery_tile_count:%d expected:%d" % [selected.size(), min(target_tile_count, expected_kernel_ids.size())])
+		var variant_limit: int = min(max(1, variants_per_kernel), candidates.size())
+		for variant_index in range(variant_limit):
+			if selected.size() >= target_tile_count:
+				break
+			selected.append(candidates[variant_index] as Dictionary)
+	if selected.size() < min(target_tile_count, expected_kernel_ids.size() * max(1, variants_per_kernel)):
+		errors.append("kernel_gallery_tile_count:%d expected:%d filter:%s" % [
+			selected.size(),
+			min(target_tile_count, expected_kernel_ids.size() * max(1, variants_per_kernel)),
+			family_filter,
+		])
 	return selected
+
+
+func _kernel_family_matches(kernel: Dictionary) -> bool:
+	if family_filter.strip_edges().is_empty():
+		return true
+	return str(kernel.get("family", "")) == family_filter
 
 
 func _add_kernel_candidate(
 	candidates_by_kernel: Dictionary,
+	expected_kernel_ids: Dictionary,
 	used_region_keys: Dictionary,
 	rx: int,
 	rz: int,
@@ -139,6 +158,8 @@ func _add_kernel_candidate(
 	slot: String
 ) -> void:
 	if kernel_id.is_empty():
+		return
+	if not expected_kernel_ids.has(kernel_id):
 		return
 	var region_key := "%d,%d:%s" % [rx, rz, slot]
 	if used_region_keys.has(region_key):

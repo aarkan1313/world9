@@ -83,7 +83,7 @@ func _exit_tree() -> void:
 
 
 func setup(p_world: RefCounted) -> bool:
-	clear_levels()
+	clear_levels(true)
 	world = p_world
 	if world == null:
 		return false
@@ -109,8 +109,8 @@ func setup(p_world: RefCounted) -> bool:
 	return true
 
 
-func clear_levels() -> void:
-	_clear_native_workers()
+func clear_levels(wait_for_running: bool = false) -> void:
+	_clear_native_workers(wait_for_running)
 	for child in get_children():
 		child.queue_free()
 	level_nodes.clear()
