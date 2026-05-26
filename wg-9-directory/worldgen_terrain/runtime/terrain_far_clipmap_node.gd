@@ -424,21 +424,28 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
 	var previous_height_texture: Texture2D = null
 	var previous_normal_texture: Texture2D = null
+	var previous_page_origin := origin
+	var previous_page_extent := outer_extent
 	if use_transition and previous_material != null:
 		previous_height_texture = previous_material.get_shader_parameter("height_texture") as Texture2D
 		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
+		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
+		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
 	mesh_instance.material_override = _page_height_material_for_descriptor(
 		descriptor,
 		level,
 		previous_height_texture,
 		previous_normal_texture,
-		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0
+		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0,
+		previous_page_origin,
+		previous_page_extent
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	level_origins[level] = origin
 	level_build_counts[level] = int(level_build_counts[level]) + 1
 	_set_level_geometry_counts(level, side * side, _clipmap_index_count(side, spacing, outer_extent, inner_extent))
 	_start_page_blend(level, previous_height_texture != null and use_transition)
+	_refresh_page_morph_sources()
 	_protect_active_page_keys()
 
 
@@ -466,22 +473,29 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
 	var previous_height_texture: Texture2D = null
 	var previous_normal_texture: Texture2D = null
+	var previous_page_origin := origin
+	var previous_page_extent := outer_extent
 	if use_transition and previous_material != null:
 		previous_height_texture = previous_material.get_shader_parameter("height_texture") as Texture2D
 		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
+		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
+		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
 	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, float(payload["inner_extent_m"]))
 	mesh_instance.material_override = _page_height_material_for_descriptor(
 		descriptor,
 		level,
 		previous_height_texture,
 		previous_normal_texture,
-		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0
+		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0,
+		previous_page_origin,
+		previous_page_extent
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	level_origins[level] = origin
 	level_build_counts[level] = int(level_build_counts[level]) + 1
 	_set_level_geometry_counts(level, side * side, (payload["indices"] as PackedInt32Array).size())
 	_start_page_blend(level, previous_height_texture != null and use_transition)
+	_refresh_page_morph_sources()
 	_protect_active_page_keys()
 	last_rebuilt_levels.append(level)
 
@@ -1466,10 +1480,18 @@ func _page_height_material_for_descriptor(
 	level: int,
 	previous_height_texture: Texture2D = null,
 	previous_normal_texture: Texture2D = null,
-	blend_alpha: float = 1.0
+	blend_alpha: float = 1.0,
+	previous_page_origin_m: Vector2 = Vector2(INF, INF),
+	previous_page_extent_m: float = 0.0
 ) -> ShaderMaterial:
 	var height_texture: ImageTexture = ImageTexture.create_from_image(descriptor["height_image"] as Image)
 	var normal_texture: ImageTexture = ImageTexture.create_from_image(descriptor["normal_image"] as Image)
+	var page_origin := Vector2(float(descriptor.get("origin_x", 0.0)), float(descriptor.get("origin_z", 0.0)))
+	var page_extent: float = float(descriptor.get("outer_extent_m", 0.0))
+	if not is_finite(previous_page_origin_m.x) or not is_finite(previous_page_origin_m.y):
+		previous_page_origin_m = page_origin
+	if previous_page_extent_m <= 0.0:
+		previous_page_extent_m = page_extent
 	var material := ShaderMaterial.new()
 	material.shader = _page_height_material_shader()
 	material.set_shader_parameter("height_texture", height_texture)
@@ -1479,11 +1501,72 @@ func _page_height_material_for_descriptor(
 	material.set_shader_parameter("height_blend_alpha", clampf(blend_alpha, 0.0, 1.0))
 	material.set_shader_parameter("normal_strength", surface_texture_normal_strength)
 	material.set_shader_parameter("clipmap_level", level)
+	material.set_shader_parameter("page_origin_m", page_origin)
+	material.set_shader_parameter("page_extent_m", page_extent)
+	material.set_shader_parameter("previous_page_origin_m", previous_page_origin_m)
+	material.set_shader_parameter("previous_page_extent_m", previous_page_extent_m)
+	material.set_shader_parameter("coarse_height_texture", height_texture)
+	material.set_shader_parameter("coarse_page_origin_m", page_origin)
+	material.set_shader_parameter("coarse_page_extent_m", page_extent)
+	material.set_shader_parameter("morph_enabled", false)
+	material.set_shader_parameter("morph_band_m", 0.0)
 	material.set_shader_parameter("inner_extent_m", float(descriptor.get("inner_extent_m", 0.0)))
 	material.set_shader_parameter("outer_extent_m", float(descriptor.get("outer_extent_m", 0.0)))
 	material.set_shader_parameter("boundary_blend_width_m", max(512.0, float(descriptor.get("outer_extent_m", 0.0)) * 0.035))
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
+
+
+func _refresh_page_morph_sources() -> void:
+	for level in range(level_nodes.size()):
+		var mesh_instance: MeshInstance3D = level_nodes[level] as MeshInstance3D
+		if mesh_instance == null:
+			continue
+		var material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
+		if material == null:
+			continue
+		var height_texture: Texture2D = material.get_shader_parameter("height_texture") as Texture2D
+		if height_texture == null:
+			continue
+		var page_origin := _shader_vec2_param(material, "page_origin_m", Vector2.ZERO)
+		var page_extent: float = _shader_float_param(material, "page_extent_m", _level_outer_extent(level))
+		var enabled := false
+		var coarse_texture: Texture2D = height_texture
+		var coarse_origin := page_origin
+		var coarse_extent := page_extent
+		if geometric_transition_band_cells > 0 and level + 1 < level_nodes.size():
+			var coarse_instance: MeshInstance3D = level_nodes[level + 1] as MeshInstance3D
+			var coarse_material: ShaderMaterial = coarse_instance.material_override as ShaderMaterial if coarse_instance != null else null
+			if coarse_material != null:
+				var candidate: Texture2D = coarse_material.get_shader_parameter("height_texture") as Texture2D
+				if candidate != null:
+					enabled = true
+					coarse_texture = candidate
+					coarse_origin = _shader_vec2_param(coarse_material, "page_origin_m", page_origin)
+					coarse_extent = _shader_float_param(coarse_material, "page_extent_m", page_extent)
+		material.set_shader_parameter("coarse_height_texture", coarse_texture)
+		material.set_shader_parameter("coarse_page_origin_m", coarse_origin)
+		material.set_shader_parameter("coarse_page_extent_m", coarse_extent)
+		material.set_shader_parameter("morph_enabled", enabled)
+		material.set_shader_parameter("morph_band_m", max(_level_spacing(level) * float(geometric_transition_band_cells), 1.0))
+
+
+func _shader_vec2_param(material: ShaderMaterial, name: String, fallback: Vector2) -> Vector2:
+	if material == null:
+		return fallback
+	var value: Variant = material.get_shader_parameter(name)
+	if value is Vector2:
+		return value as Vector2
+	return fallback
+
+
+func _shader_float_param(material: ShaderMaterial, name: String, fallback: float) -> float:
+	if material == null:
+		return fallback
+	var value: Variant = material.get_shader_parameter(name)
+	if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
+		return float(value)
+	return fallback
 
 
 func _material_for_level(level: int, alpha: float = 1.0) -> Material:
@@ -1686,13 +1769,22 @@ func _page_height_material_shader() -> Shader:
 shader_type spatial;
 render_mode unshaded, cull_disabled;
 
-uniform sampler2D height_texture : filter_linear;
-uniform sampler2D normal_texture : filter_linear;
-uniform sampler2D previous_height_texture : filter_linear;
-uniform sampler2D previous_normal_texture : filter_linear;
+uniform sampler2D height_texture : filter_linear, repeat_disable;
+uniform sampler2D normal_texture : filter_linear, repeat_disable;
+uniform sampler2D previous_height_texture : filter_linear, repeat_disable;
+uniform sampler2D previous_normal_texture : filter_linear, repeat_disable;
+uniform sampler2D coarse_height_texture : filter_linear, repeat_disable;
 uniform float height_blend_alpha = 1.0;
 uniform float normal_strength = 1.0;
 uniform int clipmap_level = 0;
+uniform vec2 page_origin_m = vec2(0.0, 0.0);
+uniform float page_extent_m = 1.0;
+uniform vec2 previous_page_origin_m = vec2(0.0, 0.0);
+uniform float previous_page_extent_m = 1.0;
+uniform vec2 coarse_page_origin_m = vec2(0.0, 0.0);
+uniform float coarse_page_extent_m = 1.0;
+uniform bool morph_enabled = false;
+uniform float morph_band_m = 0.0;
 uniform float inner_extent_m = 0.0;
 uniform float outer_extent_m = 0.0;
 uniform float boundary_blend_width_m = 512.0;
@@ -1704,25 +1796,60 @@ uniform bool edge_fog_square_enabled = true;
 uniform vec2 edge_fog_center_xz = vec2(0.0, 0.0);
 
 varying vec2 local_uv;
+varying vec2 current_uv;
+varying vec2 previous_uv;
+varying float previous_uv_valid;
 varying vec2 local_xz;
 varying float height_m;
 varying vec3 terrain_normal;
 varying vec3 world_position;
 
+vec2 page_uv_for_world(vec2 world_xz, vec2 origin_m, float extent_m) {
+	float diameter_m = max(extent_m * 2.0, 1e-6);
+	return (world_xz - (origin_m - vec2(extent_m))) / diameter_m;
+}
+
+float uv_valid_factor(vec2 uv) {
+	vec2 inside_min = step(vec2(0.0), uv);
+	vec2 inside_max = step(uv, vec2(1.0));
+	return inside_min.x * inside_min.y * inside_max.x * inside_max.y;
+}
+
+float sample_height_world(sampler2D tex, vec2 world_xz, vec2 origin_m, float extent_m) {
+	vec2 uv = clamp(page_uv_for_world(world_xz, origin_m, extent_m), vec2(0.0), vec2(1.0));
+	return texture(tex, uv).r;
+}
+
 void vertex() {
-	local_uv = UV;
 	local_xz = VERTEX.xz;
-	float previous_height_m = texture(previous_height_texture, UV).r;
-	float current_height_m = texture(height_texture, UV).r;
+	vec3 flat_world_position = (MODEL_MATRIX * vec4(VERTEX.x, 0.0, VERTEX.z, 1.0)).xyz;
+	vec2 world_xz = flat_world_position.xz;
+	current_uv = clamp(page_uv_for_world(world_xz, page_origin_m, page_extent_m), vec2(0.0), vec2(1.0));
+	previous_uv = clamp(page_uv_for_world(world_xz, previous_page_origin_m, previous_page_extent_m), vec2(0.0), vec2(1.0));
+	previous_uv_valid = uv_valid_factor(page_uv_for_world(world_xz, previous_page_origin_m, previous_page_extent_m));
+	local_uv = current_uv;
+	float current_height_m = texture(height_texture, current_uv).r;
+	float previous_height_m = texture(previous_height_texture, previous_uv).r;
+	previous_height_m = mix(current_height_m, previous_height_m, previous_uv_valid);
 	height_m = mix(previous_height_m, current_height_m, clamp(height_blend_alpha, 0.0, 1.0));
+	if (morph_enabled) {
+		vec2 coarse_uv_unclamped = page_uv_for_world(world_xz, coarse_page_origin_m, coarse_page_extent_m);
+		float coarse_valid = uv_valid_factor(coarse_uv_unclamped);
+		float coarse_height_m = texture(coarse_height_texture, clamp(coarse_uv_unclamped, vec2(0.0), vec2(1.0))).r;
+		float square_radius_m = max(abs(world_xz.x - page_origin_m.x), abs(world_xz.y - page_origin_m.y));
+		float distance_to_outer_m = max(0.0, page_extent_m - square_radius_m);
+		float morph_t = 1.0 - smoothstep(0.0, max(1.0, morph_band_m), distance_to_outer_m);
+		height_m = mix(height_m, coarse_height_m, morph_t * coarse_valid);
+	}
 	VERTEX.y = height_m;
 	terrain_normal = NORMAL;
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
-	vec3 previous_n = normalize(texture(previous_normal_texture, local_uv).rgb * 2.0 - 1.0);
-	vec3 current_n = normalize(texture(normal_texture, local_uv).rgb * 2.0 - 1.0);
+	vec3 previous_n = normalize(texture(previous_normal_texture, previous_uv).rgb * 2.0 - 1.0);
+	vec3 current_n = normalize(texture(normal_texture, current_uv).rgb * 2.0 - 1.0);
+	previous_n = normalize(mix(current_n, previous_n, previous_uv_valid));
 	vec3 n = normalize(mix(previous_n, current_n, clamp(height_blend_alpha, 0.0, 1.0)));
 	if (n.y < 0.0) {
 		n = -n;

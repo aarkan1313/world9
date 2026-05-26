@@ -121,6 +121,7 @@ func _start() -> void:
 	if scene.use_far_clipmap_native_workers:
 		errors.append("walk_review_page_clipmap_should_not_use_mesh_workers")
 	_check_far_fog_center_tracks_viewer(scene, errors)
+	_check_page_clipmap_shader_contract(scene, errors)
 	_check_lod_mesh_counts(scene, errors)
 	scene.queue_free()
 	if not errors.is_empty():
@@ -212,6 +213,45 @@ func _check_far_fog_center_tracks_viewer(scene: Node3D, errors: Array[String]) -
 		errors.append("far_fog_center_not_tracking_viewer:%.3f" % fog_center_after.distance_to(scene.viewer_position_xz))
 	if fog_center_after.distance_to(fog_center_before) < 1.0:
 		errors.append("far_fog_center_did_not_move_smoothly:%.3f" % fog_center_after.distance_to(fog_center_before))
+
+
+func _check_page_clipmap_shader_contract(scene: Node3D, errors: Array[String]) -> void:
+	if scene.far_clipmap == null:
+		errors.append("page_shader_far_clipmap_missing")
+		return
+	if scene.far_clipmap.level_nodes.size() < 2:
+		errors.append("page_shader_not_enough_levels:%d" % scene.far_clipmap.level_nodes.size())
+		return
+	var level0: MeshInstance3D = scene.far_clipmap.level_nodes[0] as MeshInstance3D
+	var level1: MeshInstance3D = scene.far_clipmap.level_nodes[1] as MeshInstance3D
+	var material0: ShaderMaterial = level0.material_override as ShaderMaterial
+	var material1: ShaderMaterial = level1.material_override as ShaderMaterial
+	if material0 == null or material1 == null:
+		errors.append("page_shader_material_missing")
+		return
+	var height_texture0: Texture2D = material0.get_shader_parameter("height_texture") as Texture2D
+	var height_texture1: Texture2D = material1.get_shader_parameter("height_texture") as Texture2D
+	var coarse_texture: Texture2D = material0.get_shader_parameter("coarse_height_texture") as Texture2D
+	if height_texture0 == null or height_texture1 == null:
+		errors.append("page_shader_height_texture_missing")
+	if coarse_texture == null:
+		errors.append("page_shader_coarse_texture_missing")
+	elif coarse_texture != height_texture1:
+		errors.append("page_shader_coarse_texture_not_next_level")
+	if not bool(material0.get_shader_parameter("morph_enabled")):
+		errors.append("page_shader_morph_disabled")
+	var page_origin: Vector2 = material0.get_shader_parameter("page_origin_m") as Vector2
+	var previous_origin: Vector2 = material0.get_shader_parameter("previous_page_origin_m") as Vector2
+	if page_origin.distance_to(scene.far_clipmap.level_origins[0] as Vector2) > 0.001:
+		errors.append("page_shader_origin_mismatch:%s" % str(page_origin))
+	if not is_finite(previous_origin.x) or not is_finite(previous_origin.y):
+		errors.append("page_shader_previous_origin_invalid:%s" % str(previous_origin))
+	if float(material0.get_shader_parameter("page_extent_m")) <= 0.0:
+		errors.append("page_shader_extent_invalid")
+	if float(material0.get_shader_parameter("previous_page_extent_m")) <= 0.0:
+		errors.append("page_shader_previous_extent_invalid")
+	if float(material0.get_shader_parameter("morph_band_m")) <= 0.0:
+		errors.append("page_shader_morph_band_invalid")
 
 
 func _check_review_site_diversity(scene: Node3D, errors: Array[String]) -> void:
