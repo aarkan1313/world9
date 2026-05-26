@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://worldgen_terrain/runtime/terrain_kernel_gallery_scene.gd" id="1_kernel_gallery"]
+
+[node name="TerrainKernelGallery" type="Node3D"]
+script = ExtResource("1_kernel_gallery")
+seed = 1337
+target_tile_count = 36
+scan_radius_regions = 18
+vertices_per_tile_side = 65
+gallery_columns = 6
+sample_span_m = 3440.64
+display_tile_size_m = 320.0
+display_gap_m = 90.0
+vertical_scale = 0.045
+label_height_m = 48.0

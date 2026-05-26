@@ -88,6 +88,8 @@ EXTENDED_HEADLESS_CHECKS = FAST_HEADLESS_CHECKS + [
 
 QUALITY_HEADLESS_CHECKS = [
     "terrain_worldgen_capability_check.gd",
+    "terrain_kernel_gallery_scene_check.gd",
+    "terrain_kernel_gallery_contact_sheet_check.gd",
     "terrain_landform_quality_probe_check.gd",
     "terrain_hydrology_consistency_check.gd",
     "terrain_hydrology_tile_cache_check.gd",

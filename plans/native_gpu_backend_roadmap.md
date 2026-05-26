@@ -102,7 +102,8 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.
-65. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
+65. [x] Add a compact kernel-gallery review scene and headless contact-sheet gate proving all current runtime kernel IDs are selectable as live provider terrain.
+66. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 
 ## First Backend Shape
 
@@ -211,7 +212,7 @@ walk chunk-boundary recenter: first edge crossing keeps far rings stable; larger
 rapid far recenter: boundary ping-pong keeps counts unchanged; rapid larger recenter while level 0 is in flight defers instead of synchronously rebuilding, then all levels finish at the newest origin
 fast Godot runtime gate: 19 checks, pass on the current machine, including the quality-profile, visibility-contract, elevation-color material, GPU page residency, walk motion/recenter profile, and forward-prefetch residency gates
 extended Godot runtime gate: 33 checks, pass on the current machine
-quality Godot runtime gate: 8 checks, including the worldgen capability proof
+quality Godot runtime gate: 10 checks, including the worldgen capability and kernel-gallery proofs
 walk motion profile: high-speed forward profile writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass proves recenter/page-blend coverage, and the first near-residency optimization slice now prefetches the next movement-biased chunk row
 forward-prefetch residency: the walk profile keeps 49 base chunks plus one movement-biased overlap row resident after motion is known, with the fast gate proving 56 cardinal-forward chunks after workers drain
 startup prefetch residency: walk setup now preloads the initial camera-forward row; the motion profile reports base-window misses separately from still-building optional prefetch rows
@@ -224,11 +225,12 @@ persistent page descriptor reuse: returning to an already GPU-resident far page 
 walk motion GPU page budget: the motion profile now fails if far page GPU uploads exceed the level-set budget or if the residency cache evicts pages during the profile
 elevation-color review: near chunks and far clipmap shaders can use the same dark-low/rainbow-mid/white-high height ramp; gray remains available for old review captures
 worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samples 12 diverse region sites and reports 6 palettes, 9 families, 20 unique kernels, with DEM-kernel relief active at all sites
+kernel gallery proof: `terrain_kernel_gallery.tscn` builds a compact review grid from real provider-sampled world sites; `terrain_kernel_gallery_contact_sheet_check.gd` writes `factory/runtime/godot_kernel_gallery/kernel_gallery_contact_sheet.png` and currently finds all 36 runtime kernel IDs with 0 missing IDs
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up
 local-detail quality profile: `local_detail_review` is an opt-in review-only profile that starts from `walk_review`, enables one native-worker 1m local-detail patch, turns on the texture material plus bounded visual displacement, keeps collision bodies off, and is validated by the quality-profile gate
 local-detail review budgets: the streaming local-detail surface perf gate now reads patch assign, surface texture, parameter refresh, displacement-toggle, move-update, and drain-frame budgets from `local_detail_review`
 high-density review profile: `high_density_257_review` is an opt-in review-only profile for 257v / 2m near chunks; the 257 walk perf probe now reads its settings and budgets instead of carrying private constants
-quality Godot runtime gate: 8 checks, pass on the current machine; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
+quality Godot runtime gate: 10 checks, pass on the current machine; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
 render Godot runtime gate: 6 non-headless capture checks, pass in ~17.5s on the current machine; static preview capture uses native/fast-gray chunk payloads where possible, and locked render artifacts avoid volatile diagnostic overlay text
 review Godot runtime gate: 4 non-headless contact-sheet checks, pass in ~32.2s on the current machine; release gate remains pass after repeated review runs
 Godot review index: deterministic HTML/JSON index locked in the runtime artifact manifest; runtime readiness checks schema, section order, required review files, and PNG dimensions

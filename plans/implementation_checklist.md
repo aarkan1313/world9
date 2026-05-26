@@ -122,6 +122,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Reuse persistent far page shader materials across page commits, updating textures/params in place while preserving previous/current height-page blend sources.
 - [x] Skip persistent far page descriptor image rebuilds when the target page already has GPU-resident height/normal textures.
 - [x] Add motion-profile hard budgets for far page GPU uploads and evictions so page residency regressions fail before they become visible stutter.
+- [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.
