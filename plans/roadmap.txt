@@ -54,6 +54,8 @@ startup residency: the walk preview seeds stream priority from the initial camer
 worldgen capability proof: `terrain_worldgen_capability_check.gd` samples 12 diverse region sites and currently reports 6 palettes, 9 families, 20 unique kernels, and DEM-kernel relief active at all 12 sites
 kernel gallery review: `terrain_kernel_gallery.tscn` lays 36 real provider-sampled kernel sites into a compact review grid without changing production region/biome scale; the headless contact-sheet gate currently finds all 36 runtime kernel IDs
 kernel tour review: `terrain_kernel_tour.tscn` uses the normal walk-preview streaming stack from a higher overview camera and advances through diverse selected kernel sites for live visual review
+landform tuning next: add review-only landform profiles for current balance, stronger mountains, and compressed world scale before changing defaults; see `plans/landform_tuning_and_erosion_order.md`
+erosion position: erosion comes after accepted base relief/scale, kernel influence tuning, useful hydrology hints, and first river/pass routing facts; it should be cached/world-fact shaping, not per-frame chunk simulation
 LOD transition continuity: mixed-density shared edge samples are machine-checked at zero height/XZ delta; fine chunk edge bands now morph toward coarser neighbor sampling while inner samples stay raw
 far terrain: visual clipmap rings with a level-0 overlap band below authoritative chunk edges
 far clipmap continuity: levels share one base-snapped origin, with zero tested fine/coarse transition height deltas
@@ -207,7 +209,8 @@ Immediate roadmap order from here:
    stable page geometry, previous/current height pages, coarse/fine morph.
 7. Move far clipmap pages toward GPU residency behind the same provider/page
    contract after the CPU/native facts remain stable.
-8. Add biome/material masks only after height clipmap motion is accepted.
+8. Add landform tuning profiles for scale/relief and kernel influence before changing defaults.
+9. Add biome/material masks only after height clipmap motion and base landform scale are accepted.
 ```
 
 Explicitly out of scope until those pass:
@@ -225,6 +228,7 @@ The next useful output is not another subsystem. It is:
 plain gray infinite terrain
 larger contiguous readable landforms
 DEM-derived terrain character
+landform tuning profiles for scale/relief
 strict seam/determinism checks
 debug screenshots that prove the surface is improving
 ```

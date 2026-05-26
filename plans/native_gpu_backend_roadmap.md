@@ -104,7 +104,10 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.
 65. [x] Add a compact kernel-gallery review scene and headless contact-sheet gate proving all current runtime kernel IDs are selectable as live provider terrain.
 66. [x] Add a high-camera live kernel-tour scene that advances through diverse selected kernel sites using the normal walk-preview streaming stack.
-67. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
+67. [x] Capture the landform tuning and erosion-order plan before changing generator defaults.
+68. [ ] Add review-only landform tuning profiles for scale/relief/kernel influence before changing defaults.
+69. [ ] Add same-site landform profile comparison metrics and review artifacts.
+70. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 
 ## First Backend Shape
 
@@ -227,6 +230,8 @@ walk motion GPU page budget: the motion profile now fails if far page GPU upload
 elevation-color review: near chunks and far clipmap shaders can use the same dark-low/rainbow-mid/white-high height ramp; gray remains available for old review captures
 worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samples 12 diverse region sites and reports 6 palettes, 9 families, 20 unique kernels, with DEM-kernel relief active at all sites
 kernel gallery/tour proof: `terrain_kernel_gallery.tscn` builds a compact review grid from real provider-sampled world sites; `terrain_kernel_gallery_contact_sheet_check.gd` writes `factory/runtime/godot_kernel_gallery/kernel_gallery_contact_sheet.png` and currently finds all 36 runtime kernel IDs with 0 missing IDs. `terrain_kernel_tour.tscn` uses the normal walk-preview streaming stack from a high camera and advances through diverse selected kernel sites for live review
+
+landform tuning next: `plans/landform_tuning_and_erosion_order.md` captures the next generator slice. The next implementation should add review-only landform profiles for current balance, stronger mountains, and compressed scale. Erosion remains later: after base relief/scale, kernel influence, hydrology hints, and first river/pass routing facts are stable
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up
 local-detail quality profile: `local_detail_review` is an opt-in review-only profile that starts from `walk_review`, enables one native-worker 1m local-detail patch, turns on the texture material plus bounded visual displacement, keeps collision bodies off, and is validated by the quality-profile gate
 local-detail review budgets: the streaming local-detail surface perf gate now reads patch assign, surface texture, parameter refresh, displacement-toggle, move-update, and drain-frame budgets from `local_detail_review`

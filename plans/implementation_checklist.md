@@ -124,6 +124,11 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add motion-profile hard budgets for far page GPU uploads and evictions so page residency regressions fail before they become visible stutter.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Add high-camera kernel-tour review scene that advances through diverse selected kernel sites using the normal walk-preview streaming stack.
+- [x] Add landform tuning and erosion-order plan at `plans/landform_tuning_and_erosion_order.md`.
+- [ ] Add review-only landform tuning profiles for current balance, stronger mountains, and compressed scale before changing defaults.
+- [ ] Add same-site profile comparison probe/contact sheet/tour with height-range, p05/p95 relief, slope, local-relief, kernel-contribution, and seam checks.
+- [ ] Add deterministic pass/corridor world-fact placeholder after base scale/relief profiles are measurable.
+- [ ] Keep erosion after accepted base relief/scale, kernel influence tuning, useful hydrology hints, and first river/pass routing facts.
 - [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.
