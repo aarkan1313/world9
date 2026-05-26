@@ -273,7 +273,7 @@ func apply_landform_profile(profile_id: String, rebuild_existing: bool = true) -
 		return true
 	var applied := false
 	if terrain.has_method("apply_landform_profile"):
-		applied = bool(terrain.call("apply_landform_profile", profile_id))
+		applied = bool(terrain.call("apply_landform_profile", profile_id, rebuild_existing))
 	elif terrain.world.has_method("apply_landform_profile"):
 		applied = bool(terrain.world.call("apply_landform_profile", profile_id))
 	if not applied:
@@ -281,7 +281,7 @@ func apply_landform_profile(profile_id: String, rebuild_existing: bool = true) -
 	if rebuild_existing:
 		if terrain.has_method("clear_native_worker_backlog_for_preview"):
 			terrain.call("clear_native_worker_backlog_for_preview")
-		if terrain.has_method("rebuild_all_active_for_preview"):
+		if not terrain.has_method("apply_landform_profile") and terrain.has_method("rebuild_all_active_for_preview"):
 			terrain.call("rebuild_all_active_for_preview", 0)
 		if far_clipmap != null:
 			if not far_clipmap.setup(terrain.world):
@@ -292,6 +292,13 @@ func apply_landform_profile(profile_id: String, rebuild_existing: bool = true) -
 			local_detail.clear_patches()
 		_update_camera()
 		_update_diagnostics()
+	else:
+		if far_clipmap != null:
+			if not far_clipmap.setup(terrain.world):
+				errors.append("far_clipmap_profile_queue_failed:%s" % profile_id)
+				return false
+		if local_detail != null:
+			local_detail.clear_patches(true)
 	return true
 
 

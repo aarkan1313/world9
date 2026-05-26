@@ -126,13 +126,16 @@ func set_stream_priority_direction(direction: Vector2) -> void:
 		world.call("set_stream_priority_direction", direction)
 
 
-func apply_landform_profile(profile: Variant) -> bool:
+func apply_landform_profile(profile: Variant, rebuild_existing: bool = true) -> bool:
 	if world == null or not world.has_method("apply_landform_profile"):
 		return false
 	var ok: bool = bool(world.call("apply_landform_profile", profile))
 	if ok:
 		_clear_native_chunk_workers(true)
-		_rebuild_existing_chunk_meshes()
+		if rebuild_existing:
+			_rebuild_existing_chunk_meshes()
+		else:
+			_queue_active_chunks_for_rebuild()
 	return ok
 
 
@@ -1258,6 +1261,17 @@ func _rebuild_existing_chunk_meshes() -> void:
 		var ring: int = int(mesh_instance.get_meta("ring"))
 		var lod: int = int(mesh_instance.get_meta("lod"))
 		mesh_instance.mesh = _build_chunk_mesh(chunk_x, chunk_z, ring, lod)
+
+
+func _queue_active_chunks_for_rebuild() -> void:
+	if world == null or world.streamer == null or last_report.is_empty():
+		return
+	for item_value in last_report.get("active_chunks", []) as Array:
+		var item: Dictionary = item_value as Dictionary
+		var key: String = _chunk_key(int(item.get("chunk_x", 0)), int(item.get("chunk_z", 0)))
+		_remove_queued_native_worker_for_key(key)
+		if not world.streamer.queued_builds.has(key):
+			world.streamer.queued_builds.append(key)
 
 
 func _fast_gray_material() -> ShaderMaterial:

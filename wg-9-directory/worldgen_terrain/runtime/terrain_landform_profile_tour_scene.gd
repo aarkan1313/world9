@@ -56,7 +56,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func cycle_landform_profile(direction: int) -> void:
 	var previous_index: int = landform_profile_index
-	_apply_landform_profile_index(direction, true)
+	_apply_landform_profile_index(direction, false)
 	if advance_site_after_profile_cycle and direction > 0 and landform_profile_index == 0 and previous_index != 0:
 		jump_review_site(1)
 
