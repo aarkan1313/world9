@@ -33,6 +33,7 @@ An opt-in review profile also exists:
 
 ```text
 local_detail_review
+high_density_257_review
 ```
 
 It is defined in:
@@ -167,6 +168,27 @@ surface texture, parameter refresh, displacement-toggle texture, move-update,
 and drain-frame limits. Local-detail review settings and the gate that protects
 them should move together.
 
+## High Density 257 Review Profile
+
+`high_density_257_review` is review-only and does not change the default walk
+scene. It starts from `walk_review`, then switches the near chunk density to:
+
+```text
+near vertices: 257 x 257
+near spacing: 2m on 512m chunks
+near window: 7x7 chunks
+build budget: 2 chunks per frame
+preload before start: off
+native chunk workers: 4
+forward prefetch: off
+```
+
+The profile owns the 257v probe budgets consumed by
+`terrain_walk_preview_257_perf_probe_check.gd`: setup time, queue drain steps,
+average native chunk build time, native payload time, and small-move update
+time. This keeps high-density review measurable without quietly promoting it to
+the normal walk-review profile.
+
 ## Roadmap Use
 
 When the distant edge, motion profile, or residency budget needs tuning, change
@@ -177,7 +199,7 @@ Next profile work:
 
 ```text
 1. Add profile-specific motion thresholds now that the first fast-flight residency policy is gated.
-2. Add a dedicated high-density/257v profile only after local-detail visual review is accepted.
+2. Add human-review acceptance notes for `local_detail_review` and `high_density_257_review` before either influences defaults.
 3. Move far page generation/upload toward GPU compute or lower-churn native texture upload after visual review remains stable.
 4. Add optional profile tiers for high-density/257v review, review-only far radius, and hidden-edge buffer tuning.
 ```

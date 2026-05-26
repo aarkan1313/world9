@@ -1,12 +1,13 @@
 extends SceneTree
 
 const TerrainWalkPreviewSceneScript := preload("res://worldgen_terrain/runtime/terrain_walk_preview_scene.gd")
+const TerrainQualityProfileScript := preload("res://worldgen_terrain/core/terrain_quality_profile.gd")
 
-const MAX_DRAIN_STEPS := 260
-const MAX_SETUP_MS := 800
-const MAX_AVG_BUILD_MS := 90.0
-const MAX_NATIVE_PAYLOAD_MS := 140.0
-const MAX_MOVE_STEP_MS := 20
+var max_drain_steps: int = 260
+var max_setup_ms: int = 800
+var max_avg_build_ms: float = 90.0
+var max_native_payload_ms: float = 140.0
+var max_move_step_ms: int = 20
 
 
 func _init() -> void:
@@ -15,13 +16,13 @@ func _init() -> void:
 
 func _start() -> void:
 	var errors: Array[String] = []
+	var profile: Dictionary = TerrainQualityProfileScript.profile(TerrainQualityProfileScript.HIGH_DENSITY_257_REVIEW)
+	_apply_profile_budgets(profile)
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
-	scene.vertices_per_side = 257
-	scene.visible_radius_chunks = 3
-	scene.build_budget_per_frame = 2
-	scene.max_native_chunk_workers = 2
+	scene.quality_profile_id = TerrainQualityProfileScript.HIGH_DENSITY_257_REVIEW
+	TerrainQualityProfileScript.apply_to_node(scene, profile)
 	get_root().add_child(scene)
 
 	var start_ms: int = Time.get_ticks_msec()
@@ -49,14 +50,17 @@ func _start() -> void:
 	var max_build_ms: int = int(stats.get("max_recent_chunk_build_ms", 0))
 	var native_payload_ms: float = float(stats.get("last_native_chunk_payload_ms", 0.0))
 	var max_move_ms: int = _max_int(move_ms)
-	if setup_ms > MAX_SETUP_MS:
-		errors.append("setup_ms:%d limit:%d" % [setup_ms, MAX_SETUP_MS])
-	if avg_build_ms > MAX_AVG_BUILD_MS:
-		errors.append("avg_build_ms:%.1f limit:%.1f" % [avg_build_ms, MAX_AVG_BUILD_MS])
-	if native_payload_ms > MAX_NATIVE_PAYLOAD_MS:
-		errors.append("native_payload_ms:%.1f limit:%.1f" % [native_payload_ms, MAX_NATIVE_PAYLOAD_MS])
-	if max_move_ms > MAX_MOVE_STEP_MS:
-		errors.append("max_move_ms:%d limit:%d" % [max_move_ms, MAX_MOVE_STEP_MS])
+	var profile_report: Dictionary = scene.quality_profile_report()
+	if profile_report.get("status", "fail") != "pass":
+		errors.append("profile_report:%s" % str(profile_report))
+	if setup_ms > max_setup_ms:
+		errors.append("setup_ms:%d limit:%d" % [setup_ms, max_setup_ms])
+	if avg_build_ms > max_avg_build_ms:
+		errors.append("avg_build_ms:%.1f limit:%.1f" % [avg_build_ms, max_avg_build_ms])
+	if native_payload_ms > max_native_payload_ms:
+		errors.append("native_payload_ms:%.1f limit:%.1f" % [native_payload_ms, max_native_payload_ms])
+	if max_move_ms > max_move_step_ms:
+		errors.append("max_move_ms:%d limit:%d" % [max_move_ms, max_move_step_ms])
 
 	scene.queue_free()
 	if not errors.is_empty():
@@ -92,7 +96,7 @@ func _start() -> void:
 
 
 func _drain_queue(scene: Node3D, errors: Array[String]) -> int:
-	for index in range(MAX_DRAIN_STEPS):
+	for index in range(max_drain_steps):
 		var report: Dictionary = scene.step_viewer(0.0, Vector2.ZERO, 0.0)
 		var stats: Dictionary = scene.terrain.build_stats()
 		var queued: int = int(report.get("queued_build_count", 0))
@@ -103,7 +107,7 @@ func _drain_queue(scene: Node3D, errors: Array[String]) -> int:
 			return index + 1
 		OS.delay_msec(5)
 	errors.append("queue_not_drained:%s" % str(scene.diagnostics_text()))
-	return MAX_DRAIN_STEPS
+	return max_drain_steps
 
 
 func _far_clipmap_build_counts(scene: Node3D) -> Array:
@@ -118,3 +122,12 @@ func _max_int(values: Array[int]) -> int:
 	for value in values:
 		result = max(result, value)
 	return result
+
+
+func _apply_profile_budgets(profile: Dictionary) -> void:
+	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
+	max_drain_steps = int(budgets.get("high_density_max_drain_steps", max_drain_steps))
+	max_setup_ms = int(budgets.get("high_density_max_setup_ms", max_setup_ms))
+	max_avg_build_ms = float(budgets.get("high_density_max_avg_build_ms", max_avg_build_ms))
+	max_native_payload_ms = float(budgets.get("high_density_max_native_payload_ms", max_native_payload_ms))
+	max_move_step_ms = int(budgets.get("high_density_max_move_step_ms", max_move_step_ms))

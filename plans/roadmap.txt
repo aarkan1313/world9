@@ -125,6 +125,7 @@ Render review: local-detail base, texture-material, and bounded displacement cap
 Production review perf: native backend now generates local-detail visual-displacement residuals; surface/displacement assignment is ~20ms instead of ~160ms in the perf gate
 Quality profile: `local_detail_review` is review-only and starts from `walk_review`, then enables one native-worker 1m patch with texture material plus bounded visual displacement while keeping collision bodies off
 Review budget profile: local-detail surface/material perf limits are stored on `local_detail_review` and consumed by the streaming local-detail surface perf gate
+High-density profile: `high_density_257_review` is review-only for 257 x 257 / 2m near chunks, with the 257 walk perf probe consuming its settings and budgets
 Walk review captures: actual `TerrainWalkPreviewScene` base/texture/displacement frames plus manifest write to `factory/runtime/godot_walk_local_detail_review/`; current metadata flags subtle displacement
 Local detail release guard: runtime readiness checks local-detail review manifest schema, 257x257 / 1m patch budget, image stats, collision-off walk state, and subtle-displacement flags
 Review workflow gate: headless perf test now covers the normal T then Y toggle path; current displacement texture work is ~14ms

@@ -17,6 +17,7 @@ func _start() -> void:
 		errors.append("walk_profile_not_listed")
 	_check_profile_contract(profile, errors)
 	_check_local_detail_profile_contract(errors)
+	_check_high_density_profile_contract(errors)
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
@@ -166,4 +167,57 @@ func _check_local_detail_profile_contract(errors: Array[String]) -> void:
 				errors.append("local_detail_profile_node_displacement_disabled")
 			if bool(stats.get("collision_enabled", true)):
 				errors.append("local_detail_profile_node_collision_enabled")
+	scene.queue_free()
+
+
+func _check_high_density_profile_contract(errors: Array[String]) -> void:
+	var profile: Dictionary = TerrainQualityProfileScript.profile(TerrainQualityProfileScript.HIGH_DENSITY_257_REVIEW)
+	if profile.is_empty():
+		errors.append("high_density_profile_missing")
+		return
+	if not TerrainQualityProfileScript.profile_ids().has(TerrainQualityProfileScript.HIGH_DENSITY_257_REVIEW):
+		errors.append("high_density_profile_not_listed")
+	var settings: Dictionary = profile.get("settings", {}) as Dictionary
+	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
+	if not bool(profile.get("review_only", false)):
+		errors.append("high_density_profile_not_review_only")
+	if int(settings.get("vertices_per_side", 0)) != 257:
+		errors.append("high_density_vertices:%d" % int(settings.get("vertices_per_side", 0)))
+	if int(settings.get("visible_radius_chunks", 0)) != 3:
+		errors.append("high_density_radius:%d" % int(settings.get("visible_radius_chunks", 0)))
+	if int(settings.get("build_budget_per_frame", 0)) > 2:
+		errors.append("high_density_build_budget:%d" % int(settings.get("build_budget_per_frame", 0)))
+	if bool(settings.get("preload_active_chunks_before_start", true)):
+		errors.append("high_density_preload_enabled")
+	var required_budgets: Array[String] = [
+		"high_density_max_drain_steps",
+		"high_density_max_setup_ms",
+		"high_density_max_avg_build_ms",
+		"high_density_max_native_payload_ms",
+		"high_density_max_move_step_ms",
+	]
+	for key in required_budgets:
+		if float(budgets.get(key, 0.0)) <= 0.0:
+			errors.append("high_density_missing_budget:%s" % key)
+	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
+	scene.auto_setup_on_ready = false
+	scene.capture_mouse_on_ready = false
+	scene.show_diagnostics_overlay = false
+	scene.quality_profile_id = TerrainQualityProfileScript.HIGH_DENSITY_257_REVIEW
+	TerrainQualityProfileScript.apply_to_node(scene, profile)
+	get_root().add_child(scene)
+	var pre_setup_report: Dictionary = scene.quality_profile_report()
+	if pre_setup_report.get("status", "fail") != "pass":
+		errors.append("high_density_profile_pre_setup:%s" % str(pre_setup_report))
+	if not scene.setup():
+		errors.append("high_density_profile_setup_failed:%s" % str(scene.errors))
+	else:
+		var live_report: Dictionary = scene.quality_profile_report()
+		if live_report.get("status", "fail") != "pass":
+			errors.append("high_density_profile_live:%s" % str(live_report))
+		if scene.vertices_per_side != 257:
+			errors.append("high_density_scene_vertices:%d" % scene.vertices_per_side)
+		var spacing_m: float = scene.chunk_size_m / float(max(1, scene.vertices_per_side - 1))
+		if absf(spacing_m - 2.0) > 0.0001:
+			errors.append("high_density_spacing:%.6f" % spacing_m)
 	scene.queue_free()

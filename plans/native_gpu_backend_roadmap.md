@@ -101,7 +101,8 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 61. [x] Gate walk-motion far page GPU upload/eviction budgets so page-residency churn cannot silently regress.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
-64. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
+64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.
+65. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 
 ## First Backend Shape
 
@@ -226,6 +227,7 @@ worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samp
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up
 local-detail quality profile: `local_detail_review` is an opt-in review-only profile that starts from `walk_review`, enables one native-worker 1m local-detail patch, turns on the texture material plus bounded visual displacement, keeps collision bodies off, and is validated by the quality-profile gate
 local-detail review budgets: the streaming local-detail surface perf gate now reads patch assign, surface texture, parameter refresh, displacement-toggle, move-update, and drain-frame budgets from `local_detail_review`
+high-density review profile: `high_density_257_review` is an opt-in review-only profile for 257v / 2m near chunks; the 257 walk perf probe now reads its settings and budgets instead of carrying private constants
 quality Godot runtime gate: 8 checks, pass on the current machine; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
 render Godot runtime gate: 6 non-headless capture checks, pass in ~17.5s on the current machine; static preview capture uses native/fast-gray chunk payloads where possible, and locked render artifacts avoid volatile diagnostic overlay text
 review Godot runtime gate: 4 non-headless contact-sheet checks, pass in ~32.2s on the current machine; release gate remains pass after repeated review runs

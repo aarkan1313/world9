@@ -3,6 +3,7 @@ extends RefCounted
 
 const WALK_REVIEW := "walk_review"
 const LOCAL_DETAIL_REVIEW := "local_detail_review"
+const HIGH_DENSITY_257_REVIEW := "high_density_257_review"
 
 
 static func profile(profile_id: String) -> Dictionary:
@@ -11,12 +12,14 @@ static func profile(profile_id: String) -> Dictionary:
 			return _walk_review_profile()
 		LOCAL_DETAIL_REVIEW:
 			return _local_detail_review_profile()
+		HIGH_DENSITY_257_REVIEW:
+			return _high_density_257_review_profile()
 		_:
 			return {}
 
 
 static func profile_ids() -> Array[String]:
-	return [WALK_REVIEW, LOCAL_DETAIL_REVIEW]
+	return [WALK_REVIEW, LOCAL_DETAIL_REVIEW, HIGH_DENSITY_257_REVIEW]
 
 
 static func apply_to_node(node: Object, profile_data: Dictionary) -> void:
@@ -145,6 +148,35 @@ static func _local_detail_review_profile() -> Dictionary:
 		"local_detail_max_param_refresh_ms": 20,
 		"local_detail_max_toggle_displacement_texture_ms": 45,
 		"local_detail_max_patch_move_update_ms": 35,
+	}
+	profile_data["review_only"] = true
+	return profile_data
+
+
+static func _high_density_257_review_profile() -> Dictionary:
+	var profile_data: Dictionary = _walk_review_profile()
+	profile_data["id"] = HIGH_DENSITY_257_REVIEW
+	profile_data["description"] = "Opt-in 257v / 2m near-chunk density review profile for scale/detail checks; not a default runtime profile."
+	var settings: Dictionary = (profile_data["settings"] as Dictionary).duplicate(true)
+	settings.merge({
+		"vertices_per_side": 257,
+		"visible_radius_chunks": 3,
+		"build_budget_per_frame": 2,
+		"warmup_build_steps": 1,
+		"preload_active_chunks_before_start": false,
+		"preload_active_chunk_limit": 0,
+		"max_native_chunk_workers": 4,
+		"prefetch_forward_chunks": 0,
+		"review_sync_hole_fill_radius_chunks": 0,
+		"review_sync_hole_fill_max_chunks_per_frame": 0,
+	}, true)
+	profile_data["settings"] = settings
+	profile_data["budgets"] = {
+		"high_density_max_drain_steps": 260,
+		"high_density_max_setup_ms": 800,
+		"high_density_max_avg_build_ms": 90.0,
+		"high_density_max_native_payload_ms": 140.0,
+		"high_density_max_move_step_ms": 20,
 	}
 	profile_data["review_only"] = true
 	return profile_data
