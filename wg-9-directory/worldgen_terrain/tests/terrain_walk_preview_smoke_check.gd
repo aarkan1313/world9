@@ -161,6 +161,14 @@ func _check_saved_scene_defaults(errors: Array[String]) -> void:
 		errors.append("walk_scene_skirts_enabled")
 	if int(scene.get("review_sync_hole_fill_max_chunks_per_frame")) != 0:
 		errors.append("walk_scene_hole_fill_cap:%d" % int(scene.get("review_sync_hole_fill_max_chunks_per_frame")))
+	if not bool(scene.get("use_persistent_page_clipmap")):
+		errors.append("walk_scene_page_clipmap_disabled")
+	if bool(scene.get("use_far_clipmap_native_workers")):
+		errors.append("walk_scene_page_clipmap_workers_enabled")
+	if float(scene.get("far_clipmap_transition_fade_seconds")) < 0.2:
+		errors.append("walk_scene_page_blend_too_short:%.3f" % float(scene.get("far_clipmap_transition_fade_seconds")))
+	if int(scene.get("far_clipmap_page_cache_max_pages")) < 64:
+		errors.append("walk_scene_page_cache:%d" % int(scene.get("far_clipmap_page_cache_max_pages")))
 	scene.free()
 
 

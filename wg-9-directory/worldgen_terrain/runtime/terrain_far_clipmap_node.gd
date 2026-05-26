@@ -1478,6 +1478,10 @@ func _page_height_material_for_descriptor(
 	material.set_shader_parameter("previous_normal_texture", previous_normal_texture if previous_normal_texture != null else normal_texture)
 	material.set_shader_parameter("height_blend_alpha", clampf(blend_alpha, 0.0, 1.0))
 	material.set_shader_parameter("normal_strength", surface_texture_normal_strength)
+	material.set_shader_parameter("clipmap_level", level)
+	material.set_shader_parameter("inner_extent_m", float(descriptor.get("inner_extent_m", 0.0)))
+	material.set_shader_parameter("outer_extent_m", float(descriptor.get("outer_extent_m", 0.0)))
+	material.set_shader_parameter("boundary_blend_width_m", max(512.0, float(descriptor.get("outer_extent_m", 0.0)) * 0.035))
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
 
@@ -1688,6 +1692,10 @@ uniform sampler2D previous_height_texture : filter_linear;
 uniform sampler2D previous_normal_texture : filter_linear;
 uniform float height_blend_alpha = 1.0;
 uniform float normal_strength = 1.0;
+uniform int clipmap_level = 0;
+uniform float inner_extent_m = 0.0;
+uniform float outer_extent_m = 0.0;
+uniform float boundary_blend_width_m = 512.0;
 uniform bool edge_fog_enabled = false;
 uniform float edge_fog_begin_m = 24000.0;
 uniform float edge_fog_end_m = 33000.0;
@@ -1696,12 +1704,14 @@ uniform bool edge_fog_square_enabled = true;
 uniform vec2 edge_fog_center_xz = vec2(0.0, 0.0);
 
 varying vec2 local_uv;
+varying vec2 local_xz;
 varying float height_m;
 varying vec3 terrain_normal;
 varying vec3 world_position;
 
 void vertex() {
 	local_uv = UV;
+	local_xz = VERTEX.xz;
 	float previous_height_m = texture(previous_height_texture, UV).r;
 	float current_height_m = texture(height_texture, UV).r;
 	height_m = mix(previous_height_m, current_height_m, clamp(height_blend_alpha, 0.0, 1.0));
@@ -1720,7 +1730,15 @@ void fragment() {
 	if (n.y < 0.25) {
 		n = vec3(0.0, 1.0, 0.0);
 	}
-	vec3 review_n = normalize(vec3(n.x * 0.65, n.y, n.z * 0.65));
+	float square_radius = max(abs(local_xz.x), abs(local_xz.y));
+	float inner_distance = inner_extent_m > 0.0 ? abs(square_radius - inner_extent_m) : boundary_blend_width_m;
+	float outer_distance = outer_extent_m > 0.0 ? max(0.0, outer_extent_m - square_radius) : boundary_blend_width_m;
+	float boundary_distance = min(inner_distance, outer_distance);
+	float boundary_strength = smoothstep(0.0, max(1.0, boundary_blend_width_m), boundary_distance);
+	float level_strength = 1.0 / (1.0 + max(float(clipmap_level), 0.0) * 0.55);
+	float detail_strength = clamp(normal_strength, 0.0, 4.0) * boundary_strength * level_strength;
+	vec3 stable_n = normalize(mix(vec3(0.0, 1.0, 0.0), n, detail_strength));
+	vec3 review_n = normalize(vec3(stable_n.x * 0.65, stable_n.y, stable_n.z * 0.65));
 	vec3 light_dir = normalize(vec3(-0.42, 0.74, -0.52));
 	float lambert = dot(review_n, light_dir) * 0.5 + 0.5;
 	float compressed_height = 0.5 + atan(height_m / 1800.0) / 3.14159265;
