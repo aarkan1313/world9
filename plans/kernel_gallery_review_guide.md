@@ -71,3 +71,36 @@ terrain source?
 It does not answer whether the infinite streaming view places those kernels at
 the right frequency, scale, or biome transition width. Those remain walk-preview
 and world-facts/biome-resolver questions.
+
+## Live Kernel Tour
+
+```text
+res://worldgen_terrain/scenes/terrain_kernel_tour.tscn
+```
+
+The tour scene is the live companion to the static gallery. It uses the normal
+walk-preview streaming stack, starts from diverse real provider sites, raises
+the camera to an overview height, and advances to the next selected kernel site
+every few seconds.
+
+Controls:
+
+```text
+N: next selected kernel site
+B: previous selected kernel site
+P: pause/resume automatic tour
+G: toggle free-fly/ground-follow
+1: gray review
+8: elevation-color review
+```
+
+Use this scene to judge whether the live terrain around different selected
+kernels actually reads as different geography. If this still feels samey, the
+next fix is not more gallery UI; it is kernel influence scale/strength and
+region/family placement policy.
+
+Validation:
+
+```text
+python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_kernel_tour_scene_check.gd
+```
