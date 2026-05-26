@@ -10,6 +10,8 @@ const PROFILE_SPEED_MULTIPLIER := 60.0
 const MAX_HARD_STEP_MS := 220
 const WARN_NOT_FULL_FRAMES := 6
 const WARN_QUEUE_BACKLOG := 90
+const MAX_GPU_PAGE_UPLOAD_LEVEL_SETS := 6
+const MAX_GPU_PAGE_EVICTIONS := 0
 
 
 func _init() -> void:
@@ -73,6 +75,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 	var max_page_blends := 0
 	var max_gpu_pages := 0
 	var max_gpu_page_mib := 0.0
+	var max_gpu_uploads := 0
 	var max_gpu_evictions := 0
 	var page_material_reuse_frames := 0
 	var page_descriptor_texture_hit_frames := 0
@@ -124,6 +127,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		max_page_blends = max(max_page_blends, page_blends)
 		max_gpu_pages = max(max_gpu_pages, int(gpu_state.get("count", 0)))
 		max_gpu_page_mib = maxf(max_gpu_page_mib, float(gpu_state.get("total_mib", 0.0)))
+		max_gpu_uploads = max(max_gpu_uploads, int(gpu_state.get("uploads", 0)))
 		max_gpu_evictions = max(max_gpu_evictions, int(gpu_state.get("evictions", 0)))
 		if bool(far_stats.get("last_page_material_reused", false)):
 			page_material_reuse_frames += 1
@@ -175,6 +179,11 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		errors.append("no_recenter_frames_observed")
 	if max_page_blends <= 0:
 		errors.append("no_page_blend_activity_observed")
+	var max_allowed_gpu_uploads: int = _max_allowed_gpu_page_uploads(scene)
+	if max_gpu_uploads > max_allowed_gpu_uploads:
+		errors.append("gpu_page_uploads:%d limit:%d" % [max_gpu_uploads, max_allowed_gpu_uploads])
+	if max_gpu_evictions > MAX_GPU_PAGE_EVICTIONS:
+		errors.append("gpu_page_evictions:%d limit:%d" % [max_gpu_evictions, MAX_GPU_PAGE_EVICTIONS])
 	return {
 		"schema": "worldgen9.walk_motion_profile.v1",
 		"quality_profile": scene.quality_profile_report(),
@@ -189,6 +198,9 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"max_hard_step_ms": MAX_HARD_STEP_MS,
 			"warn_not_full_frames": WARN_NOT_FULL_FRAMES,
 			"warn_queue_backlog": WARN_QUEUE_BACKLOG,
+			"max_gpu_page_upload_level_sets": MAX_GPU_PAGE_UPLOAD_LEVEL_SETS,
+			"max_gpu_page_uploads": max_allowed_gpu_uploads,
+			"max_gpu_page_evictions": MAX_GPU_PAGE_EVICTIONS,
 		},
 		"warnings": warnings,
 		"summary": {
@@ -204,6 +216,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"max_page_blends": max_page_blends,
 			"max_gpu_pages": max_gpu_pages,
 			"max_gpu_page_mib": max_gpu_page_mib,
+			"max_gpu_uploads": max_gpu_uploads,
 			"max_gpu_evictions": max_gpu_evictions,
 			"page_material_reuse_frames": page_material_reuse_frames,
 			"page_descriptor_texture_hit_frames": page_descriptor_texture_hit_frames,
@@ -234,6 +247,13 @@ func _drain_initial_work(scene: Node3D, errors: Array[String]) -> void:
 			return
 		OS.delay_msec(5)
 	errors.append("initial_work_not_drained:%s" % scene.diagnostics_text())
+
+
+func _max_allowed_gpu_page_uploads(scene: Node3D) -> int:
+	var level_count: int = 1
+	if scene.far_clipmap != null:
+		level_count = max(1, int(scene.far_clipmap.level_count))
+	return level_count * MAX_GPU_PAGE_UPLOAD_LEVEL_SETS
 
 
 func _timing_summary(values: Array[int]) -> Dictionary:

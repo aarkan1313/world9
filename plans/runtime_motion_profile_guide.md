@@ -72,6 +72,11 @@ policy is now explicit: the walk profile prefetches one movement-biased near
 chunk row, and `terrain_walk_prefetch_residency_check.gd` gates that it becomes
 resident after workers drain.
 
+The profile now also hard-gates far page GPU residency churn. Uploads must stay
+within a small multiple of the active clipmap level count, and evictions must
+remain at zero during the standard motion profile. That makes page-cache
+regressions visible before they show up as hitching or far-terrain pop-in.
+
 ## How To Read Failures
 
 ```text

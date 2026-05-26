@@ -118,6 +118,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Promote the default walk far clipmap to persistent texture-displaced page meshes with raw height pages and shader-only coarse/fine morph.
 - [x] Reuse persistent far page shader materials across page commits, updating textures/params in place while preserving previous/current height-page blend sources.
 - [x] Skip persistent far page descriptor image rebuilds when the target page already has GPU-resident height/normal textures.
+- [x] Add motion-profile hard budgets for far page GPU uploads and evictions so page residency regressions fail before they become visible stutter.
 - [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.

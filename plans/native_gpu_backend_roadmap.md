@@ -98,7 +98,8 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 58. [x] Promote the default walk far clipmap to persistent texture-displaced page meshes using raw height pages and shader-only coarse/fine morph.
 59. [x] Reuse persistent far page shader materials across page commits while preserving previous/current height-page blend sources.
 60. [x] Skip far page height/normal image rebuilds when a page commit can reuse already GPU-resident textures.
-61. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
+61. [x] Gate walk-motion far page GPU upload/eviction budgets so page-residency churn cannot silently regress.
+62. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 
 ## First Backend Shape
 
@@ -217,6 +218,7 @@ persistent page bounds: shader-displaced far pages now set per-level custom AABB
 persistent page morph: page heightfields now retain raw provider samples in persistent mode; the shader owns coarse/fine LOD morph against the next level height page, avoiding double-morphing transition bands before shading
 persistent page material reuse: page commits now update the existing page ShaderMaterial in place instead of allocating a new material per level, while still preserving the previous height/normal textures for shader blend
 persistent page descriptor reuse: returning to an already GPU-resident far page uses a lightweight descriptor and reuses resident height/normal textures instead of rebuilding CPU images before the cache hit
+walk motion GPU page budget: the motion profile now fails if far page GPU uploads exceed the level-set budget or if the residency cache evicts pages during the profile
 elevation-color review: near chunks and far clipmap shaders can use the same dark-low/rainbow-mid/white-high height ramp; gray remains available for old review captures
 worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samples 12 diverse region sites and reports 6 palettes, 9 families, 20 unique kernels, with DEM-kernel relief active at all sites
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up
