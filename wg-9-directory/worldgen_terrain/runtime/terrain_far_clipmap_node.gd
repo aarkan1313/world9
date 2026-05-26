@@ -430,7 +430,6 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		return
 	last_page_error = ""
 	var height: PackedFloat32Array = result["height_samples"] as PackedFloat32Array
-	height = _morph_outer_transition_band(level, origin, outer_extent, spacing, side, height)
 	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
 	var normals := PackedVector3Array()
 	normals.resize(side * side)
@@ -483,7 +482,6 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var spacing: float = float(payload["spacing_m"])
 	var height: PackedFloat32Array = payload["height"] as PackedFloat32Array
 	_cache_page_payload(level, origin, outer_extent, spacing, side, height)
-	height = _morph_outer_transition_band(level, origin, outer_extent, spacing, side, height)
 	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
 	var normals := PackedVector3Array()
 	normals.resize(side * side)

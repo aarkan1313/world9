@@ -95,7 +95,8 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 55. [x] Seed initial walk-review stream priority from camera direction and split motion-profile residency into base-window versus prefetch-window readiness.
 56. [x] Add first GPU-resident far page texture residency cache with protected-key eviction, live budget diagnostics, walk-profile control, and fast gate coverage.
 57. [x] Add persistent page displacement bounds via custom AABBs that cover current and previous height pages during shader blend.
-58. [ ] Promote far clipmap rendering from CPU-built page meshes to persistent texture-displaced rings once residency, motion, and visual transition gates stay stable.
+58. [x] Promote the default walk far clipmap to persistent texture-displaced page meshes using raw height pages and shader-only coarse/fine morph.
+59. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 
 ## First Backend Shape
 
@@ -211,6 +212,7 @@ startup prefetch residency: walk setup now preloads the initial camera-forward r
 page-backed far workers: persistent far clipmap recentering now schedules native page payload workers, keeps old pages visible while the full level set is pending, caches completed height pages, and starts previous/current height-page blending when the worker set commits
 GPU page residency: persistent far page height/normal textures now flow through a bounded residency cache with protected active page keys, upload/hit/eviction/MiB diagnostics, and a walk-profile page limit. This is the first GPU-resident page step; persistent texture-displaced rings remain the next renderer promotion.
 persistent page bounds: shader-displaced far pages now set per-level custom AABBs from current and previous page height ranges, preventing engine culling from treating the page as a flat y=0 mesh during height-page blend
+persistent page morph: page heightfields now retain raw provider samples in persistent mode; the shader owns coarse/fine LOD morph against the next level height page, avoiding double-morphing transition bands before shading
 elevation-color review: near chunks and far clipmap shaders can use the same dark-low/rainbow-mid/white-high height ramp; gray remains available for old review captures
 worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samples 12 diverse region sites and reports 6 palettes, 9 families, 20 unique kernels, with DEM-kernel relief active at all sites
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up

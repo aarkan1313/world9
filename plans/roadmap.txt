@@ -47,6 +47,7 @@ The live Godot preview is now past the first one-tile proof. Current direction:
 ```text
 near terrain: 512m chunks, 129 vertices, 4m spacing, native worker payloads
 review surface: default walk preview now uses an elevation-color debug material so low/mid/high landforms are visually distinct before real biome textures exist
+saved walk scene default: `terrain_walk_preview.tscn` now opens in `elevation_color`; `1` still switches back to gray and `8` restores elevation color
 retained terrain: 7x7 walk chunk window with full-density near review by default, plus far 4L clipmap coverage for larger visible range
 fast-flight residency: the walk profile prefetches one movement-biased near chunk row ahead of the viewer, gated as 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal-forward chunks
 startup residency: the walk preview seeds stream priority from the initial camera yaw, so the first movement direction has its forward row preloaded before review starts
@@ -62,6 +63,7 @@ async far clipmap: walk/streaming preview schedules far level rebuilds on native
 page-backed far workers: persistent page-mode clipmap recentering now uses native workers, caches worker-completed height pages, and commits only when the full page set is ready so previous/current height-page blend remains the transition mechanism
 GPU page residency: persistent far page height/normal textures now use a bounded residency cache with protected active page keys and upload/hit/eviction/MiB diagnostics; this is the first GPU-resident page step, not the final texture-displaced ring renderer
 persistent page bounds: shader-displaced far pages now set custom visibility AABBs from current and previous height-page ranges so engine culling cannot treat them as flat y=0 pages during blend
+persistent page morph: persistent far pages now keep raw provider height samples and leave coarse/fine LOD morph to the shader, matching the World 4 direction and avoiding double-morphed transition bands
 rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
 visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
 far clipmap transition policy: page-backed clipmap geometry stays opaque; do not alpha-crossfade whole square pages/rings, and smooth recenter/LOD only through world-space previous/current height-page blend, coarse/fine morph bands, and outer-edge-only visibility masking

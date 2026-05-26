@@ -186,9 +186,10 @@ contract instead of tuned by eye.
 4. Lock the current page-backed clipmap rules: opaque geometry, world-space height-page blend, and coarse/fine morph.
 5. Keep fixing current CPU/native clipmap visual issues only where the profiler proves a real problem.
 6. Add the first GPU-resident far page texture residency cache behind the existing provider contract.
-7. Switch far clipmap rendering from CPU-built page meshes to persistent rings/pages with height texture displacement.
-8. Add world-space biome/material masks only after terrain families/material rules are ready.
-9. Add material micro detail after the mask/material path is stable.
+7. Keep persistent far pages raw and perform coarse/fine LOD morph in shader.
+8. Move page generation/upload toward GPU compute or lower-churn native texture upload after visual review stays stable.
+9. Add world-space biome/material masks only after terrain families/material rules are ready.
+10. Add material micro detail after the mask/material path is stable.
 
 ## Immediate Practical Takeaway
 

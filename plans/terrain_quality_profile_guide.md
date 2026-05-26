@@ -71,7 +71,9 @@ movement already has the forward row preloaded.
 hidden by a flat white/gray surface. It is still a debug material, not final
 biome texturing: low elevations are dark, middle elevations pass through a
 rainbow ramp, and high elevations trend toward white. Press `1` for the old gray
-review and `8` to return to elevation color.
+review and `8` to return to elevation color. The saved walk scene now opens in
+this mode as well, so launching `terrain_walk_preview.tscn` directly matches the
+profile instead of falling back to gray.
 
 ## Gates
 
@@ -129,6 +131,11 @@ reports hits, uploads, evictions, page count, and MiB usage through far clipmap
 stats. This is still a texture-backed page residency step; the final renderer
 promotion is persistent ring geometry displaced from resident height pages.
 
+The default walk far clipmap now uses raw provider height pages for persistent
+mode and leaves coarse/fine LOD morph to the shader. CPU-side morphing remains
+for the older non-persistent mesh path, but persistent page rendering should not
+double-morph height data before the shader sees it.
+
 ## Roadmap Use
 
 When the distant edge, motion profile, or residency budget needs tuning, change
@@ -140,6 +147,6 @@ Next profile work:
 ```text
 1. Add profile-specific motion thresholds now that the first fast-flight residency policy is gated.
 2. Add high-density/local-detail profiles after the default walk profile is stable.
-3. Promote persistent texture-displaced far rings once GPU page residency and motion gates stay stable.
+3. Move far page generation/upload toward GPU compute or lower-churn native texture upload after visual review remains stable.
 4. Add optional profile tiers for review-only far radius and hidden-edge buffer tuning.
 ```

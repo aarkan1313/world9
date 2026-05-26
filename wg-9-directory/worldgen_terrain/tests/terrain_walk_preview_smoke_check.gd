@@ -1,6 +1,7 @@
 extends SceneTree
 
 const TerrainWalkPreviewSceneScript := preload("res://worldgen_terrain/runtime/terrain_walk_preview_scene.gd")
+const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_world.gd")
 const SCENE_PATH := "res://worldgen_terrain/scenes/terrain_walk_preview.tscn"
 
 
@@ -173,6 +174,8 @@ func _check_saved_scene_defaults(errors: Array[String]) -> void:
 		errors.append("walk_scene_page_blend_too_short:%.3f" % float(scene.get("far_clipmap_transition_fade_seconds")))
 	if int(scene.get("far_clipmap_page_cache_max_pages")) < 64:
 		errors.append("walk_scene_page_cache:%d" % int(scene.get("far_clipmap_page_cache_max_pages")))
+	if str(scene.get("debug_mode")) != TerrainWorldScript.DEBUG_ELEVATION_COLOR:
+		errors.append("walk_scene_debug_mode:%s" % str(scene.get("debug_mode")))
 	scene.free()
 
 
@@ -266,6 +269,30 @@ func _check_page_clipmap_shader_contract(scene: Node3D, errors: Array[String]) -
 			errors.append("page_mesh_custom_aabb_min:%.3f min:%.3f" % [custom_bounds.position.y, min_y])
 		if custom_bounds.position.y + custom_bounds.size.y < max_y:
 			errors.append("page_mesh_custom_aabb_max:%.3f max:%.3f" % [custom_bounds.position.y + custom_bounds.size.y, max_y])
+		_check_page_heightfield_keeps_raw_samples(scene, heightfield0, errors)
+
+
+func _check_page_heightfield_keeps_raw_samples(scene: Node3D, heightfield: Dictionary, errors: Array[String]) -> void:
+	if scene.terrain == null or scene.terrain.world == null:
+		errors.append("page_raw_sample_world_missing")
+		return
+	var side: int = int(heightfield.get("vertices_per_side", 0))
+	if side < 3:
+		errors.append("page_raw_sample_side:%d" % side)
+		return
+	var height: PackedFloat32Array = heightfield["height"] as PackedFloat32Array
+	var x: int = side - 1
+	var z: int = int(side / 2) + 1
+	var outer_extent: float = float(heightfield["outer_extent_m"])
+	var spacing: float = float(heightfield["spacing_m"])
+	var local_x: float = -outer_extent + float(x) * spacing
+	var local_z: float = -outer_extent + float(z) * spacing
+	var world_x: float = float(heightfield["origin_x"]) + local_x
+	var world_z: float = float(heightfield["origin_z"]) + local_z
+	var raw: float = scene.terrain.world.sample_height(world_x, world_z)
+	var actual: float = float(height[z * side + x])
+	if absf(actual - raw) > 0.0001:
+		errors.append("page_heightfield_not_raw:%.6f raw:%.6f" % [actual, raw])
 
 
 func _check_review_site_diversity(scene: Node3D, errors: Array[String]) -> void:

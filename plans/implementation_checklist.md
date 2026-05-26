@@ -115,7 +115,8 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Preload the walk profile's initial movement-biased chunk row and split motion-profile residency diagnostics into base-window readiness versus optional prefetch-row readiness.
 - [x] Add first GPU-resident far page texture residency cache behind the current provider contract, with protected-key eviction, live diagnostics, walk-profile budget knobs, and a fast gate.
 - [x] Harden persistent far page displacement bounds with per-level custom AABBs that cover current and previous height pages during shader blend, so renderer culling cannot cut displaced terrain.
-- [ ] Promote the far clipmap from CPU-built page meshes to persistent texture-displaced rings after GPU page residency, motion, and visual review stay stable.
+- [x] Promote the default walk far clipmap to persistent texture-displaced page meshes with raw height pages and shader-only coarse/fine morph.
+- [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.
 - [x] Add `TerrainChunkRenderer` as the first renderer boundary for chunk MeshInstance lifecycle, active-node ownership, and bounded pooling.

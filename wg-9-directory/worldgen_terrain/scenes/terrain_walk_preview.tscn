@@ -4,7 +4,7 @@
 
 [node name="TerrainWalkPreview" type="Node3D"]
 script = ExtResource("1_walk_preview")
-debug_mode = "gray"
+debug_mode = "elevation_color"
 vertices_per_side = 129
 visible_radius_chunks = 3
 build_budget_per_frame = 8
