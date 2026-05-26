@@ -13,6 +13,7 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export_range(17, 257, 16) var vertices_per_side: int = 33
 @export_range(1, 5, 1) var visible_radius_chunks: int = 1
 @export_range(1, 16, 1) var build_budget_per_frame: int = 1
+@export_range(0, 3, 1) var prefetch_forward_chunks: int = 0
 @export_range(1, 6, 1) var max_lod: int = 4
 @export_range(0, 24, 1) var warmup_build_steps: int = 3
 @export var preload_active_chunks_before_start: bool = false
@@ -198,6 +199,7 @@ func setup() -> bool:
 		"visible_radius_chunks": visible_radius_chunks,
 		"max_lod": max_lod,
 		"build_budget_per_frame": build_budget_per_frame,
+		"prefetch_forward_chunks": prefetch_forward_chunks,
 		"queue_policy": TerrainStreamerScript.QUEUE_POLICY_PRIORITY_CANCEL,
 	})
 	_add_light()
@@ -256,6 +258,8 @@ func apply_debug_mode(mode: String) -> void:
 
 
 func expected_active_count() -> int:
+	if not last_stream_report.is_empty():
+		return int(last_stream_report.get("expected_active_count", last_stream_report.get("active_count", 0)))
 	return (visible_radius_chunks * 2 + 1) * (visible_radius_chunks * 2 + 1)
 
 

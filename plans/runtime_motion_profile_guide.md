@@ -61,8 +61,10 @@ final diagnostics string
 
 The pass/fail thresholds are deliberately conservative. This gate is not yet a
 final performance budget. It is a diagnosis contract: it must produce enough
-data to decide where the next fix belongs. Residency/backlog issues are written
-as warnings until the quality profile and prefetch policy are explicit.
+data to decide where the next fix belongs. The first quality-profile residency
+policy is now explicit: the walk profile prefetches one movement-biased near
+chunk row, and `terrain_walk_prefetch_residency_check.gd` gates that it becomes
+resident after workers drain.
 
 ## How To Read Failures
 
@@ -80,8 +82,9 @@ not_full_frames
 
 The near chunk window is not resident during the motion profile. Investigate
 prefetch direction, queue prioritization, worker count, and preload policy.
-This is currently a warning because the project has not yet locked a fast-flight
-residency budget.
+The first locked fast-flight residency budget is one forward prefetch step:
+49 base chunks, 56 cardinal-forward chunks, or 62 diagonal-forward chunks after
+movement direction is known.
 
 ```text
 queue_backlog_frames

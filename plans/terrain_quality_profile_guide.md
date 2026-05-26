@@ -43,6 +43,7 @@ The walk preview applies this profile in `_init()` and exposes
 ```text
 near terrain: 512m chunks, 129 vertices, 4m spacing
 near window: 7x7 chunks
+near forward prefetch: 1 movement-biased overlap window
 far terrain: 4 page-backed clipmap levels
 far radius: 32768m
 camera far: 120000m
@@ -55,6 +56,13 @@ The fog values are intentionally part of the profile. They are not a visual
 band-aid inside the playable area; they are the outer-edge visibility contract
 for the currently loaded far clipmap radius.
 
+The forward prefetch value is also part of the profile. It does not expand the
+base retained window in all directions; it keeps one extra row or diagonal
+corner fan ahead of the current movement vector so fast flight has terrain
+resident before the viewer reaches the next chunk boundary. The current walk
+profile expects 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal
+forward chunks after movement direction is known.
+
 ## Gates
 
 Run through the wrapper only:
@@ -62,6 +70,7 @@ Run through the wrapper only:
 ```text
 python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_quality_profile_check.gd
 python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_visibility_contract_check.gd
+python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_walk_prefetch_residency_check.gd
 python D:/workflows/worldgen9/tools/godot_runtime_gate.py --suite fast
 ```
 
@@ -75,6 +84,7 @@ live setup values still match the profile
 camera far matches the profile
 visibility loaded radius matches far clipmap budget
 fog begin/end/camera far form a sane edge-only visibility contract
+walk profile carries the forward-prefetch setting
 ```
 
 The visibility contract check writes:
@@ -88,6 +98,10 @@ loaded radius, camera far plane, hidden buffer, fog begin/end, transition
 length, global fog density, edge-fog shader settings, page-clipmap mode, and
 viewer-tracked fog center.
 
+The prefetch residency check starts the walk scene, applies forward movement,
+drains terrain workers, and verifies the movement-biased active set is resident:
+49 base chunks plus the expected forward prefetch row for the profile.
+
 ## Roadmap Use
 
 When the distant edge, motion profile, or residency budget needs tuning, change
@@ -97,8 +111,8 @@ scene value by hand unless the change is intentionally local to that scene.
 Next profile work:
 
 ```text
-1. Add profile-specific motion thresholds once fast-flight residency policy is fixed.
-2. Add residency/prefetch profile fields for the next fast-flight optimization slice.
-3. Add high-density/local-detail profiles after the default walk profile is stable.
-4. Add future GPU page profile fields behind the same profile id.
+1. Add profile-specific motion thresholds now that the first fast-flight residency policy is gated.
+2. Add high-density/local-detail profiles after the default walk profile is stable.
+3. Add future GPU page profile fields behind the same profile id.
+4. Add optional profile tiers for review-only far radius and hidden-edge buffer tuning.
 ```

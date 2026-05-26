@@ -63,6 +63,7 @@ FAST_HEADLESS_CHECKS = [
     "terrain_walk_hole_fill_priority_check.gd",
     "terrain_walk_preview_perf_check.gd",
     "terrain_walk_motion_profile_check.gd",
+    "terrain_walk_prefetch_residency_check.gd",
     "terrain_walk_preview_smoke_check.gd",
 ]
 

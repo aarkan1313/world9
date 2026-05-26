@@ -79,6 +79,7 @@ static func _walk_review_profile() -> Dictionary:
 			"visible_radius_chunks": 3,
 			"max_lod": 2,
 			"build_budget_per_frame": 8,
+			"prefetch_forward_chunks": 1,
 			"warmup_build_steps": 4,
 			"preload_active_chunks_before_start": true,
 			"preload_active_chunk_limit": 0,

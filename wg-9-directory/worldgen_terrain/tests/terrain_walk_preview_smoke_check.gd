@@ -106,7 +106,10 @@ func _start() -> void:
 	var expected_spacing: float = scene.chunk_size_m / float(scene.vertices_per_side - 1)
 	if absf(expected_spacing - 4.0) > 0.001:
 		errors.append("unexpected_spacing:%.3f" % expected_spacing)
-	if scene.expected_active_count() != 49:
+	var base_active_count: int = int(scene.last_stream_report.get("base_active_count", 49))
+	if base_active_count != 49:
+		errors.append("base_active_count:%d" % base_active_count)
+	if scene.expected_active_count() < 49:
 		errors.append("expected_active_count:%d" % scene.expected_active_count())
 	if scene.use_lod_mesh_density:
 		errors.append("walk_review_should_not_use_mixed_density_chunks")

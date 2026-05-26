@@ -67,6 +67,7 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		"vertices_per_side",
 		"visible_radius_chunks",
 		"build_budget_per_frame",
+		"prefetch_forward_chunks",
 		"max_native_chunk_workers",
 		"use_far_clipmap",
 		"far_clipmap_level_count",

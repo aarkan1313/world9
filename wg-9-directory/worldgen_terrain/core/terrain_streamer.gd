@@ -11,6 +11,7 @@ var visible_radius_chunks: int = 4
 var max_lod: int = 4
 var build_budget_per_frame: int = 2
 var queue_policy: String = QUEUE_POLICY_PRIORITY_CANCEL
+var prefetch_forward_chunks: int = 0
 var active: Dictionary = {}
 var queued_builds: Array[String] = []
 var step_index: int = 0
@@ -27,6 +28,7 @@ func setup(settings: Dictionary) -> bool:
 	max_lod = int(settings["max_lod"])
 	build_budget_per_frame = int(settings["build_budget_per_frame"])
 	queue_policy = str(settings["queue_policy"])
+	prefetch_forward_chunks = max(0, int(settings.get("prefetch_forward_chunks", 0)))
 	reset()
 	return true
 
@@ -46,12 +48,12 @@ func set_priority_direction(direction: Vector2) -> void:
 
 
 func expected_active_count() -> int:
-	return (visible_radius_chunks * 2 + 1) * (visible_radius_chunks * 2 + 1)
+	return wanted_chunks(Vector2i.ZERO, visible_radius_chunks, max_lod, priority_direction, prefetch_forward_chunks).size()
 
 
 func update_viewer(point: Vector2) -> Dictionary:
 	var center: Vector2i = viewer_chunk(point, chunk_size_m)
-	var wanted: Dictionary = wanted_chunks(center, visible_radius_chunks, max_lod)
+	var wanted: Dictionary = wanted_chunks(center, visible_radius_chunks, max_lod, priority_direction, prefetch_forward_chunks)
 	var created: Array[String] = _sorted_difference(wanted, active)
 	var retired: Array[String] = _sorted_difference(active, wanted)
 	var kept: Array[String] = _sorted_intersection(wanted, active)
@@ -103,7 +105,7 @@ func update_viewer(point: Vector2) -> Dictionary:
 		"viewer_world": [point.x, point.y],
 		"viewer_chunk": [center.x, center.y],
 		"active_count": active.size(),
-		"expected_active_count": expected_active_count(),
+		"expected_active_count": wanted.size(),
 		"created_count": created.size(),
 		"retired_count": retired.size(),
 		"lod_changed_count": lod_changed.size(),
@@ -119,6 +121,10 @@ func update_viewer(point: Vector2) -> Dictionary:
 		"build_now": _coord_list(build_now),
 		"status": "pass",
 	}
+	if prefetch_forward_chunks > 0:
+		report["base_active_count"] = _base_active_count(visible_radius_chunks)
+		report["prefetch_forward_chunks"] = prefetch_forward_chunks
+		report["prefetch_step"] = _prefetch_step_array(priority_direction)
 	step_index += 1
 	return report
 
@@ -133,16 +139,34 @@ static func lod_for_ring(ring: int, p_max_lod: int) -> int:
 	return min(p_max_lod, ring - 1)
 
 
-static func wanted_chunks(center: Vector2i, visible_radius: int, p_max_lod: int) -> Dictionary:
+static func wanted_chunks(
+	center: Vector2i,
+	visible_radius: int,
+	p_max_lod: int,
+	direction: Vector2 = Vector2.ZERO,
+	prefetch_steps: int = 0
+) -> Dictionary:
 	var result: Dictionary = {}
+	_merge_wanted_chunks_for_center(result, center, visible_radius, p_max_lod)
+	var step: Vector2i = _prefetch_step_from_direction(direction)
+	for prefetch_index in range(1, max(0, prefetch_steps) + 1):
+		if step == Vector2i.ZERO:
+			break
+		_merge_wanted_chunks_for_center(result, center + step * prefetch_index, visible_radius, p_max_lod)
+	return result
+
+
+static func _merge_wanted_chunks_for_center(result: Dictionary, center: Vector2i, visible_radius: int, p_max_lod: int) -> void:
 	for dz in range(-visible_radius, visible_radius + 1):
 		for dx in range(-visible_radius, visible_radius + 1):
 			var chunk_x: int = center.x + dx
 			var chunk_z: int = center.y + dz
+			var key := "%d,%d" % [chunk_x, chunk_z]
+			if result.has(key):
+				continue
 			var ring: int = max(abs(dx), abs(dz))
 			var chunk: RefCounted = TerrainChunkScript.new(chunk_x, chunk_z, ring, lod_for_ring(ring, p_max_lod))
 			result[chunk.key()] = chunk
-	return result
 
 
 static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictionary:
@@ -154,13 +178,14 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 	var sim_max_lod: int = int(settings["max_lod"])
 	var sim_build_budget_per_frame: int = int(settings["build_budget_per_frame"])
 	var sim_queue_policy: String = str(settings["queue_policy"])
+	var sim_prefetch_forward_chunks: int = max(0, int(settings.get("prefetch_forward_chunks", 0)))
 	var derive_priority_direction: bool = bool(settings.get("derive_priority_direction_from_path", false))
 	var fixed_priority_direction: Vector2 = _priority_direction_from_settings(settings.get("priority_direction", Vector2.ZERO))
-	var expected_count: int = (visible_radius * 2 + 1) * (visible_radius * 2 + 1)
 	var sim_active: Dictionary = {}
 	var sim_queued_builds: Array[String] = []
 	var steps: Array[Dictionary] = []
 	var max_active_count: int = 0
+	var max_expected_count: int = 0
 	var total_created: int = 0
 	var total_retired: int = 0
 	var total_lod_changed: int = 0
@@ -174,7 +199,9 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 			var delta: Vector2 = point - path[sim_step_index - 1]
 			if delta.length_squared() > 0.000001:
 				sim_priority_direction = delta.normalized()
-		var wanted: Dictionary = wanted_chunks(center, visible_radius, sim_max_lod)
+		var wanted: Dictionary = wanted_chunks(center, visible_radius, sim_max_lod, sim_priority_direction, sim_prefetch_forward_chunks)
+		var expected_count: int = wanted.size()
+		max_expected_count = max(max_expected_count, expected_count)
 		var created: Array[String] = _sorted_difference(wanted, sim_active)
 		var retired: Array[String] = _sorted_difference(sim_active, wanted)
 		var kept: Array[String] = _sorted_intersection(wanted, sim_active)
@@ -224,7 +251,7 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 		total_retired += retired.size()
 		total_lod_changed += lod_changed.size()
 
-		steps.append({
+		var step_report: Dictionary = {
 			"step": sim_step_index,
 			"viewer_world": [point.x, point.y],
 			"viewer_chunk": [center.x, center.y],
@@ -243,14 +270,19 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 			"retired": _coord_list(retired),
 			"lod_changed": _coord_list(lod_changed),
 			"build_now": _coord_list(build_now),
-		})
+		}
+		if sim_prefetch_forward_chunks > 0:
+			step_report["base_active_count"] = _base_active_count(visible_radius)
+			step_report["prefetch_forward_chunks"] = sim_prefetch_forward_chunks
+			step_report["prefetch_step"] = _prefetch_step_array(sim_priority_direction)
+		steps.append(step_report)
 
 	var errors: Array[String] = []
-	if max_active_count > expected_count:
+	if max_active_count > max_expected_count:
 		errors.append("active_count_exceeded_expected")
 	for step_value in steps:
 		var step: Dictionary = step_value
-		if int(step["active_count"]) != expected_count:
+		if int(step["active_count"]) != int(step["expected_active_count"]):
 			errors.append("active_count_not_expected_at_step_%d" % int(step["step"]))
 
 	var report_settings: Dictionary = {
@@ -259,8 +291,11 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 		"max_lod": sim_max_lod,
 		"build_budget_per_frame": sim_build_budget_per_frame,
 		"queue_policy": sim_queue_policy,
-		"expected_active_count": expected_count,
+		"expected_active_count": wanted_chunks(Vector2i.ZERO, visible_radius, sim_max_lod, fixed_priority_direction, sim_prefetch_forward_chunks).size(),
 	}
+	if sim_prefetch_forward_chunks > 0:
+		report_settings["prefetch_forward_chunks"] = sim_prefetch_forward_chunks
+		report_settings["base_active_count"] = _base_active_count(visible_radius)
 	if fixed_priority_direction.length_squared() > 0.000001:
 		report_settings["priority_direction"] = [fixed_priority_direction.x, fixed_priority_direction.y]
 	if derive_priority_direction:
@@ -327,6 +362,8 @@ static func _validate_settings(settings: Dictionary) -> Array[String]:
 		result.append("invalid_max_lod")
 	if int(settings["build_budget_per_frame"]) <= 0:
 		result.append("invalid_build_budget_per_frame")
+	if int(settings.get("prefetch_forward_chunks", 0)) < 0:
+		result.append("invalid_prefetch_forward_chunks")
 	var policy: String = str(settings["queue_policy"])
 	if policy != QUEUE_POLICY_PRIORITY_CANCEL and policy != QUEUE_POLICY_FIFO:
 		result.append("invalid_queue_policy:%s" % policy)
@@ -347,6 +384,33 @@ static func _priority_direction_from_settings(value: Variant) -> Vector2:
 	if direction.length_squared() > 0.000001:
 		return direction.normalized()
 	return Vector2.ZERO
+
+
+static func _base_active_count(visible_radius: int) -> int:
+	return (visible_radius * 2 + 1) * (visible_radius * 2 + 1)
+
+
+static func _prefetch_step_array(direction: Vector2) -> Array[int]:
+	var step: Vector2i = _prefetch_step_from_direction(direction)
+	return [step.x, step.y]
+
+
+static func _prefetch_step_from_direction(direction: Vector2) -> Vector2i:
+	if direction.length_squared() <= 0.000001:
+		return Vector2i.ZERO
+	var normalized: Vector2 = direction.normalized()
+	var step_x := 0
+	var step_z := 0
+	if absf(normalized.x) >= 0.35:
+		step_x = 1 if normalized.x > 0.0 else -1
+	if absf(normalized.y) >= 0.35:
+		step_z = 1 if normalized.y > 0.0 else -1
+	if step_x == 0 and step_z == 0:
+		if absf(normalized.x) >= absf(normalized.y):
+			step_x = 1 if normalized.x > 0.0 else -1
+		else:
+			step_z = 1 if normalized.y > 0.0 else -1
+	return Vector2i(step_x, step_z)
 
 
 static func _sorted_difference(left: Dictionary, right: Dictionary) -> Array[String]:

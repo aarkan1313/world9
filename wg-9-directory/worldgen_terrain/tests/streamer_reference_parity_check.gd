@@ -23,6 +23,7 @@ func _run() -> int:
 	_check_invalid_settings(errors)
 	_check_directional_priority(errors)
 	_check_directional_simulate(errors)
+	_check_forward_prefetch_residency(errors)
 
 	if not errors.is_empty():
 		for error in errors:
@@ -106,6 +107,35 @@ func _check_directional_simulate(errors: Array[String]) -> void:
 	var second_ahead: Array = build_now[2] as Array
 	if int(first_ahead[0]) <= 0 or int(second_ahead[0]) <= 0:
 		errors.append("directional_simulate_not_ahead:%s" % str(build_now))
+
+
+func _check_forward_prefetch_residency(errors: Array[String]) -> void:
+	var settings := {
+		"chunk_size_m": 512.0,
+		"visible_radius_chunks": 2,
+		"max_lod": 2,
+		"build_budget_per_frame": 64,
+		"queue_policy": TerrainStreamerScript.QUEUE_POLICY_PRIORITY_CANCEL,
+		"priority_direction": [0.0, 1.0],
+		"prefetch_forward_chunks": 1,
+	}
+	var report: Dictionary = TerrainStreamerScript.simulate(PackedVector2Array([Vector2.ZERO]), settings)
+	var steps: Array = report.get("steps", []) as Array
+	if steps.is_empty():
+		errors.append("prefetch_no_steps:%s" % str(report))
+		return
+	var first_step: Dictionary = steps[0] as Dictionary
+	if int(first_step.get("base_active_count", 0)) != 25:
+		errors.append("prefetch_base_active:%s" % str(first_step))
+	if int(first_step.get("active_count", 0)) != 30:
+		errors.append("prefetch_active_count:%d" % int(first_step.get("active_count", 0)))
+	if first_step.get("prefetch_step", []) != [0, 1]:
+		errors.append("prefetch_step:%s" % str(first_step.get("prefetch_step", [])))
+	var active_chunks: Array = first_step.get("active_chunks", []) as Array
+	if not _chunk_list_has(active_chunks, 0, 3):
+		errors.append("prefetch_missing_forward_row:%s" % str(active_chunks))
+	if _chunk_list_has(active_chunks, 0, -3):
+		errors.append("prefetch_added_behind_row:%s" % str(active_chunks))
 
 
 func _check_reference(label: String, expected: Dictionary, errors: Array[String]) -> void:
@@ -229,6 +259,14 @@ func _compare_array(path: String, expected: Array, actual: Array, errors: Array[
 func _is_number(value: Variant) -> bool:
 	var value_type: int = typeof(value)
 	return value_type == TYPE_INT or value_type == TYPE_FLOAT
+
+
+func _chunk_list_has(chunks: Array, chunk_x: int, chunk_z: int) -> bool:
+	for chunk_value in chunks:
+		var chunk: Dictionary = chunk_value as Dictionary
+		if int(chunk.get("chunk_x", 0)) == chunk_x and int(chunk.get("chunk_z", 0)) == chunk_z:
+			return true
+	return false
 
 
 func _strip_runtime_step_fields(steps: Array[Dictionary]) -> Array[Dictionary]:
