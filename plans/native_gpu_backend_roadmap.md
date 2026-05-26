@@ -108,7 +108,8 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 68. [x] Add review-only landform tuning profiles for scale/relief/kernel influence before changing defaults.
 69. [x] Add same-site landform profile comparison metrics and review artifacts.
 70. [x] Add a live landform profile tour scene for visual comparison of current balance, stronger mountains, and compressed scale. It defaults to manual profile changes while non-neutral profiles remain outside the native prepared-grid fast path.
-71. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
+71. [x] Add deterministic pass/corridor world facts as non-deforming route placeholders before erosion.
+72. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 
 ## First Backend Shape
 
@@ -217,7 +218,7 @@ walk chunk-boundary recenter: first edge crossing keeps far rings stable; larger
 rapid far recenter: boundary ping-pong keeps counts unchanged; rapid larger recenter while level 0 is in flight defers instead of synchronously rebuilding, then all levels finish at the newest origin
 fast Godot runtime gate: 19 checks, pass on the current machine, including the quality-profile, visibility-contract, elevation-color material, GPU page residency, walk motion/recenter profile, and forward-prefetch residency gates
 extended Godot runtime gate: 33 checks, pass on the current machine
-quality Godot runtime gate: 11 checks, including the worldgen capability and kernel-gallery/tour proofs
+quality Godot runtime gate: 16 checks, including the worldgen capability, kernel-gallery/tour, landform profile, pass/corridor fact, hydrology, and perf proofs
 walk motion profile: high-speed forward profile writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass proves recenter/page-blend coverage, and the first near-residency optimization slice now prefetches the next movement-biased chunk row
 forward-prefetch residency: the walk profile keeps 49 base chunks plus one movement-biased overlap row resident after motion is known, with the fast gate proving 56 cardinal-forward chunks after workers drain
 startup prefetch residency: walk setup now preloads the initial camera-forward row; the motion profile reports base-window misses separately from still-building optional prefetch rows
@@ -234,11 +235,12 @@ kernel gallery/tour proof: `terrain_kernel_gallery.tscn` builds a compact review
 
 landform tuning proof: `terrain_landform_profile_compare_check.gd` writes `factory/runtime/godot_landform_profiles/landform_profile_report.json` plus `landform_profile_contact_sheet.png`; it compares `balanced_current`, `strong_mountains`, and `compressed_scale` at the same selected sites, verifies the neutral profile does not move default terrain, and gates profile seam deltas. Erosion remains later: after base relief/scale, kernel influence, hydrology hints, and first river/pass routing facts are stable
 landform live review: `terrain_landform_profile_tour.tscn` exposes `balanced_current`, `strong_mountains`, and `compressed_scale` on representative sites. It defaults to manual profile switching (`V`) with far coverage enabled; `P` can toggle auto cycling for stationary review, and `N`/`B` still move across selected sites. `V` is now gated through the saved scene path and follow-up frames. Non-neutral profiles currently disable the native prepared-grid fast path, so live near/far terrain rebuilds are intentionally suppressed instead of falling back to multi-second synchronous GDScript page/chunk generation. Far page requests include the active landform profile in their cache identity for the later native/GPU parity step.
+pass/corridor world facts: `TerrainWorldFacts` emits deterministic route placeholders with `affects_height=false`; the quality gate checks determinism, sample hints, and no height deformation when the pass profile knob is enabled. This gives erosion/pass shaping a stable CPU fact source without making chunk generation more expensive yet.
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up
 local-detail quality profile: `local_detail_review` is an opt-in review-only profile that starts from `walk_review`, enables one native-worker 1m local-detail patch, turns on the texture material plus bounded visual displacement, keeps collision bodies off, and is validated by the quality-profile gate
 local-detail review budgets: the streaming local-detail surface perf gate now reads patch assign, surface texture, parameter refresh, displacement-toggle, move-update, and drain-frame budgets from `local_detail_review`
 high-density review profile: `high_density_257_review` is an opt-in review-only profile for 257v / 2m near chunks; the 257 walk perf probe now reads its settings and budgets instead of carrying private constants
-quality Godot runtime gate: 15 checks, pass on the current machine after the focused mountain-kernel gallery and saved-scene profile-key gate are included; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
+quality Godot runtime gate: 16 checks, pass on the current machine after the pass/corridor world-fact gate is included; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
 render Godot runtime gate: 6 non-headless capture checks, pass in ~17.5s on the current machine; static preview capture uses native/fast-gray chunk payloads where possible, and locked render artifacts avoid volatile diagnostic overlay text
 review Godot runtime gate: 4 non-headless contact-sheet checks, pass in ~32.2s on the current machine; release gate remains pass after repeated review runs
 Godot review index: deterministic HTML/JSON index locked in the runtime artifact manifest; runtime readiness checks schema, section order, required review files, and PNG dimensions

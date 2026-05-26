@@ -96,6 +96,7 @@ QUALITY_HEADLESS_CHECKS = [
     "terrain_landform_profile_compare_check.gd",
     "terrain_landform_profile_tour_scene_check.gd",
     "terrain_landform_profile_tour_live_key_check.gd",
+    "terrain_world_facts_pass_corridor_check.gd",
     "terrain_hydrology_consistency_check.gd",
     "terrain_hydrology_tile_cache_check.gd",
     "terrain_hydrology_hint_probe_check.gd",

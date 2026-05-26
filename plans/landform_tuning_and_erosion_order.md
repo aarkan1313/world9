@@ -133,6 +133,15 @@ passes are macro route/topology facts
 erosion is a shaping/detail pass
 ```
 
+Implemented placeholder:
+
+```text
+TerrainWorldFacts emits deterministic per-region pass/corridor facts
+facts include endpoints, width, priority, ruggedness, palette/family context
+facts expose sample hints but do not alter height yet (`affects_height=false`)
+terrain_world_facts_pass_corridor_check.gd proves determinism and no height deformation
+```
+
 A pass/corridor field can guide later systems:
 
 ```text

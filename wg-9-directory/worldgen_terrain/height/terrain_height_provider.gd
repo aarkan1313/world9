@@ -5,6 +5,7 @@ const TerrainSettingsScript := preload("res://worldgen_terrain/core/terrain_sett
 const TerrainHashScript := preload("res://worldgen_terrain/height/terrain_hash.gd")
 const TerrainLandformProfileScript := preload("res://worldgen_terrain/height/terrain_landform_profile.gd")
 const TerrainProviderDecisionsScript := preload("res://worldgen_terrain/height/terrain_provider_decisions.gd")
+const TerrainWorldFactsScript := preload("res://worldgen_terrain/height/terrain_world_facts.gd")
 
 const SOURCE_MASK_CURRENT: int = 1 | 2 | 4 | 8
 const FAMILY_IDS: Dictionary = {
@@ -22,6 +23,7 @@ const FAMILY_IDS: Dictionary = {
 
 var pack: RefCounted
 var decisions: RefCounted
+var world_facts: RefCounted
 var kernel_ids: Dictionary = {}
 var use_native_prepared_height_grid: bool = false
 var landform_profile_id: String = TerrainLandformProfileScript.BALANCED_CURRENT
@@ -38,6 +40,8 @@ func setup(runtime_pack: RefCounted) -> void:
 	pack = runtime_pack
 	decisions = TerrainProviderDecisionsScript.new()
 	decisions.setup(pack)
+	world_facts = TerrainWorldFactsScript.new()
+	world_facts.setup(decisions)
 	_index_kernel_ids()
 	apply_landform_profile(TerrainLandformProfileScript.BALANCED_CURRENT)
 
@@ -208,7 +212,7 @@ func _sample_height_grid_single_region(origin_x: float, origin_z: float, step_m:
 
 
 func sample_height_grid_native_prepared(origin_x: float, origin_z: float, step_m: float, count_x: int, count_z: int, world_seed: int = 1337, region_size_m: float = TerrainSettingsScript.REGION_SIZE_M) -> Dictionary:
-	if not _can_use_native_prepared_grid():
+	if not _native_prepared_profile_supported():
 		return {"status": "fail", "error": "native_profile_not_supported"}
 	if not _native_backend_available():
 		return {"status": "fail", "error": "native_backend_unavailable"}
@@ -232,7 +236,7 @@ func sample_height_grid_native_prepared(origin_x: float, origin_z: float, step_m
 
 
 func native_prepared_height_grid_request(origin_x: float, origin_z: float, step_m: float, count_x: int, count_z: int, world_seed: int = 1337, region_size_m: float = TerrainSettingsScript.REGION_SIZE_M) -> Dictionary:
-	if not _landform_profile_is_native_neutral():
+	if not _native_prepared_profile_supported():
 		return {"status": "fail", "error": "native_profile_not_supported"}
 	if not _is_valid_grid_request(origin_x, origin_z, step_m, count_x, count_z, region_size_m):
 		return {"status": "fail", "error": "invalid_grid_request"}
@@ -300,7 +304,11 @@ func _native_backend_available() -> bool:
 
 
 func _can_use_native_prepared_grid() -> bool:
-	return use_native_prepared_height_grid and _landform_profile_is_native_neutral()
+	return use_native_prepared_height_grid and _native_prepared_profile_supported()
+
+
+func _native_prepared_profile_supported() -> bool:
+	return _landform_profile_is_native_neutral()
 
 
 func _landform_profile_is_native_neutral() -> bool:
@@ -377,6 +385,7 @@ func _grid_corner_entries(base_rx: int, base_rz: int, world_seed: int, region_si
 
 func sample(world_x: float, world_z: float, world_seed: int = 1337, region_size_m: float = TerrainSettingsScript.REGION_SIZE_M, slope_step_m: float = 32.0) -> Dictionary:
 	var layers: Dictionary = sample_layers(world_x, world_z, world_seed, region_size_m)
+	var pass_hint: Dictionary = sample_pass_corridor_hint(world_x, world_z, world_seed, region_size_m)
 	var primary_info: Dictionary = primary_families(world_x, world_z, world_seed, region_size_m)
 	var primary: String = str(primary_info["primary_family"])
 	var secondary: String = str(primary_info["secondary_family"])
@@ -408,6 +417,8 @@ func sample(world_x: float, world_z: float, world_seed: int = 1337, region_size_
 		"kernel_relief_m": float(layers["relief"]),
 		"detail_height_m": float(layers["detail"]),
 		"valley_adjust_m": float(layers["valley"]),
+		"pass_corridor_hint": float(pass_hint.get("corridor_strength", 0.0)),
+		"pass_corridor_id": str(pass_hint.get("corridor_id", "")),
 		"slope_hint": slope_hint(world_x, world_z, world_seed, region_size_m, slope_step_m),
 		"roughness_hint": abs(float(layers["detail"])),
 		"confidence": clampf(primary_weight, 0.0, 1.0),
@@ -422,7 +433,20 @@ func sample(world_x: float, world_z: float, world_seed: int = 1337, region_size_
 func sample_layers(x: float, z: float, world_seed: int, region_size_m: float) -> Dictionary:
 	var layers: Dictionary = _sample_layer_values(x, z, world_seed, region_size_m)
 	layers["region"] = f32(palette_weights(x, z, world_seed, region_size_m)["palette_id"])
+	layers["pass_corridor"] = f32(sample_pass_corridor_hint(x, z, world_seed, region_size_m).get("corridor_strength", 0.0))
 	return layers
+
+
+func pass_corridor_facts_for_region(rx: int, rz: int, world_seed: int = 1337, region_size_m: float = TerrainSettingsScript.REGION_SIZE_M) -> Dictionary:
+	if world_facts == null:
+		return {"status": "fail", "error": "world_facts_not_setup"}
+	return world_facts.call("pass_corridor_facts_for_region", rx, rz, world_seed, region_size_m) as Dictionary
+
+
+func sample_pass_corridor_hint(x: float, z: float, world_seed: int = 1337, region_size_m: float = TerrainSettingsScript.REGION_SIZE_M) -> Dictionary:
+	if world_facts == null:
+		return {"status": "fail", "error": "world_facts_not_setup"}
+	return world_facts.call("sample_pass_corridor_hint", x, z, world_seed, region_size_m) as Dictionary
 
 
 func _sample_height_value(x: float, z: float, world_seed: int, region_size_m: float) -> float:

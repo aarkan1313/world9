@@ -98,6 +98,18 @@ func sample(world_x: float, world_z: float, slope_step_m: float = 32.0) -> Dicti
 	return provider.sample(world_x, world_z, seed, region_size_m, slope_step_m)
 
 
+func pass_corridor_facts_for_region(rx: int, rz: int) -> Dictionary:
+	if provider == null or not provider.has_method("pass_corridor_facts_for_region"):
+		return {"status": "fail", "error": "provider_has_no_world_facts"}
+	return provider.call("pass_corridor_facts_for_region", rx, rz, seed, region_size_m) as Dictionary
+
+
+func sample_pass_corridor_hint(world_x: float, world_z: float) -> Dictionary:
+	if provider == null or not provider.has_method("sample_pass_corridor_hint"):
+		return {"status": "fail", "error": "provider_has_no_world_facts"}
+	return provider.call("sample_pass_corridor_hint", world_x, world_z, seed, region_size_m) as Dictionary
+
+
 func sample_height_grid(origin_x: float, origin_z: float, step_m: float, count_x: int, count_z: int) -> PackedFloat32Array:
 	return provider.sample_height_grid(
 		origin_x,
