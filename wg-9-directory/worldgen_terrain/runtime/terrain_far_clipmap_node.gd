@@ -244,6 +244,11 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 				last_deferred_levels.append(level)
 				rebuilt_count += 1
 				continue
+			if use_persistent_page_mesh and _page_cache_has_level(level, _pending_origin):
+				_rebuild_level(level, _pending_origin)
+				last_rebuilt_levels.append(level)
+				rebuilt_count += 1
+				continue
 			if _can_use_native_workers():
 				var schedule_status: String = _schedule_native_worker(level, _pending_origin)
 				if schedule_status == "scheduled":
@@ -467,6 +472,7 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var outer_extent: float = float(payload["outer_extent_m"])
 	var spacing: float = float(payload["spacing_m"])
 	var height: PackedFloat32Array = payload["height"] as PackedFloat32Array
+	_cache_page_payload(level, origin, outer_extent, spacing, side, height)
 	height = _morph_outer_transition_band(level, origin, outer_extent, spacing, side, height)
 	var normals := PackedVector3Array()
 	normals.resize(side * side)
@@ -546,6 +552,52 @@ func _height_page_result_for_level(level: int, origin: Vector2, outer_extent: fl
 		return result
 	_page_cache.put_page(result)
 	return result
+
+
+func _page_cache_has_level(level: int, origin: Vector2) -> bool:
+	_ensure_page_cache()
+	var spacing: float = _level_spacing(level)
+	var outer_extent: float = _level_outer_extent(level)
+	var side: int = _side_for_extent(outer_extent, spacing)
+	var request = _make_far_clipmap_page_request(level, origin, outer_extent, spacing, side)
+	if not request.validate().is_empty():
+		return false
+	return _page_cache.has_page(request.cache_key())
+
+
+func _cache_page_payload(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int, height: PackedFloat32Array) -> void:
+	if not use_persistent_page_mesh:
+		return
+	_ensure_page_cache()
+	var request = _make_far_clipmap_page_request(level, origin, outer_extent, spacing, side)
+	var validation: String = request.validate()
+	if not validation.is_empty():
+		last_page_error = "level_%d:cache_request:%s" % [level, validation]
+		return
+	var result := {
+		"status": "pass",
+		"error": "",
+		"request_key": request.deterministic_key(),
+		"cache_key": request.cache_key(),
+		"version_stamp": request.version_stamp(),
+		"origin_xz": request.origin_xz,
+		"count_x": request.count_x,
+		"count_z": request.count_z,
+		"step_m": request.step_m,
+		"world_seed": request.world_seed,
+		"purpose": request.purpose,
+		"quality_profile": request.quality_profile,
+		"provider_revision": request.provider_revision,
+		"runtime_pack_hash": request.runtime_pack_hash,
+		"height_samples": PackedFloat32Array(height),
+		"timings_ms": {"source": "native_worker"},
+		"metadata": request.metadata.duplicate(true),
+	}
+	var shape_error: String = _validate_page_dictionary_shape(result)
+	if not shape_error.is_empty():
+		last_page_error = "level_%d:cache_payload:%s" % [level, shape_error]
+		return
+	_page_cache.put_page(result)
 
 
 func _failed_page_dictionary(request, error: String) -> Dictionary:
@@ -946,7 +998,6 @@ func _native_backend_available() -> bool:
 func _can_use_native_workers() -> bool:
 	return (
 		use_native_workers
-		and not use_persistent_page_mesh
 		and ClassDB.class_exists("Wg9TerrainNativeBackend")
 		and world != null
 		and world.provider != null
@@ -1162,7 +1213,7 @@ func _commit_staged_payloads_if_ready() -> void:
 		if not _staged_native_payloads.has(level):
 			return
 	for level in range(level_nodes.size()):
-		_assign_level_payload(_staged_native_payloads[level] as Dictionary, false)
+		_assign_level_payload(_staged_native_payloads[level] as Dictionary, use_persistent_page_mesh)
 	_staged_native_payloads.clear()
 	_staged_native_origin = _pending_origin
 

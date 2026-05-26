@@ -28,6 +28,7 @@ func _start() -> void:
 	var expected_level_count: int = _expected_level_count(scene)
 	var expected_latest_recenter: int = expected_level_count
 	var page_mode: bool = bool(boundary_stats.get("use_persistent_page_mesh", false))
+	var page_async: bool = page_mode and scene.use_far_clipmap_native_workers
 	if _count_delta(counts_before, counts_after_boundary) != 0:
 		errors.append("boundary_recenter_rebuilt:%s before:%s" % [str(counts_after_boundary), str(counts_before)])
 	if not (boundary_stats.get("last_scheduled_levels", []) as Array).is_empty():
@@ -41,7 +42,7 @@ func _start() -> void:
 	var expected_latest_origin: Vector2 = scene._far_clipmap_center_xz()
 	var second_stats: Dictionary = scene.far_clipmap.stats()
 	var counts_after_second: Array = _far_counts(scene)
-	if page_mode:
+	if page_mode and not page_async:
 		expected_latest_recenter = expected_level_count * 2
 		if _count_delta(counts_before, counts_after_first) != expected_level_count:
 			errors.append("first_page_recenter_not_committed:%s before:%s" % [str(counts_after_first), str(counts_before)])

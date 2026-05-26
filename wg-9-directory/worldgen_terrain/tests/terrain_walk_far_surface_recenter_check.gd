@@ -52,11 +52,12 @@ func _start() -> void:
 	var stats_after_first: Dictionary = scene.far_clipmap.stats()
 	var counts_after_first: Array = _far_counts(scene)
 	var page_mode: bool = bool(stats_after_first.get("use_persistent_page_mesh", false))
+	var page_async: bool = page_mode and scene.use_far_clipmap_native_workers
 	var rebuilt_after_first: Array = stats_after_first.get("last_rebuilt_levels", []) as Array
 	var scheduled_after_first: Array = stats_after_first.get("last_scheduled_levels", []) as Array
 	var pending_after_first: int = int(stats_after_first.get("pending_rebuild_count", 0))
 	var workers_after_first: int = int(stats_after_first.get("active_worker_count", 0))
-	if page_mode:
+	if page_mode and not page_async:
 		if _count_delta(counts_before_cross, counts_after_first) != expected_level_count:
 			errors.append("surface_page_recenter_not_committed:%s before:%s" % [str(counts_after_first), str(counts_before_cross)])
 		if rebuilt_after_first != _expected_levels(scene):

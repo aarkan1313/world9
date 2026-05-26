@@ -101,7 +101,7 @@ static func _walk_review_profile() -> Dictionary:
 			"far_clipmap_recenter_distance_m": 768.0,
 			"far_clipmap_rebuild_levels_per_update": 4,
 			"far_clipmap_transition_fade_seconds": 0.35,
-			"use_far_clipmap_native_workers": false,
+			"use_far_clipmap_native_workers": true,
 			"use_persistent_page_clipmap": true,
 			"far_clipmap_page_cache_max_pages": 64,
 			"distance_fog_depth_begin_m": 30000.0,

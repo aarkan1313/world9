@@ -58,6 +58,7 @@ walk preview stability: spawn and review jumps are chunk-centered to avoid first
 chunk-boundary recenter: crossing one chunk edge no longer recenters far rings; the far anchor recenters only after meaningful travel, then schedules the far-ring rebuild through native workers instead of blocking the movement frame
 native clipmap payload: far levels use native centered vertex/normal/UV and hole-filtered index generation
 async far clipmap: walk/streaming preview schedules far level rebuilds on native workers instead of rebuilding in the movement frame
+page-backed far workers: persistent page-mode clipmap recentering now uses native workers, caches worker-completed height pages, and commits only when the full page set is ready so previous/current height-page blend remains the transition mechanism
 rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
 visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
 far clipmap transition policy: page-backed clipmap geometry stays opaque; do not alpha-crossfade whole square pages/rings, and smooth recenter/LOD only through world-space previous/current height-page blend, coarse/fine morph bands, and outer-edge-only visibility masking
@@ -149,6 +150,7 @@ Visibility contract gate: `terrain_visibility_contract_check.gd` writes `factory
 Motion profile gate: `terrain_walk_motion_profile_check.gd` drives the live walk preview at high-speed forward motion and writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass shows page-blend/recenter coverage working while the new forward-prefetch gate covers the first near-residency optimization slice.
 Forward-prefetch residency gate: `terrain_walk_prefetch_residency_check.gd` verifies that the walk profile's one-step movement-biased prefetch is resident after workers drain, instead of waiting for the viewer to cross into the next chunk row.
 Worldgen capability gate: `terrain_worldgen_capability_check.gd` writes `factory/runtime/godot_worldgen_capability/worldgen_capability_report.json` and a contact sheet, proving that the runtime provider is selecting multiple DEM-kernel families and not repeating one starting geography everywhere.
+Persistent far-page worker gate: the fast walk recenter, far-surface recenter, rapid recenter, motion-profile, and smoke checks now expect the page-backed clipmap path to schedule far native workers, keep pending pages off the scene-thread rebuild path, and still report page-height blend activity after commit.
 ```
 
 This keeps the later collision path near-player only and separate from visual

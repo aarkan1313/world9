@@ -43,8 +43,8 @@ func _start() -> void:
 func _check_startup_defaults(scene: Node3D, errors: Array[String]) -> void:
 	if not scene.use_persistent_page_clipmap:
 		errors.append("page_clipmap_disabled")
-	if scene.use_far_clipmap_native_workers:
-		errors.append("page_clipmap_mesh_workers_enabled")
+	if not scene.use_far_clipmap_native_workers:
+		errors.append("page_clipmap_workers_disabled")
 	if scene.far_clipmap_rebuild_levels_per_update < scene.far_clipmap_level_count:
 		errors.append("page_clipmap_rebuild_budget_too_low:%d" % scene.far_clipmap_rebuild_levels_per_update)
 	if scene.built_chunk_count() < scene.expected_active_count():
@@ -185,7 +185,8 @@ func _drain_initial_work(scene: Node3D, errors: Array[String]) -> void:
 		var native_workers: int = int(stats.get("active_native_workers", 0))
 		var active: int = int(report.get("active_count", 0))
 		var far_pending: int = int(scene.far_clipmap.stats().get("pending_rebuild_count", 0)) if scene.far_clipmap != null else 0
-		if queued == 0 and native_queued == 0 and native_workers == 0 and far_pending == 0 and scene.built_chunk_count() >= active:
+		var far_workers: int = int(scene.far_clipmap.stats().get("active_worker_count", 0)) if scene.far_clipmap != null else 0
+		if queued == 0 and native_queued == 0 and native_workers == 0 and far_pending == 0 and far_workers == 0 and scene.built_chunk_count() >= active:
 			return
 		OS.delay_msec(5)
 	errors.append("initial_work_not_drained:%s" % scene.diagnostics_text())

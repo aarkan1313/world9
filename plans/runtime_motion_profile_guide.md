@@ -51,6 +51,7 @@ active vs built chunk count
 chunk queue and native worker backlog
 chunk create/retire churn
 far clipmap pending rebuilds
+far clipmap worker activity
 far page rebuild deltas
 far page blend activity
 anchor/recenter frames
@@ -85,6 +86,12 @@ prefetch direction, queue prioritization, worker count, and preload policy.
 The first locked fast-flight residency budget is one forward prefetch step:
 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal-forward chunks after
 movement direction is known.
+
+The current page-backed far clipmap uses native workers for persistent page
+recenter payloads. A healthy recenter frame can show pending far work and active
+far workers without immediately increasing build counts; the commit should
+happen after the full page set is ready, then height-page blend activity should
+be observed.
 
 ```text
 queue_backlog_frames

@@ -50,7 +50,7 @@ far radius: 32768m
 camera far: 120000m
 fog begin/end: 30000m / 33000m
 page recenter: opaque geometry with previous/current height blend
-workers: 6 native chunk workers, far page mesh workers disabled
+workers: 6 native chunk workers, persistent far-page native workers enabled
 ```
 
 The fog values are intentionally part of the profile. They are not a visual
@@ -109,6 +109,11 @@ viewer-tracked fog center.
 The prefetch residency check starts the walk scene, applies forward movement,
 drains terrain workers, and verifies the movement-biased active set is resident:
 49 base chunks plus the expected forward prefetch row for the profile.
+
+The page-backed far clipmap now uses native workers for recenter payloads. The
+old CPU page path remains as a fallback/cache-hit path, but normal motion should
+schedule page payloads off the scene thread, commit the full level set together,
+and start the previous/current height-page blend on assignment.
 
 ## Roadmap Use
 
