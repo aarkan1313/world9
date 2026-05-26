@@ -100,7 +100,7 @@ strong_mountains increases relief on at least one selected mountain-family site
 compressed_scale changes local-relief/frequency on the same selected sites
 same-coordinate adjacent grid seams stay under 1cm
 non-neutral profiles do not claim native prepared-grid support
-live profile tour exposes the same profiles through the normal walk/far stack
+live profile tour exposes the same profiles in a manual near-terrain review scene
 ```
 
 Live review controls:
@@ -111,6 +111,11 @@ P: toggle automatic profile cycling
 N/B: next/previous representative site
 WASD + mouse: normal walk/fly controls
 ```
+
+The live scene keeps far clipmap disabled by default for this review slice.
+Non-neutral profiles intentionally fall back to the GDScript provider path, so
+far clipmap/profile parity belongs in the later native/GPU backend pass rather
+than being hidden by a review scene.
 
 ## Passes And Traversable Corridors
 

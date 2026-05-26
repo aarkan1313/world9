@@ -1,7 +1,7 @@
 class_name TerrainLandformProfileTourScene
 extends "res://worldgen_terrain/runtime/terrain_kernel_tour_scene.gd"
 
-@export var auto_profile_cycle_enabled: bool = true
+@export var auto_profile_cycle_enabled: bool = false
 @export_range(2.0, 20.0, 0.5) var seconds_per_profile: float = 5.0
 @export var advance_site_after_profile_cycle: bool = true
 
@@ -12,7 +12,7 @@ var _profile_elapsed_s: float = 0.0
 func _init() -> void:
 	super._init()
 	auto_tour_enabled = false
-	auto_profile_cycle_enabled = true
+	auto_profile_cycle_enabled = false
 	seconds_per_profile = 5.0
 	landform_profile_id = TerrainLandformProfileScript.BALANCED_CURRENT
 	review_site_target_count = 9

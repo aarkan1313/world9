@@ -1033,13 +1033,19 @@ func _native_backend_available() -> bool:
 
 
 func _can_use_native_workers() -> bool:
-	return (
-		use_native_workers
-		and ClassDB.class_exists("Wg9TerrainNativeBackend")
-		and world != null
-		and world.provider != null
-		and world.provider.has_method("native_prepared_height_grid_request")
-	)
+	if not use_native_workers:
+		return false
+	if not ClassDB.class_exists("Wg9TerrainNativeBackend"):
+		return false
+	if world == null or world.provider == null:
+		return false
+	if not world.provider.has_method("native_prepared_height_grid_request"):
+		return false
+	if world.provider.has_method("landform_profile_report"):
+		var profile_report: Dictionary = world.provider.call("landform_profile_report") as Dictionary
+		if not bool(profile_report.get("native_prepared_grid_enabled", true)):
+			return false
+	return true
 
 
 func _schedule_native_worker(level: int, origin: Vector2) -> String:
