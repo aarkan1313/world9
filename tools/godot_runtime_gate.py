@@ -92,6 +92,7 @@ QUALITY_HEADLESS_CHECKS = [
     "terrain_kernel_gallery_contact_sheet_check.gd",
     "terrain_kernel_tour_scene_check.gd",
     "terrain_landform_quality_probe_check.gd",
+    "terrain_landform_profile_compare_check.gd",
     "terrain_hydrology_consistency_check.gd",
     "terrain_hydrology_tile_cache_check.gd",
     "terrain_hydrology_hint_probe_check.gd",

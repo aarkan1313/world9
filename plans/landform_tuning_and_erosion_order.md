@@ -20,11 +20,11 @@ future terrain should support passes, saddles, valleys, and navigable corridors
 
 These should be solved as generator contracts, not one-off scene hacks.
 
-## Next Slice: Landform Tuning Profiles
+## Implemented Slice: Landform Tuning Profiles
 
-Add review-only landform tuning profiles before changing defaults.
+Review-only landform tuning profiles now exist before changing defaults.
 
-Initial profile targets:
+Implemented profile targets:
 
 ```text
 balanced_current
@@ -43,8 +43,17 @@ regional_scale_multiplier
 pass_corridor_strength, disabled by default
 ```
 
-The first implementation should keep the saved walk scene default unchanged.
-Review profiles should be opt-in and measurable.
+`balanced_current` is the neutral default and is gated to match unprofiled
+terrain. `strong_mountains` raises macro/kernel relief with extra boost for
+mountain, glacial, and volcanic families. `compressed_scale` samples macro and
+kernel terrain at a shorter effective world scale while leaving region IDs and
+family selection anchored to the normal world grid.
+
+Review profiles are opt-in. Non-neutral profiles currently disable native
+prepared-grid/chunk payload generation and fall back to the GDScript provider
+path so the Rust backend cannot silently generate the old neutral height field.
+If one of these profiles is promoted later, the native/GPU backend must receive
+the same profile parameters and parity gates.
 
 ## Acceptance Checks
 
@@ -71,6 +80,24 @@ large landforms are visible at walk/tour scale
 compressed-scale profile shows more variation per travel distance
 terrain does not become noisy, stamped, or obviously tiled
 no new chunk/clipmap seams appear
+```
+
+Current proof:
+
+```text
+res://worldgen_terrain/tests/terrain_landform_profile_compare_check.gd
+factory/runtime/godot_landform_profiles/landform_profile_report.json
+factory/runtime/godot_landform_profiles/landform_profile_contact_sheet.png
+```
+
+The gate currently checks:
+
+```text
+neutral profile does not change default sampled heights
+strong_mountains increases relief on at least one selected mountain-family site
+compressed_scale changes local-relief/frequency on the same selected sites
+same-coordinate adjacent grid seams stay under 1cm
+non-neutral profiles do not claim native prepared-grid support
 ```
 
 ## Passes And Traversable Corridors
@@ -170,10 +197,9 @@ do not add final biome art before the world facts are stable
 Current recommended order:
 
 ```text
-1. landform tuning profile contract
-2. profile comparison probe/contact sheet/tour
-3. choose or revise default scale/relief
-4. add pass/corridor world-fact placeholder
-5. continue hydrology/rivers
-6. add erosion residuals only after the above reads correctly
+1. visually review landform profile contact sheet and live profile behavior
+2. choose whether to keep balanced_current or revise default scale/relief
+3. add pass/corridor world-fact placeholder
+4. continue hydrology/rivers
+5. add erosion residuals only after the above reads correctly
 ```

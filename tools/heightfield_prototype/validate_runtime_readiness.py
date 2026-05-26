@@ -56,6 +56,7 @@ def validate() -> dict[str, Any]:
         "runtime_budget": RUNTIME / "runtime_budget" / "runtime_budget.json",
         "godot_review_index_manifest": RUNTIME / "godot_review_index" / "review_index_manifest.json",
         "landform_quality_report": RUNTIME / "godot_landform_quality" / "landform_quality_report.json",
+        "landform_profile_report": RUNTIME / "godot_landform_profiles" / "landform_profile_report.json",
         "hydrology_hint_report": RUNTIME / "godot_hydrology_hints" / "hydrology_hint_report.json",
         "hydrology_consistency_report": RUNTIME / "godot_hydrology_hints" / "hydrology_consistency_report.json",
         "hydrology_tile_cache_report": RUNTIME / "godot_hydrology_tiles" / "hydrology_tile_cache_report.json",
@@ -92,6 +93,7 @@ def validate() -> dict[str, Any]:
     runtime_budget = read_json(paths["runtime_budget"])
     godot_review_index_manifest = read_json(paths["godot_review_index_manifest"])
     landform_quality_report = read_json(paths["landform_quality_report"])
+    landform_profile_report = read_json(paths["landform_profile_report"])
     hydrology_hint_report = read_json(paths["hydrology_hint_report"])
     hydrology_consistency_report = read_json(paths["hydrology_consistency_report"])
     hydrology_tile_cache_report = read_json(paths["hydrology_tile_cache_report"])
@@ -184,6 +186,7 @@ def validate() -> dict[str, Any]:
     )
     _check_godot_review_index(godot_review_index_manifest, errors)
     _check_landform_quality_report(landform_quality_report, errors)
+    _check_landform_profile_report(landform_profile_report, errors)
     _check_hydrology_reports(hydrology_hint_report, hydrology_consistency_report, hydrology_tile_cache_report, errors)
     _check_debug_mode_perf_report(debug_mode_perf_report, errors)
     _check_streaming_far_overview_budget(runtime_budget, streaming_far_overview_manifest, errors)
@@ -460,6 +463,38 @@ def _check_landform_quality_report(report: dict[str, Any], errors: list[str]) ->
         families.add(str(case.get("primary_family", "")))
     check(strong_count >= 3, errors, "landform_quality_strong_count")
     check(len(families - {""}) >= 4, errors, "landform_quality_family_variety")
+
+
+def _check_landform_profile_report(report: dict[str, Any], errors: list[str]) -> None:
+    check(report.get("schema") == "worldgen9.landform_profile_report.v1", errors, "landform_profile_schema")
+    check(int(report.get("grid_size", 0)) == 81, errors, "landform_profile_grid_size")
+    expected_profiles = ["balanced_current", "strong_mountains", "compressed_scale"]
+    check(report.get("profile_ids", []) == expected_profiles, errors, "landform_profile_ids")
+    sites = report.get("sites", [])
+    check(len(sites) >= 3, errors, "landform_profile_site_count")
+    strong_improved = False
+    compressed_changed = False
+    for site in sites:
+        by_profile = {str(item.get("profile", "")): item for item in site.get("profiles", [])}
+        for profile_id in expected_profiles:
+            check(profile_id in by_profile, errors, f"landform_profile_missing:{profile_id}")
+        if not all(profile_id in by_profile for profile_id in expected_profiles):
+            continue
+        balanced = by_profile["balanced_current"]
+        strong = by_profile["strong_mountains"]
+        compressed = by_profile["compressed_scale"]
+        for profile_id, item in by_profile.items():
+            check(float(item.get("seam_max_delta_m", 1.0)) <= 0.01, errors, f"landform_profile_seam:{profile_id}")
+            check(float(item.get("height_range_m", 0.0)) >= 100.0, errors, f"landform_profile_height_range:{profile_id}")
+        check(bool(balanced.get("native_prepared_grid_enabled", False)), errors, "landform_profile_balanced_native")
+        check(not bool(strong.get("native_prepared_grid_enabled", True)), errors, "landform_profile_strong_native")
+        check(not bool(compressed.get("native_prepared_grid_enabled", True)), errors, "landform_profile_compressed_native")
+        if float(strong.get("relief_p05_p95_m", 0.0)) >= float(balanced.get("relief_p05_p95_m", 0.0)) * 1.03:
+            strong_improved = True
+        if abs(float(compressed.get("mean_local_relief_m", 0.0)) - float(balanced.get("mean_local_relief_m", 0.0))) >= 1.0:
+            compressed_changed = True
+    check(strong_improved, errors, "landform_profile_strong_effect")
+    check(compressed_changed, errors, "landform_profile_compressed_effect")
 
 
 def _check_hydrology_hint_report(report: dict[str, Any], errors: list[str]) -> None:

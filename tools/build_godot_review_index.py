@@ -25,6 +25,8 @@ SECTIONS: list[dict[str, Any]] = [
             "factory/runtime/godot_streaming_review/streaming_review_contact_sheet.png",
             "factory/runtime/godot_landform_quality/landform_quality_contact_sheet.png",
             "factory/runtime/godot_landform_quality/landform_quality_report.json",
+            "factory/runtime/godot_landform_profiles/landform_profile_contact_sheet.png",
+            "factory/runtime/godot_landform_profiles/landform_profile_report.json",
         ],
     },
     {

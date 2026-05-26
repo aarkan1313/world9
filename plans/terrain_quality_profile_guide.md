@@ -201,5 +201,39 @@ Next profile work:
 1. Add profile-specific motion thresholds now that the first fast-flight residency policy is gated.
 2. Add human-review acceptance notes for `local_detail_review` and `high_density_257_review` before either influences defaults.
 3. Move far page generation/upload toward GPU compute or lower-churn native texture upload after visual review remains stable.
-4. Add optional profile tiers for high-density/257v review, review-only far radius, and hidden-edge buffer tuning.
+4. Add optional profile tiers for review-only far radius and hidden-edge buffer tuning.
 ```
+
+## Landform Profiles
+
+Terrain quality profiles are runtime/render contracts. Landform tuning profiles
+are generator contracts and live in:
+
+```text
+res://worldgen_terrain/height/terrain_landform_profile.gd
+```
+
+Current landform profiles:
+
+```text
+balanced_current
+strong_mountains
+compressed_scale
+```
+
+They are validated by:
+
+```text
+python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_landform_profile_compare_check.gd
+```
+
+The check writes:
+
+```text
+D:/workflows/worldgen9/factory/runtime/godot_landform_profiles/landform_profile_report.json
+D:/workflows/worldgen9/factory/runtime/godot_landform_profiles/landform_profile_contact_sheet.png
+```
+
+Non-neutral landform profiles are review-only. They intentionally disable native
+prepared-grid/chunk payload support until the native/GPU backend consumes the
+same profile settings and passes parity.

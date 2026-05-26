@@ -122,6 +122,18 @@ func sample_height_grid_for_chunk(chunk_x: int, chunk_z: int, vertices_per_side:
 	)
 
 
+func apply_landform_profile(profile: Variant) -> bool:
+	if provider == null or not provider.has_method("apply_landform_profile"):
+		return false
+	return bool(provider.call("apply_landform_profile", profile))
+
+
+func landform_profile_report() -> Dictionary:
+	if provider == null or not provider.has_method("landform_profile_report"):
+		return {}
+	return provider.call("landform_profile_report") as Dictionary
+
+
 func active_count() -> int:
 	return chunks.size()
 
