@@ -9,7 +9,7 @@ const TerrainFarClipmapNodeScript := preload("res://worldgen_terrain/runtime/ter
 const TerrainLocalDetailNodeScript := preload("res://worldgen_terrain/runtime/terrain_local_detail_node.gd")
 const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_world_node.gd")
 
-@export_enum("gray", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
+@export_enum("gray", "elevation_color", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
 @export_range(17, 257, 16) var vertices_per_side: int = 33
 @export_range(1, 5, 1) var visible_radius_chunks: int = 1
 @export_range(1, 16, 1) var build_budget_per_frame: int = 1
@@ -255,6 +255,8 @@ func apply_debug_mode(mode: String) -> void:
 	debug_mode = mode
 	if terrain != null:
 		terrain.apply_debug_mode(mode)
+	if far_clipmap != null:
+		_configure_far_clipmap_node()
 
 
 func expected_active_count() -> int:
@@ -705,6 +707,7 @@ func _configure_far_clipmap_node() -> void:
 	far_clipmap.use_persistent_page_mesh = use_persistent_page_clipmap
 	far_clipmap.page_cache_max_pages = far_clipmap_page_cache_max_pages
 	far_clipmap.use_surface_texture_material = use_far_clipmap_surface_material
+	far_clipmap.set_elevation_color_material(debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR)
 	far_clipmap.surface_texture_normal_strength = far_clipmap_surface_normal_strength
 	far_clipmap.visual_y_bias_per_level_m = far_clipmap_visual_y_bias_per_level_m
 	far_clipmap.level0_full_underlay_enabled = far_clipmap_full_underlay_level0
@@ -712,7 +715,7 @@ func _configure_far_clipmap_node() -> void:
 
 
 func _far_clipmap_config_key_for_current_settings() -> String:
-	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f" % [
+	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d" % [
 		far_clipmap_level_count,
 		far_clipmap_base_spacing_m,
 		far_clipmap_base_outer_extent_m,
@@ -732,6 +735,7 @@ func _far_clipmap_config_key_for_current_settings() -> String:
 		distance_fog_color.r,
 		distance_fog_color.g,
 		distance_fog_color.b,
+		1 if debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR else 0,
 	]
 
 
@@ -763,6 +767,8 @@ func _apply_debug_key_input() -> void:
 		apply_debug_mode(TerrainWorldScript.DEBUG_CHUNK_ID)
 	elif Input.is_key_pressed(KEY_7):
 		apply_debug_mode(TerrainWorldScript.DEBUG_HYDROLOGY)
+	elif Input.is_key_pressed(KEY_8):
+		apply_debug_mode(TerrainWorldScript.DEBUG_ELEVATION_COLOR)
 
 
 func _apply_local_detail_review_key_input() -> void:

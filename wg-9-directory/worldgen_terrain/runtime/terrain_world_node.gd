@@ -10,7 +10,7 @@ const TerrainChunkRendererScript := preload("res://worldgen_terrain/runtime/terr
 const HydrologyTileCacheScript := preload("res://worldgen_terrain/hydrology/hydrology_tile_cache.gd")
 
 @export_enum("procedural", "flat") var provider_mode: String = TerrainWorldScript.PROVIDER_PROCEDURAL
-@export_enum("gray", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
+@export_enum("gray", "elevation_color", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
 @export var seed: int = 1337
 @export var flat_height_m: float = 0.0
 @export_range(17, 257, 16) var vertices_per_side: int = TerrainSettingsScript.LOD0_VERTICES_PER_SIDE
@@ -41,6 +41,7 @@ var last_report: Dictionary = {}
 var errors: Array[String] = []
 var _active_info_by_key: Dictionary = {}
 var _gray_material: ShaderMaterial
+var _elevation_color_material: ShaderMaterial
 var _hydrology_cache: RefCounted
 var _chunk_renderer: RefCounted
 var _native_backend: Object
@@ -1156,6 +1157,8 @@ func _build_gray_colors_for_chunk(chunk_x: int, chunk_z: int, count: int, step_m
 func _material_for_chunk(chunk_x: int, chunk_z: int, ring: int, lod: int) -> Material:
 	if debug_mode == TerrainWorldScript.DEBUG_HEIGHT_BANDS:
 		return _height_band_material()
+	if debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR:
+		return _elevation_color_material_for_chunks()
 	if debug_mode == TerrainWorldScript.DEBUG_GRAY and use_fast_gray_material:
 		return _fast_gray_material()
 	var material := StandardMaterial3D.new()
@@ -1299,6 +1302,77 @@ void fragment() {
 	_gray_material.set_shader_parameter("gray_contrast", fast_gray_contrast)
 	_apply_edge_fog_shader_parameters(_gray_material)
 	return _gray_material
+
+
+func _elevation_color_material_for_chunks() -> ShaderMaterial:
+	if _elevation_color_material != null:
+		_apply_edge_fog_shader_parameters(_elevation_color_material)
+		return _elevation_color_material
+	var shader := Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+
+uniform bool edge_fog_enabled = false;
+uniform float edge_fog_begin_m = 24000.0;
+uniform float edge_fog_end_m = 33000.0;
+uniform vec3 edge_fog_color = vec3(0.18, 0.18, 0.18);
+
+varying float height_m;
+varying vec3 terrain_normal;
+varying vec3 world_position;
+
+vec3 elevation_palette(float t) {
+	t = clamp(t, 0.0, 1.0);
+	if (t < 0.16) {
+		return mix(vec3(0.005, 0.006, 0.012), vec3(0.02, 0.05, 0.22), t / 0.16);
+	}
+	if (t < 0.32) {
+		return mix(vec3(0.02, 0.05, 0.22), vec3(0.02, 0.35, 0.70), (t - 0.16) / 0.16);
+	}
+	if (t < 0.48) {
+		return mix(vec3(0.02, 0.35, 0.70), vec3(0.05, 0.58, 0.24), (t - 0.32) / 0.16);
+	}
+	if (t < 0.64) {
+		return mix(vec3(0.05, 0.58, 0.24), vec3(0.95, 0.86, 0.20), (t - 0.48) / 0.16);
+	}
+	if (t < 0.80) {
+		return mix(vec3(0.95, 0.86, 0.20), vec3(0.90, 0.20, 0.08), (t - 0.64) / 0.16);
+	}
+	if (t < 0.92) {
+		return mix(vec3(0.90, 0.20, 0.08), vec3(0.70, 0.24, 0.86), (t - 0.80) / 0.12);
+	}
+	return mix(vec3(0.70, 0.24, 0.86), vec3(1.0, 1.0, 1.0), (t - 0.92) / 0.08);
+}
+
+void vertex() {
+	height_m = VERTEX.y;
+	terrain_normal = normalize(NORMAL);
+	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	vec3 n = normalize(terrain_normal);
+	if (n.y < 0.0) {
+		n = -n;
+	}
+	if (n.y < 0.25) {
+		n = vec3(0.0, 1.0, 0.0);
+	}
+	vec3 review_n = normalize(vec3(n.x * 0.75, n.y, n.z * 0.75));
+	vec3 light_dir = normalize(vec3(-0.42, 0.74, -0.52));
+	float lambert = dot(review_n, light_dir) * 0.5 + 0.5;
+	float height_t = clamp(0.5 + atan(height_m / 1800.0) / 3.14159265, 0.0, 1.0);
+	vec3 color = elevation_palette(height_t);
+	float shade = clamp(0.62 + lambert * 0.32 - (1.0 - review_n.y) * 0.08, 0.45, 1.0);
+	float fog_t = edge_fog_enabled ? smoothstep(edge_fog_begin_m, edge_fog_end_m, distance(world_position.xz, CAMERA_POSITION_WORLD.xz)) : 0.0;
+	ALBEDO = mix(color * shade, edge_fog_color, fog_t);
+}
+"""
+	_elevation_color_material = ShaderMaterial.new()
+	_elevation_color_material.shader = shader
+	_apply_edge_fog_shader_parameters(_elevation_color_material)
+	return _elevation_color_material
 
 
 func _apply_edge_fog_shader_parameters(material: ShaderMaterial) -> void:

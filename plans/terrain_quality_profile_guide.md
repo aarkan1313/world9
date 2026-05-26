@@ -42,6 +42,7 @@ The walk preview applies this profile in `_init()` and exposes
 
 ```text
 near terrain: 512m chunks, 129 vertices, 4m spacing
+review color: elevation_color
 near window: 7x7 chunks
 near forward prefetch: 1 movement-biased overlap window
 far terrain: 4 page-backed clipmap levels
@@ -62,6 +63,12 @@ corner fan ahead of the current movement vector so fast flight has terrain
 resident before the viewer reaches the next chunk boundary. The current walk
 profile expects 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal
 forward chunks after movement direction is known.
+
+`elevation_color` is the default walk-review mode so landform changes are not
+hidden by a flat white/gray surface. It is still a debug material, not final
+biome texturing: low elevations are dark, middle elevations pass through a
+rainbow ramp, and high elevations trend toward white. Press `1` for the old gray
+review and `8` to return to elevation color.
 
 ## Gates
 
@@ -85,6 +92,7 @@ camera far matches the profile
 visibility loaded radius matches far clipmap budget
 fog begin/end/camera far form a sane edge-only visibility contract
 walk profile carries the forward-prefetch setting
+walk profile uses elevation-color review by default
 ```
 
 The visibility contract check writes:

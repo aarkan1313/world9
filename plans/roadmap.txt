@@ -46,8 +46,10 @@ The live Godot preview is now past the first one-tile proof. Current direction:
 
 ```text
 near terrain: 512m chunks, 129 vertices, 4m spacing, native worker payloads
+review surface: default walk preview now uses an elevation-color debug material so low/mid/high landforms are visually distinct before real biome textures exist
 retained terrain: 7x7 walk chunk window with full-density near review by default, plus far 4L clipmap coverage for larger visible range
 fast-flight residency: the walk profile prefetches one movement-biased near chunk row ahead of the viewer, gated as 49 base chunks, 56 cardinal-forward chunks, or 62 diagonal-forward chunks
+worldgen capability proof: `terrain_worldgen_capability_check.gd` samples 12 diverse region sites and currently reports 6 palettes, 9 families, 20 unique kernels, and DEM-kernel relief active at all 12 sites
 LOD transition continuity: mixed-density shared edge samples are machine-checked at zero height/XZ delta; fine chunk edge bands now morph toward coarser neighbor sampling while inner samples stay raw
 far terrain: visual clipmap rings with a level-0 overlap band below authoritative chunk edges
 far clipmap continuity: levels share one base-snapped origin, with zero tested fine/coarse transition height deltas
@@ -120,9 +122,9 @@ Movement perf gate: chunk-centered walk spawn keeps small movement at ~2-3ms and
 Boundary recenter gate: first real chunk-boundary crossing keeps far clipmap counts stable; larger travel schedules far rings asynchronously, then drains pending levels
 Rapid recenter gate: boundary ping-pong keeps counts unchanged; rapid larger recenter requests defer level 0 while the worker is active, and finish all levels at the newest origin
 Native clipmap payload gate: direct backend check verifies centered vertices, UVs, and hole-filtered indices
-Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 17 headless native/clipmap/walk checks, including the quality-profile, visibility-contract, walk motion/recenter profile, and forward-prefetch residency gates
-Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 31 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, quality-profile, visibility-contract, motion-profile, and forward-prefetch residency checks
-Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 7 landform, hydrology, debug performance, streaming performance, and 257-walk-density checks
+Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 18 headless native/clipmap/walk checks, including the quality-profile, visibility-contract, elevation-color material, walk motion/recenter profile, and forward-prefetch residency gates
+Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 32 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, quality-profile, visibility-contract, elevation-color material, motion-profile, and forward-prefetch residency checks
+Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 8 worldgen-capability, landform, hydrology, debug performance, streaming performance, and 257-walk-density checks
 Hydrology/debug performance: cross-region height grids now split into per-region fast blocks, so padded hydrology windows avoid the slow scalar fallback; quality gate time is back in single-digit seconds on the current machine
 Renderer boundary: `TerrainChunkRenderer` now owns chunk MeshInstance lifecycle and bounded pooling, while `TerrainWorldNode` remains orchestration/build-policy glue
 Quality release guard: runtime readiness checks landform/hydrology report schemas, six-window coverage, relief/source-confidence thresholds, stable/window-limited hydrology field policy, and zero hydrology tile seam deltas
@@ -135,6 +137,7 @@ High-density visual review: `godot_walk_density_review/walk_density_contact_shee
 High-density budget: current default 9x9 skirted walk window is ~572,416 triangles / 16.652 MiB at 129/4m with max LOD capped at 2; the 257/2m review remains a 7x7 opt-in window at ~1,947,648 triangles / 56.129 MiB
 Runtime budget release guard: runtime readiness now checks baseline 65/129/257 LOD totals, 129/4m versus 257/2m walk-density cost, standalone far clipmap budgets, and walk-preview far clipmap budgets
 Walk readability guard: live walk preview now starts closer to player-scale review height, uses a neutral background, caps gray/far-clipmap brightness, and locks a walk-density manifest that rejects washed-out frames
+Elevation-color review: `elevation_color` is the default walk profile material, with dark low terrain, rainbow mid elevations, and white high terrain; `1` still toggles gray and `8` returns to elevation color.
 Visual seam/readability guard: near fast-gray chunks and far clipmap gray review now use the same world-height shading response, guard degenerate rendered-geometry normals, de-emphasize vertical skirt walls, keep clipmap level 0 as a handoff overlap band below near chunk edges, overlap visual clipmap handoffs, and keep far anchors stable across chunk-edge ping-pong
 Walk review controls: `G` toggles free-fly versus ground-follow review mode; ground mode holds the camera at player eye height using the authoritative height provider while free-fly remains available for fast inspection
 Artifact policy: debug performance artifacts store deterministic pass/fail checks, raw measured milliseconds stay in stdout/gate output, and locked render captures avoid volatile diagnostic overlay text
@@ -145,6 +148,7 @@ Far-edge masking: walk/streaming preview fog is depth-edge only, with no global 
 Visibility contract gate: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and validates loaded radius, camera far, hidden buffer, fog begin/end, fog transition length, edge shader fog settings, and viewer-tracked fog center against the `walk_review` profile.
 Motion profile gate: `terrain_walk_motion_profile_check.gd` drives the live walk preview at high-speed forward motion and writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass shows page-blend/recenter coverage working while the new forward-prefetch gate covers the first near-residency optimization slice.
 Forward-prefetch residency gate: `terrain_walk_prefetch_residency_check.gd` verifies that the walk profile's one-step movement-biased prefetch is resident after workers drain, instead of waiting for the viewer to cross into the next chunk row.
+Worldgen capability gate: `terrain_worldgen_capability_check.gd` writes `factory/runtime/godot_worldgen_capability/worldgen_capability_report.json` and a contact sheet, proving that the runtime provider is selecting multiple DEM-kernel families and not repeating one starting geography everywhere.
 ```
 
 This keeps the later collision path near-player only and separate from visual

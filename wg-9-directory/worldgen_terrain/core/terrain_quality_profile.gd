@@ -75,6 +75,7 @@ static func _walk_review_profile() -> Dictionary:
 		"description": "Default live walk/fly review profile for 129v near chunks plus 4-level page-backed far clipmap.",
 		"settings": {
 			"chunk_size_m": 512.0,
+			"debug_mode": "elevation_color",
 			"vertices_per_side": 129,
 			"visible_radius_chunks": 3,
 			"max_lod": 2,

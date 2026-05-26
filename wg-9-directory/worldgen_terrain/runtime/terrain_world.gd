@@ -12,6 +12,7 @@ const PROVIDER_FLAT := "flat"
 const PROVIDER_PROCEDURAL := "procedural"
 
 const DEBUG_GRAY := "gray"
+const DEBUG_ELEVATION_COLOR := "elevation_color"
 const DEBUG_CHUNK_ID := "chunk_id"
 const DEBUG_LOD_RING := "lod_ring"
 const DEBUG_HEIGHT_BANDS := "height_bands"
@@ -143,6 +144,7 @@ func set_debug_mode(mode: String) -> void:
 func valid_debug_modes() -> Array[String]:
 	return [
 		DEBUG_GRAY,
+		DEBUG_ELEVATION_COLOR,
 		DEBUG_CHUNK_ID,
 		DEBUG_LOD_RING,
 		DEBUG_HEIGHT_BANDS,

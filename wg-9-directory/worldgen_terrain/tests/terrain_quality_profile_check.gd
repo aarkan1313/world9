@@ -64,6 +64,7 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 	var settings: Dictionary = profile.get("settings", {}) as Dictionary
 	var required_keys: Array[String] = [
 		"chunk_size_m",
+		"debug_mode",
 		"vertices_per_side",
 		"visible_radius_chunks",
 		"build_budget_per_frame",

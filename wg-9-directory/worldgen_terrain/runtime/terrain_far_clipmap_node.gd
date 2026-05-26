@@ -15,6 +15,7 @@ const TerrainPageCacheScript := preload("res://worldgen_terrain/core/terrain_pag
 @export var level0_full_underlay_enabled: bool = false
 @export var debug_level_colors: bool = false
 @export var use_surface_texture_material: bool = false
+@export var use_elevation_color_material: bool = false
 @export var visual_y_bias_per_level_m: float = -0.08
 @export_range(0.0, 3.0, 0.05) var transition_fade_seconds: float = 0.45
 @export_range(1, 16, 1) var max_rebuild_levels_per_update: int = 16
@@ -159,6 +160,13 @@ func set_debug_level_colors(enabled: bool) -> void:
 		mesh_instance.material_override = _material_for_level(level)
 
 
+func set_elevation_color_material(enabled: bool) -> void:
+	use_elevation_color_material = enabled
+	for level in range(level_nodes.size()):
+		var mesh_instance: MeshInstance3D = level_nodes[level]
+		mesh_instance.material_override = _material_for_level(level)
+
+
 func apply_surface_material_settings(enabled: bool, normal_strength: float, refresh_existing: bool = true) -> void:
 	use_surface_texture_material = enabled
 	surface_texture_normal_strength = max(0.0, normal_strength)
@@ -262,6 +270,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_build_ms": last_build_ms,
 		"last_surface_texture_ms": last_surface_texture_ms,
 		"use_surface_texture_material": use_surface_texture_material,
+		"use_elevation_color_material": use_elevation_color_material,
 		"build_counts": level_build_counts.duplicate(),
 		"pending_rebuild_count": pending_rebuild_count,
 		"active_transition_count": active_transition_count,
@@ -1513,6 +1522,7 @@ func _page_height_material_for_descriptor(
 	material.set_shader_parameter("inner_extent_m", float(descriptor.get("inner_extent_m", 0.0)))
 	material.set_shader_parameter("outer_extent_m", float(descriptor.get("outer_extent_m", 0.0)))
 	material.set_shader_parameter("boundary_blend_width_m", max(512.0, float(descriptor.get("outer_extent_m", 0.0)) * 0.035))
+	material.set_shader_parameter("elevation_color_enabled", use_elevation_color_material)
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
 
@@ -1590,6 +1600,7 @@ func _material_for_level(level: int, alpha: float = 1.0) -> Material:
 	var material := ShaderMaterial.new()
 	material.shader = _gray_material_shader(alpha < 0.999)
 	material.set_shader_parameter("fade_alpha", alpha)
+	material.set_shader_parameter("elevation_color_enabled", use_elevation_color_material)
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
 
@@ -1606,6 +1617,7 @@ func _surface_texture_material_for_descriptor(descriptor: Dictionary, alpha: flo
 	material.set_shader_parameter("height_range_m", max(0.000001, float(descriptor["height_range_m"])))
 	material.set_shader_parameter("normal_strength", surface_texture_normal_strength)
 	material.set_shader_parameter("fade_alpha", alpha)
+	material.set_shader_parameter("elevation_color_enabled", use_elevation_color_material)
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
 
@@ -1619,6 +1631,7 @@ func _refresh_surface_material_parameters(mesh_instance: MeshInstance3D, level: 
 	if height_texture == null or normal_texture == null:
 		return false
 	material.set_shader_parameter("normal_strength", surface_texture_normal_strength)
+	material.set_shader_parameter("elevation_color_enabled", use_elevation_color_material)
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return true
 
@@ -1645,10 +1658,34 @@ uniform float edge_fog_end_m = 33000.0;
 uniform vec3 edge_fog_color = vec3(0.18, 0.18, 0.18);
 uniform bool edge_fog_square_enabled = true;
 uniform vec2 edge_fog_center_xz = vec2(0.0, 0.0);
+uniform bool elevation_color_enabled = false;
 
 varying float height_m;
 varying vec3 terrain_normal;
 varying vec3 world_position;
+
+vec3 elevation_palette(float t) {
+	t = clamp(t, 0.0, 1.0);
+	if (t < 0.16) {
+		return mix(vec3(0.005, 0.006, 0.012), vec3(0.02, 0.05, 0.22), t / 0.16);
+	}
+	if (t < 0.32) {
+		return mix(vec3(0.02, 0.05, 0.22), vec3(0.02, 0.35, 0.70), (t - 0.16) / 0.16);
+	}
+	if (t < 0.48) {
+		return mix(vec3(0.02, 0.35, 0.70), vec3(0.05, 0.58, 0.24), (t - 0.32) / 0.16);
+	}
+	if (t < 0.64) {
+		return mix(vec3(0.05, 0.58, 0.24), vec3(0.95, 0.86, 0.20), (t - 0.48) / 0.16);
+	}
+	if (t < 0.80) {
+		return mix(vec3(0.95, 0.86, 0.20), vec3(0.90, 0.20, 0.08), (t - 0.64) / 0.16);
+	}
+	if (t < 0.92) {
+		return mix(vec3(0.90, 0.20, 0.08), vec3(0.70, 0.24, 0.86), (t - 0.80) / 0.12);
+	}
+	return mix(vec3(0.70, 0.24, 0.86), vec3(1.0, 1.0, 1.0), (t - 0.92) / 0.08);
+}
 
 void vertex() {
 	height_m = VERTEX.y;
@@ -1675,6 +1712,9 @@ void fragment() {
 	float height_t = clamp(compressed_height, 0.0, 1.0);
 	vec3 elevation_tint = mix(vec3(0.56, 0.62, 0.58), vec3(0.80, 0.74, 0.62), height_t);
 	vec3 color = vec3(shade) * mix(vec3(1.0), elevation_tint * 1.24, 0.28);
+	if (elevation_color_enabled) {
+		color = elevation_palette(height_t) * clamp(0.62 + lambert * 0.32 - (1.0 - review_n.y) * 0.08, 0.45, 1.0);
+	}
 	float camera_distance_m = distance(world_position.xz, CAMERA_POSITION_WORLD.xz);
 	float square_distance_m = max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y));
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
@@ -1713,10 +1753,34 @@ uniform float edge_fog_end_m = 33000.0;
 uniform vec3 edge_fog_color = vec3(0.18, 0.18, 0.18);
 uniform bool edge_fog_square_enabled = true;
 uniform vec2 edge_fog_center_xz = vec2(0.0, 0.0);
+uniform bool elevation_color_enabled = false;
 
 varying vec2 local_uv;
 varying vec3 terrain_normal;
 varying vec3 world_position;
+
+vec3 elevation_palette(float t) {
+	t = clamp(t, 0.0, 1.0);
+	if (t < 0.16) {
+		return mix(vec3(0.005, 0.006, 0.012), vec3(0.02, 0.05, 0.22), t / 0.16);
+	}
+	if (t < 0.32) {
+		return mix(vec3(0.02, 0.05, 0.22), vec3(0.02, 0.35, 0.70), (t - 0.16) / 0.16);
+	}
+	if (t < 0.48) {
+		return mix(vec3(0.02, 0.35, 0.70), vec3(0.05, 0.58, 0.24), (t - 0.32) / 0.16);
+	}
+	if (t < 0.64) {
+		return mix(vec3(0.05, 0.58, 0.24), vec3(0.95, 0.86, 0.20), (t - 0.48) / 0.16);
+	}
+	if (t < 0.80) {
+		return mix(vec3(0.95, 0.86, 0.20), vec3(0.90, 0.20, 0.08), (t - 0.64) / 0.16);
+	}
+	if (t < 0.92) {
+		return mix(vec3(0.90, 0.20, 0.08), vec3(0.70, 0.24, 0.86), (t - 0.80) / 0.12);
+	}
+	return mix(vec3(0.70, 0.24, 0.86), vec3(1.0, 1.0, 1.0), (t - 0.92) / 0.08);
+}
 
 void vertex() {
 	local_uv = UV;
@@ -1746,6 +1810,9 @@ void fragment() {
 	float height_t = clamp(compressed_height, 0.0, 1.0);
 	vec3 elevation_tint = mix(vec3(0.56, 0.62, 0.58), vec3(0.80, 0.74, 0.62), height_t);
 	vec3 color = vec3(shade) * mix(vec3(1.0), elevation_tint * 1.24, 0.28);
+	if (elevation_color_enabled) {
+		color = elevation_palette(height_t) * clamp(0.62 + lambert * 0.32 - (1.0 - review_n.y) * 0.08, 0.45, 1.0);
+	}
 	float camera_distance_m = distance(world_position.xz, CAMERA_POSITION_WORLD.xz);
 	float square_distance_m = max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y));
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
@@ -1794,6 +1861,7 @@ uniform float edge_fog_end_m = 33000.0;
 uniform vec3 edge_fog_color = vec3(0.18, 0.18, 0.18);
 uniform bool edge_fog_square_enabled = true;
 uniform vec2 edge_fog_center_xz = vec2(0.0, 0.0);
+uniform bool elevation_color_enabled = false;
 
 varying vec2 local_uv;
 varying vec2 current_uv;
@@ -1803,6 +1871,29 @@ varying vec2 local_xz;
 varying float height_m;
 varying vec3 terrain_normal;
 varying vec3 world_position;
+
+vec3 elevation_palette(float t) {
+	t = clamp(t, 0.0, 1.0);
+	if (t < 0.16) {
+		return mix(vec3(0.005, 0.006, 0.012), vec3(0.02, 0.05, 0.22), t / 0.16);
+	}
+	if (t < 0.32) {
+		return mix(vec3(0.02, 0.05, 0.22), vec3(0.02, 0.35, 0.70), (t - 0.16) / 0.16);
+	}
+	if (t < 0.48) {
+		return mix(vec3(0.02, 0.35, 0.70), vec3(0.05, 0.58, 0.24), (t - 0.32) / 0.16);
+	}
+	if (t < 0.64) {
+		return mix(vec3(0.05, 0.58, 0.24), vec3(0.95, 0.86, 0.20), (t - 0.48) / 0.16);
+	}
+	if (t < 0.80) {
+		return mix(vec3(0.95, 0.86, 0.20), vec3(0.90, 0.20, 0.08), (t - 0.64) / 0.16);
+	}
+	if (t < 0.92) {
+		return mix(vec3(0.90, 0.20, 0.08), vec3(0.70, 0.24, 0.86), (t - 0.80) / 0.12);
+	}
+	return mix(vec3(0.70, 0.24, 0.86), vec3(1.0, 1.0, 1.0), (t - 0.92) / 0.08);
+}
 
 vec2 page_uv_for_world(vec2 world_xz, vec2 origin_m, float extent_m) {
 	float diameter_m = max(extent_m * 2.0, 1e-6);
@@ -1876,6 +1967,9 @@ void fragment() {
 	float height_t = clamp(compressed_height, 0.0, 1.0);
 	vec3 elevation_tint = mix(vec3(0.56, 0.62, 0.58), vec3(0.80, 0.74, 0.62), height_t);
 	vec3 color = vec3(shade) * mix(vec3(1.0), elevation_tint * 1.24, 0.28);
+	if (elevation_color_enabled) {
+		color = elevation_palette(height_t) * clamp(0.62 + lambert * 0.32 - (1.0 - review_n.y) * 0.08, 0.45, 1.0);
+	}
 	float camera_distance_m = distance(world_position.xz, CAMERA_POSITION_WORLD.xz);
 	float square_distance_m = max(abs(world_position.x - edge_fog_center_xz.x), abs(world_position.z - edge_fog_center_xz.y));
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;

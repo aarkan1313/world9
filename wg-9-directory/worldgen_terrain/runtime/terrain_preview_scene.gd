@@ -7,7 +7,7 @@ const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_worl
 const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_world_node.gd")
 
 @export var auto_setup_on_ready: bool = true
-@export_enum("gray", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
+@export_enum("gray", "elevation_color", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
 @export_range(17, 257, 16) var vertices_per_side: int = 65
 @export_range(0, 4, 1) var preview_radius_chunks: int = 1
 @export var seed: int = 1337

@@ -51,6 +51,7 @@ FAST_HEADLESS_CHECKS = [
     "native_backend_registration_check.gd",
     "terrain_quality_profile_check.gd",
     "terrain_visibility_contract_check.gd",
+    "terrain_elevation_color_material_check.gd",
     "native_clipmap_mesh_payload_from_height_check.gd",
     "terrain_far_clipmap_budget_check.gd",
     "terrain_far_clipmap_smoke_check.gd",
@@ -85,6 +86,7 @@ EXTENDED_HEADLESS_CHECKS = FAST_HEADLESS_CHECKS + [
 ]
 
 QUALITY_HEADLESS_CHECKS = [
+    "terrain_worldgen_capability_check.gd",
     "terrain_landform_quality_probe_check.gd",
     "terrain_hydrology_consistency_check.gd",
     "terrain_hydrology_tile_cache_check.gd",

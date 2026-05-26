@@ -89,6 +89,8 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 49. [x] Add the first `TerrainQualityProfile` source of truth for walk review near/far/fog/worker/camera settings and gate it in the fast suite.
 50. [x] Add a visibility/fog contract gate that reports loaded radius, camera far, hidden buffer, fog begin/end, transition length, edge shader fog settings, and viewer-tracked fog center.
 51. [x] Add movement-direction forward prefetch to the walk profile and gate the fast-flight near residency contract.
+52. [x] Add an elevation-color review material for near/far terrain and make it the default walk-review surface before real biome textures.
+53. [x] Add a worldgen capability gate proving diverse palettes, families, kernels, and active DEM-kernel relief across review regions.
 
 ## First Backend Shape
 
@@ -195,12 +197,15 @@ walk preview with far clipmap mounted: setup ~217ms, movement step ~2-3ms after 
 walk small-move perf: far clipmap build counts remain unchanged instead of rebuilding on first movement
 walk chunk-boundary recenter: first edge crossing keeps far rings stable; larger travel schedules far rings asynchronously through native workers, then finishes pending levels without blocking the movement frame
 rapid far recenter: boundary ping-pong keeps counts unchanged; rapid larger recenter while level 0 is in flight defers instead of synchronously rebuilding, then all levels finish at the newest origin
-fast Godot runtime gate: 17 checks, pass on the current machine, including the quality-profile, visibility-contract, walk motion/recenter profile, and forward-prefetch residency gates
-extended Godot runtime gate: 31 checks, pass on the current machine
+fast Godot runtime gate: 18 checks, pass on the current machine, including the quality-profile, visibility-contract, elevation-color material, walk motion/recenter profile, and forward-prefetch residency gates
+extended Godot runtime gate: 32 checks, pass on the current machine
+quality Godot runtime gate: 8 checks, including the worldgen capability proof
 walk motion profile: high-speed forward profile writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass proves recenter/page-blend coverage, and the first near-residency optimization slice now prefetches the next movement-biased chunk row
 forward-prefetch residency: the walk profile keeps 49 base chunks plus one movement-biased overlap row resident after motion is known, with the fast gate proving 56 cardinal-forward chunks after workers drain
+elevation-color review: near chunks and far clipmap shaders can use the same dark-low/rainbow-mid/white-high height ramp; gray remains available for old review captures
+worldgen capability proof: `terrain_worldgen_capability_check.gd` currently samples 12 diverse region sites and reports 6 palettes, 9 families, 20 unique kernels, with DEM-kernel relief active at all sites
 visibility contract: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and keeps edge fog constrained to the outer loaded boundary instead of allowing broad fog as a clipmap/LOD cover-up
-quality Godot runtime gate: 7 checks, pass on the current machine; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
+quality Godot runtime gate: 8 checks, pass on the current machine; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
 render Godot runtime gate: 6 non-headless capture checks, pass in ~17.5s on the current machine; static preview capture uses native/fast-gray chunk payloads where possible, and locked render artifacts avoid volatile diagnostic overlay text
 review Godot runtime gate: 4 non-headless contact-sheet checks, pass in ~32.2s on the current machine; release gate remains pass after repeated review runs
 Godot review index: deterministic HTML/JSON index locked in the runtime artifact manifest; runtime readiness checks schema, section order, required review files, and PNG dimensions
