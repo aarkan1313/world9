@@ -119,8 +119,8 @@ Movement perf gate: chunk-centered walk spawn keeps small movement at ~2-3ms and
 Boundary recenter gate: first real chunk-boundary crossing keeps far clipmap counts stable; larger travel schedules far rings asynchronously, then drains pending levels
 Rapid recenter gate: boundary ping-pong keeps counts unchanged; rapid larger recenter requests defer level 0 while the worker is active, and finish all levels at the newest origin
 Native clipmap payload gate: direct backend check verifies centered vertices, UVs, and hole-filtered indices
-Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 15 headless native/clipmap/walk checks, including the quality-profile and walk motion/recenter profile gates
-Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 29 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, quality-profile, and motion-profile checks
+Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 16 headless native/clipmap/walk checks, including the quality-profile, visibility-contract, and walk motion/recenter profile gates
+Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 30 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, quality-profile, visibility-contract, and motion-profile checks
 Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 7 landform, hydrology, debug performance, streaming performance, and 257-walk-density checks
 Hydrology/debug performance: cross-region height grids now split into per-region fast blocks, so padded hydrology windows avoid the slow scalar fallback; quality gate time is back in single-digit seconds on the current machine
 Renderer boundary: `TerrainChunkRenderer` now owns chunk MeshInstance lifecycle and bounded pooling, while `TerrainWorldNode` remains orchestration/build-policy glue
@@ -141,6 +141,7 @@ Live diagnostics: walk overlay now reports far clipmap level count, last build t
 Coverage guard: startup preloads the full 7x7 walk window; movement no longer does full-window synchronous hole filling, and full-density chunk ring retags update metadata/materials without rebuilding meshes.
 Near/far material guard: far clipmap gray and surface-review shaders now use the same gray review lighting response as near fast-gray chunks, with a fast gate to prevent the player-centered window from becoming a tonal square.
 Far-edge masking: walk/streaming preview fog is depth-edge only, with no global density haze; the gray terrain shaders also apply the same far-edge fog so unshaded review materials cannot bypass the outer pop-in mask.
+Visibility contract gate: `terrain_visibility_contract_check.gd` writes `factory/runtime/godot_visibility_contract/visibility_contract_report.json` and validates loaded radius, camera far, hidden buffer, fog begin/end, fog transition length, edge shader fog settings, and viewer-tracked fog center against the `walk_review` profile.
 Motion profile gate: `terrain_walk_motion_profile_check.gd` drives the live walk preview at high-speed forward motion and writes `factory/runtime/godot_walk_motion_profile/walk_motion_profile_report.json`; current first pass shows page-blend/recenter coverage working while warning that fast-flight near chunk residency and recenter step cost need the next slice.
 ```
 
@@ -172,7 +173,9 @@ Immediate roadmap order from here:
 2. Add one TerrainQualityProfile source of truth for near window, far levels,
    fog edge, worker budget, and camera distance. Current guide:
    `plans/terrain_quality_profile_guide.md`.
-3. Promote visibility/fog into a pass/fail contract instead of tuning by eye.
+3. Keep visibility/fog as a pass/fail contract, not a screenshot-only tune.
+   Current report:
+   `factory/runtime/godot_visibility_contract/visibility_contract_report.json`.
 4. Use the profiler to decide whether remaining hitching is frame-time work,
    visual recenter snap, or LOD/material change.
 5. If it is frame-time work, fix scheduling/prefetch/cache pressure first.

@@ -61,6 +61,7 @@ Run through the wrapper only:
 
 ```text
 python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_quality_profile_check.gd
+python D:/workflows/worldgen9/tools/godot_runtime_gate.py --check terrain_visibility_contract_check.gd
 python D:/workflows/worldgen9/tools/godot_runtime_gate.py --suite fast
 ```
 
@@ -76,6 +77,17 @@ visibility loaded radius matches far clipmap budget
 fog begin/end/camera far form a sane edge-only visibility contract
 ```
 
+The visibility contract check writes:
+
+```text
+D:/workflows/worldgen9/factory/runtime/godot_visibility_contract/visibility_contract_report.json
+```
+
+It validates the active walk profile against the live scene and far clipmap:
+loaded radius, camera far plane, hidden buffer, fog begin/end, transition
+length, global fog density, edge-fog shader settings, page-clipmap mode, and
+viewer-tracked fog center.
+
 ## Roadmap Use
 
 When the distant edge, motion profile, or residency budget needs tuning, change
@@ -85,8 +97,8 @@ scene value by hand unless the change is intentionally local to that scene.
 Next profile work:
 
 ```text
-1. Add a visibility/fog contract report artifact.
-2. Add profile-specific motion thresholds once fast-flight residency policy is fixed.
+1. Add profile-specific motion thresholds once fast-flight residency policy is fixed.
+2. Add residency/prefetch profile fields for the next fast-flight optimization slice.
 3. Add high-density/local-detail profiles after the default walk profile is stable.
 4. Add future GPU page profile fields behind the same profile id.
 ```
