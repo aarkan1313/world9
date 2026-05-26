@@ -41,10 +41,10 @@ contracts and gates, not its old terrain source or full PBR stack.
 | --- | --- | --- | --- |
 | Quality tiers | `low` through `ultra_far`, with ring counts, grid sizes, step ladders, frame budgets, cache budgets, draw/tri limits, and visibility distances. | WG9 has budget reports and gates, but settings are spread across scene exports, tests, and roadmap notes. | Add WG9 terrain quality profiles. They should drive near window, far levels, worker budget, fog edge distance, and review gates. |
 | Far range | `ultra_far` uses 10 rings, 256 grid, step ladder `2..256m`, 28km visibility target. | WG9 live preview defaults to 4 far levels, about 65.5km diameter, but CPU/native mesh path and review fog are still transitional. | Keep WG9's wider range as a review target, but do not blindly copy 10 GPU rings until GPU pages exist. |
-| Clipmap geometry | Each ring is a square donut/full-square shader-clipped mesh snapped to world grid. | WG9 far clipmap is CPU/native mesh based with overlap, crossfade, and geometric transition bands. | Long-term renderer should move toward persistent ring meshes plus height textures, not rebuild mesh for every clipmap page. |
+| Clipmap geometry | Each ring is a square donut/full-square shader-clipped mesh snapped to world grid. | WG9 now has a page-backed far preview path with opaque geometry, world-space displacement sampling, overlap/underlap guards, and CPU/native mesh fallback. A full-square alpha crossfade was tested and rejected because it exposed page footprints. | Long-term renderer should move toward persistent ring/page meshes plus height textures, not rebuild mesh for every clipmap page. |
 | Height generation path | GPU `R32F` storage textures via RenderingDevice compute, exposed as `Texture2DRD`; optional CPU page contract remains for collision and debug. | WG9 has CPU/native heightfields, RF/RGBF surface descriptors, optional texture-backed materials, but no GPU compute clipmap pages yet. | This is the main long-term target: keep WG9 provider semantics, move far/detail height images into GPU-resident pages. |
-| Update smoothing | Stores previous displacement texture and blends via `height_blend_alpha` over time. | WG9 has mesh crossfade for far recenter and shader fog smoothing, but height data itself still changes by mesh/page replacement. | Add height-page blend once far rings are texture-displaced. Do not depend only on mesh crossfade. |
-| LOD morph | Shader samples current and coarser height textures and morphs outer band toward coarser grid. | WG9 has CPU/generated geometric transition bands and seam gates, but still exposes visual LOD quality differences in gray review. | Keep WG9 gates, but final GPU path should use shader morph from fine height texture to coarse height texture. |
+| Update smoothing | Stores previous displacement texture and blends via `height_blend_alpha` over time. | WG9 page-backed far preview now blends previous/current height pages by world origin/extent. It still needs motion-profile acceptance for fast recenter movement. | Keep height-page blend as the accepted path; do not return to whole-page alpha crossfade. |
+| LOD morph | Shader samples current and coarser height textures and morphs outer band toward coarser grid. | WG9 page-backed far preview now has a shader coarse/fine morph path, while CPU/generated transition bands remain as fallback/test coverage. Visual LOD quality differences still need acceptance. | Keep WG9 gates, then use profiler and visual review to decide whether morph width, cadence, or page scheduling needs work. |
 | Skirts/overlap | Inner/outer skirts plus shader clipping and overlap guard. | WG9 has skirts, overlap bands, underlap bias, and near/far handoff tests. | Continue. World 4 validates this as a necessary crack-hiding layer, not sufficient alone. |
 | Collision | Only inner rings get `HeightMapShape3D`; far rings are visual only. | WG9 local detail collision is near-player opt-in; broad chunks/far clipmap are visual-only. | Aligned. Keep collision decoupled from broad far clipmap. |
 | Material masks | Global/follow-camera splat mask; mask origin/extent separate from height origin/extent so materials do not crawl on height snaps. | WG9 does not yet have biome/material masks in live terrain; gray mode currently exposes LOD/normal differences. | Important future requirement: biome/material masks must be world-space, stable, and separately cached from height pages. |
@@ -67,6 +67,29 @@ World 4 supports this plan. It does not imply that WG9 should abandon the
 current DEM-kernel provider work or replace it with World 4's procedural source.
 
 ## Gaps WG9 Should Close
+
+### 0. 2026-05-25 WG9 Clipmap Lessons Learned
+
+The W4 comparison helped separate long-term architecture from short-term visual
+patches. The accepted WG9 direction is:
+
+```text
+use opaque page/ring geometry
+sample height and materials in world space
+blend previous/current height pages on recenter
+morph fine edges toward coarser height pages in a bounded transition band
+keep fog/visibility at the outer loaded edge only
+measure motion/recenter before tuning more by eye
+```
+
+Rejected approaches:
+
+```text
+alpha-crossfading whole square page/ring meshes
+using inner fog or haze to hide clipmap transitions
+assuming zero seam tests mean the moving terrain is visually accepted
+adding biome textures before height/LOD motion is stable
+```
 
 ### 1. Quality Profile Unification
 
@@ -113,8 +136,9 @@ The long-term renderer should keep stable ring meshes and update height pages:
 ### 4. Height Page Blend
 
 When a clipmap page updates, WG9 should blend old height page to new height page
-in shader. Mesh crossfade hides some swaps, but texture height blending is the
-cleaner long-term answer for "rings pop every time the clipmap recenters".
+in shader. Full-page mesh alpha crossfade was tested and rejected because it
+made square page footprints visible. Texture height blending is the cleaner
+long-term answer for "rings pop every time the clipmap recenters".
 
 ### 5. Shader Coarse/Fine Morph
 
@@ -156,16 +180,15 @@ contract instead of tuned by eye.
 
 ## Recommended WG9 Sequence
 
-1. Add `TerrainQualityProfile` data and route the walk preview through it.
-2. Add a motion-profile gate for the live walk/fly scene.
+1. Add a motion-profile gate for the live walk/fly scene.
+2. Add `TerrainQualityProfile` data and route the walk preview through it.
 3. Promote current edge fog into a visibility contract with pass/fail reporting.
-4. Keep fixing current CPU/native clipmap visual issues only enough to support review.
-5. Implement GPU-resident far height pages behind the existing provider contract.
-6. Switch far clipmap rendering from rebuilt meshes to persistent rings with height texture displacement.
-7. Add previous/current height-page blending.
-8. Add shader coarse/fine morph against neighboring height pages.
-9. Add world-space biome/material masks only after terrain families/material rules are ready.
-10. Add material micro detail after the mask/material path is stable.
+4. Lock the current page-backed clipmap rules: opaque geometry, world-space height-page blend, and coarse/fine morph.
+5. Keep fixing current CPU/native clipmap visual issues only where the profiler proves a real problem.
+6. Implement GPU-resident far height pages behind the existing provider contract.
+7. Switch far clipmap rendering from rebuilt meshes to persistent rings/pages with height texture displacement.
+8. Add world-space biome/material masks only after terrain families/material rules are ready.
+9. Add material micro detail after the mask/material path is stable.
 
 ## Immediate Practical Takeaway
 

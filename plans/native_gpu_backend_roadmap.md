@@ -191,8 +191,8 @@ walk preview with far clipmap mounted: setup ~217ms, movement step ~2-3ms after 
 walk small-move perf: far clipmap build counts remain unchanged instead of rebuilding on first movement
 walk chunk-boundary recenter: first edge crossing keeps far rings stable; larger travel schedules far rings asynchronously through native workers, then finishes pending levels without blocking the movement frame
 rapid far recenter: boundary ping-pong keeps counts unchanged; rapid larger recenter while level 0 is in flight defers instead of synchronously rebuilding, then all levels finish at the newest origin
-fast Godot runtime gate: 11 checks, pass in ~9.3s on the current machine
-extended Godot runtime gate: 22 checks, pass in ~16.2s on the current machine
+fast Godot runtime gate: 13 checks, pass on the current machine
+extended Godot runtime gate: 27 checks, pass on the current machine
 quality Godot runtime gate: 7 checks, pass on the current machine; debug perf raw timings stay in stdout so locked artifacts remain deterministic; runtime readiness checks landform/hydrology report schemas, case counts, field policies, and seam deltas
 render Godot runtime gate: 6 non-headless capture checks, pass in ~17.5s on the current machine; static preview capture uses native/fast-gray chunk payloads where possible, and locked render artifacts avoid volatile diagnostic overlay text
 review Godot runtime gate: 4 non-headless contact-sheet checks, pass in ~32.2s on the current machine; release gate remains pass after repeated review runs
@@ -203,7 +203,7 @@ walk-density budget with skirts: default 129/4m 9x9 is ~572,416 triangles / 16.6
 runtime budget release guard: readiness checks enforce baseline 65/129/257 LOD totals, walk-density memory/triangle costs, and far clipmap 3/4-ring budget envelopes
 walk readability guard: gray/far-clipmap materials are capped for non-washed-out review, live walk preview starts at 48m fly height, and the walk-density manifest gates max luma, bright-pixel fraction, and luma range
 walk review control: `G` toggles between free-fly and height-provider ground-follow mode so player-scale terrain can be inspected without adding physics/collision to the visual renderer
-visual seam/material pass: near fast-gray chunks and far clipmap gray/surface-review materials now share the same world-height shading response, review normals guard degenerate geometry, vertical skirt walls are de-emphasized, visual clipmap level 0 uses a handoff overlap band with a downward bias, far-ring handoffs overlap by one cell, the live far anchor is stable across chunk-edge ping-pong, and far recenter completion crossfades old/new ring meshes
+visual seam/material pass: near fast-gray chunks and far clipmap gray/surface-review materials now share the same world-height shading response, review normals guard degenerate geometry, vertical skirt walls are de-emphasized, visual clipmap level 0 uses a handoff overlap band with a downward bias, far-ring handoffs overlap by one cell, and the live far anchor is stable across chunk-edge ping-pong. Page-backed far clipmap transitions must remain opaque and use world-space previous/current height-page blend plus coarse/fine morph, not whole-square alpha crossfade.
 257x257 direct native payload at 512m chunk size / 2m spacing: ~68-70ms, 0.0 seam delta
 257x257 direct native payload at 256m chunk size / 1m spacing: ~63-66ms, 0.0 seam delta
 ```
@@ -604,3 +604,27 @@ New roadmap gates from that review:
 7. shader coarse/fine morph against neighboring height pages
 8. stable world-space biome/material masks after terrain-family material rules
 ```
+
+### Current Clipmap Discipline (2026-05-25)
+
+The current page-backed far clipmap is an intermediate renderer, but its
+transition rules should already match the long-term GPU direction:
+
+```text
+accepted:
+- opaque page/ring geometry
+- world-space height sampling by page origin/extent
+- previous/current height-page blend during recenter
+- coarse/fine morph in a bounded LOD transition band
+- fog only at the outer loaded edge
+
+rejected:
+- alpha-crossfading whole square pages/rings
+- inner fog to hide LOD or page transitions
+- treating biome/material textures as a fix for unstable height motion
+```
+
+The next backend work should start with a motion/recenter profiler gate. If
+the profiler shows frame-time spikes, fix scheduling, prefetch, and cache
+pressure. If it shows visual-only snapping, adjust page cadence, morph bands,
+and height-page blend timing before adding new terrain systems.

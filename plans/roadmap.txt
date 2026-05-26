@@ -57,7 +57,7 @@ native clipmap payload: far levels use native centered vertex/normal/UV and hole
 async far clipmap: walk/streaming preview schedules far level rebuilds on native workers instead of rebuilding in the movement frame
 rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
 visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
-far ring transition: completed far-ring rebuilds can crossfade old/new meshes when enabled, and finer clipmap outer bands now morph toward the next coarser grid while inner samples stay raw
+far clipmap transition policy: page-backed clipmap geometry stays opaque; do not alpha-crossfade whole square pages/rings, and smooth recenter/LOD only through world-space previous/current height-page blend, coarse/fine morph bands, and outer-edge-only visibility masking
 local detail: 257 x 257 native payloads are viable as a near-player tier, not a global default
 ```
 
@@ -119,8 +119,8 @@ Movement perf gate: chunk-centered walk spawn keeps small movement at ~2-3ms and
 Boundary recenter gate: first real chunk-boundary crossing keeps far clipmap counts stable; larger travel schedules far rings asynchronously, then drains pending levels
 Rapid recenter gate: boundary ping-pong keeps counts unchanged; rapid larger recenter requests defer level 0 while the worker is active, and finish all levels at the newest origin
 Native clipmap payload gate: direct backend check verifies centered vertices, UVs, and hole-filtered indices
-Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 11 headless native/clipmap/walk checks in ~9.3s
-Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 23 headless native parity, renderer-boundary, far surface/review, LOD, and local-detail checks
+Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 13 headless native/clipmap/walk checks
+Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 27 headless native parity, renderer-boundary, far surface/review, LOD, and local-detail checks
 Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 7 landform, hydrology, debug performance, streaming performance, and 257-walk-density checks
 Hydrology/debug performance: cross-region height grids now split into per-region fast blocks, so padded hydrology windows avoid the slow scalar fallback; quality gate time is back in single-digit seconds on the current machine
 Renderer boundary: `TerrainChunkRenderer` now owns chunk MeshInstance lifecycle and bounded pooling, while `TerrainWorldNode` remains orchestration/build-policy glue
@@ -145,6 +145,49 @@ Far-edge masking: walk/streaming preview fog is depth-edge only, with no global 
 
 This keeps the later collision path near-player only and separate from visual
 far terrain.
+
+### 0.3 2026-05-25 Clipmap Roadmap Reset
+
+The recent clipmap work produced one important rule: do not hide clipmap
+problems with whole-page alpha fades or broad fog. Those fixes make the square
+page/ring footprint visible and create a different failure mode.
+
+Current accepted clipmap transition policy:
+
+```text
+geometry: opaque page/ring meshes only
+height recenter smoothing: world-space previous/current height-page blend
+LOD transition smoothing: shader coarse/fine morph only in the transition band
+sampling: page origins/extents are world-space and stable
+fog/visibility: edge-only, used only to hide the outer loaded boundary
+near/far handoff: tested height continuity stays mandatory
+```
+
+Immediate roadmap order from here:
+
+```text
+1. Add a motion/recenter profiler gate for the walk preview.
+2. Add one TerrainQualityProfile source of truth for near window, far levels,
+   fog edge, worker budget, and camera distance.
+3. Promote visibility/fog into a pass/fail contract instead of tuning by eye.
+4. Use the profiler to decide whether remaining hitching is frame-time work,
+   visual recenter snap, or LOD/material change.
+5. If it is frame-time work, fix scheduling/prefetch/cache pressure first.
+6. If it is visual snap, keep aligning with the World 4 pattern:
+   stable page geometry, previous/current height pages, coarse/fine morph.
+7. Move far clipmap pages toward GPU residency behind the same provider/page
+   contract after the CPU/native facts remain stable.
+8. Add biome/material masks only after height clipmap motion is accepted.
+```
+
+Explicitly out of scope until those pass:
+
+```text
+full-square page/ring alpha crossfades
+using fog inside the playable/review area to hide LOD changes
+raising near mesh density just to mask clipmap motion issues
+adding biome textures as a cover for unstable height/LOD behavior
+```
 
 The next useful output is not another subsystem. It is:
 
