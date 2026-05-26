@@ -49,6 +49,7 @@ def godot_candidates() -> list[Path]:
 
 FAST_HEADLESS_CHECKS = [
     "native_backend_registration_check.gd",
+    "terrain_quality_profile_check.gd",
     "native_clipmap_mesh_payload_from_height_check.gd",
     "terrain_far_clipmap_budget_check.gd",
     "terrain_far_clipmap_smoke_check.gd",

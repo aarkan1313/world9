@@ -54,6 +54,8 @@ far clipmap pending rebuilds
 far page rebuild deltas
 far page blend activity
 anchor/recenter frames
+near/far draw and triangle estimates
+current quality profile report
 final diagnostics string
 ```
 

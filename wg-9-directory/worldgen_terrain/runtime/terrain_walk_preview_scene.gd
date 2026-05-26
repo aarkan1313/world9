@@ -27,43 +27,14 @@ var _camera_height_initialized: bool = false
 
 
 func _init() -> void:
-	chunk_size_m = 512.0
+	quality_profile_id = TerrainQualityProfileScript.WALK_REVIEW
+	TerrainQualityProfileScript.apply_to_node(self, TerrainQualityProfileScript.profile(quality_profile_id))
 	viewer_position_xz = Vector2(chunk_size_m * 0.5, chunk_size_m * 0.5)
-	vertices_per_side = 129
-	visible_radius_chunks = 3
-	max_lod = 2
-	build_budget_per_frame = 8
-	warmup_build_steps = 4
-	preload_active_chunks_before_start = true
-	preload_active_chunk_limit = 0
-	move_speed_mps = 18.0
-	fast_multiplier = 60.0
-	slow_multiplier = 0.25
 	camera_yaw_deg = 42.0
 	camera_height_m = eye_height_m
 	camera_distance_m = 0.0
 	build_when_idle = false
-	use_fast_gray_material = true
-	use_native_chunk_payloads = true
-	use_native_chunk_workers = true
-	max_native_chunk_workers = 6
-	review_sync_hole_fill_radius_chunks = 0
-	review_sync_hole_fill_max_chunks_per_frame = 0
-	use_lod_mesh_density = false
-	use_mesh_skirts = false
-	mesh_skirt_depth_m = 48.0
-	use_far_clipmap = true
-	far_clipmap_level_count = 4
-	far_clipmap_rebuild_levels_per_update = 4
-	far_clipmap_transition_fade_seconds = 0.35
-	use_far_clipmap_native_workers = false
-	use_persistent_page_clipmap = true
-	far_clipmap_page_cache_max_pages = 64
-	distance_fog_depth_begin_m = 30000.0
-	distance_fog_depth_end_m = 33000.0
 	distance_fog_color = Color(0.18, 0.18, 0.18)
-	fast_gray_exposure = 0.42
-	fast_gray_contrast = 1.42
 
 
 func _ready() -> void:

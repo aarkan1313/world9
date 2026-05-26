@@ -119,8 +119,8 @@ Movement perf gate: chunk-centered walk spawn keeps small movement at ~2-3ms and
 Boundary recenter gate: first real chunk-boundary crossing keeps far clipmap counts stable; larger travel schedules far rings asynchronously, then drains pending levels
 Rapid recenter gate: boundary ping-pong keeps counts unchanged; rapid larger recenter requests defer level 0 while the worker is active, and finish all levels at the newest origin
 Native clipmap payload gate: direct backend check verifies centered vertices, UVs, and hole-filtered indices
-Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 14 headless native/clipmap/walk checks, including the walk motion/recenter profile
-Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 28 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, and motion-profile checks
+Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 15 headless native/clipmap/walk checks, including the quality-profile and walk motion/recenter profile gates
+Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 29 headless native parity, renderer-boundary, far surface/review, LOD, local-detail, quality-profile, and motion-profile checks
 Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 7 landform, hydrology, debug performance, streaming performance, and 257-walk-density checks
 Hydrology/debug performance: cross-region height grids now split into per-region fast blocks, so padded hydrology windows avoid the slow scalar fallback; quality gate time is back in single-digit seconds on the current machine
 Renderer boundary: `TerrainChunkRenderer` now owns chunk MeshInstance lifecycle and bounded pooling, while `TerrainWorldNode` remains orchestration/build-policy glue
@@ -170,7 +170,8 @@ Immediate roadmap order from here:
 1. Add a motion/recenter profiler gate for the walk preview. Current guide:
    `plans/runtime_motion_profile_guide.md`.
 2. Add one TerrainQualityProfile source of truth for near window, far levels,
-   fog edge, worker budget, and camera distance.
+   fog edge, worker budget, and camera distance. Current guide:
+   `plans/terrain_quality_profile_guide.md`.
 3. Promote visibility/fog into a pass/fail contract instead of tuning by eye.
 4. Use the profiler to decide whether remaining hitching is frame-time work,
    visual recenter snap, or LOD/material change.

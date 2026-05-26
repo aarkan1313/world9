@@ -3,6 +3,7 @@ extends Node3D
 
 const TerrainSettingsScript := preload("res://worldgen_terrain/core/terrain_settings.gd")
 const TerrainStreamerScript := preload("res://worldgen_terrain/core/terrain_streamer.gd")
+const TerrainQualityProfileScript := preload("res://worldgen_terrain/core/terrain_quality_profile.gd")
 const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_world.gd")
 const TerrainFarClipmapNodeScript := preload("res://worldgen_terrain/runtime/terrain_far_clipmap_node.gd")
 const TerrainLocalDetailNodeScript := preload("res://worldgen_terrain/runtime/terrain_local_detail_node.gd")
@@ -31,6 +32,7 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export var min_camera_height_m: float = 450.0
 @export var max_camera_height_m: float = 12000.0
 @export var camera_height_distance_ratio: float = 0.58
+@export var camera_far_m: float = 120000.0
 @export var far_clipmap_overview_distance_scale: float = 0.62
 @export var far_clipmap_overview_height_scale: float = 0.38
 @export var use_distance_fog: bool = true
@@ -103,6 +105,7 @@ var _far_clipmap_anchor_xz := Vector2(INF, INF)
 var _fast_modifier_active: bool = false
 var _slow_modifier_active: bool = false
 var _far_clipmap_config_key: String = ""
+var quality_profile_id: String = ""
 
 
 func _ready() -> void:
@@ -619,8 +622,26 @@ func _add_camera() -> void:
 	camera.current = true
 	camera.fov = 48.0
 	camera.near = 1.0
-	camera.far = 120000.0
+	camera.far = camera_far_m
 	add_child(camera)
+
+
+func quality_profile_report() -> Dictionary:
+	if quality_profile_id.is_empty():
+		return {
+			"profile_id": "",
+			"status": "manual",
+			"errors": [],
+		}
+	var profile_data: Dictionary = TerrainQualityProfileScript.profile(quality_profile_id)
+	var profile_errors: Array[String] = TerrainQualityProfileScript.validation_errors(self, profile_data)
+	return {
+		"profile_id": quality_profile_id,
+		"schema": str(profile_data.get("schema", "")),
+		"status": "pass" if profile_errors.is_empty() else "fail",
+		"errors": profile_errors,
+		"visibility": TerrainQualityProfileScript.visibility_contract(profile_data),
+	}
 
 
 func _add_diagnostics_overlay() -> void:

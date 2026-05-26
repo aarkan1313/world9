@@ -142,6 +142,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		errors.append("no_page_blend_activity_observed")
 	return {
 		"schema": "worldgen9.walk_motion_profile.v1",
+		"quality_profile": scene.quality_profile_report(),
 		"profile": {
 			"frame_count": FRAME_COUNT,
 			"frame_delta_s": FRAME_DELTA_S,
@@ -157,6 +158,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		"warnings": warnings,
 		"summary": {
 			"step_ms": _timing_summary(step_ms_values),
+			"render_budget": _render_budget_summary(scene),
 			"not_full_frames": not_full_frames,
 			"recenter_frames": recenter_frames,
 			"chunk_churn_frames": chunk_churn_frames,
@@ -229,6 +231,22 @@ func _summary_for_stdout(report: Dictionary) -> Dictionary:
 	return {
 		"summary": report.get("summary", {}),
 		"thresholds": report.get("thresholds", {}),
+	}
+
+
+func _render_budget_summary(scene: Node3D) -> Dictionary:
+	var active_chunks: int = scene.expected_active_count()
+	var near_vertices_per_chunk: int = scene.vertices_per_side * scene.vertices_per_side
+	var near_triangles_per_chunk: int = (scene.vertices_per_side - 1) * (scene.vertices_per_side - 1) * 2
+	var far_budget: Dictionary = scene.far_clipmap.budget_report() if scene.far_clipmap != null else {}
+	var far_totals: Dictionary = far_budget.get("totals", {}) as Dictionary
+	return {
+		"near_active_chunks": active_chunks,
+		"near_vertex_count": active_chunks * near_vertices_per_chunk,
+		"near_triangle_count": active_chunks * near_triangles_per_chunk,
+		"far_vertex_count": int(far_totals.get("vertex_count", 0)),
+		"far_triangle_count": int(far_totals.get("triangle_count", 0)),
+		"far_mesh_plus_height_mib": float(far_totals.get("mesh_plus_height_mib", 0.0)),
 	}
 
 
