@@ -431,10 +431,6 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
 		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
-	if use_transition:
-		_begin_level_transition(level)
-	else:
-		_remove_transition_node(level)
 	mesh_instance.material_override = _page_height_material_for_descriptor(
 		descriptor,
 		level,
@@ -445,10 +441,6 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		previous_page_extent
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
-	if use_transition:
-		_start_level_fade(level)
-	else:
-		_set_material_alpha(mesh_instance.material_override, 1.0)
 	level_origins[level] = origin
 	level_build_counts[level] = int(level_build_counts[level]) + 1
 	_set_level_geometry_counts(level, side * side, _clipmap_index_count(side, spacing, outer_extent, inner_extent))
@@ -489,10 +481,6 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
 	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, float(payload["inner_extent_m"]))
-	if use_transition:
-		_begin_level_transition(level)
-	else:
-		_remove_transition_node(level)
 	mesh_instance.material_override = _page_height_material_for_descriptor(
 		descriptor,
 		level,
@@ -503,10 +491,6 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 		previous_page_extent
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
-	if use_transition:
-		_start_level_fade(level)
-	else:
-		_set_material_alpha(mesh_instance.material_override, 1.0)
 	level_origins[level] = origin
 	level_build_counts[level] = int(level_build_counts[level]) + 1
 	_set_level_geometry_counts(level, side * side, (payload["indices"] as PackedInt32Array).size())
@@ -813,10 +797,7 @@ func _update_transition_fades() -> void:
 			_remove_transition_node(level)
 			if level < level_nodes.size():
 				var current: MeshInstance3D = level_nodes[level] as MeshInstance3D
-				if _is_page_height_material(current.material_override):
-					_set_material_alpha(current.material_override, 1.0)
-				else:
-					current.material_override = _material_for_level(level, 1.0)
+				current.material_override = _material_for_level(level, 1.0)
 	active_transition_count = _count_active_transitions()
 
 
@@ -900,21 +881,11 @@ func _material_copy_with_alpha(source: Material, alpha: float) -> Material:
 		return _material_for_level(0, alpha)
 	var copy: Material = source.duplicate() as Material
 	var shader_copy: ShaderMaterial = copy as ShaderMaterial
-	if shader_copy != null and _is_page_height_material(shader_copy):
-		_set_material_alpha(shader_copy, alpha)
-		return shader_copy
 	if shader_copy != null and alpha < 0.999:
 		var has_surface_textures: bool = shader_copy.get_shader_parameter("height_texture") != null
 		shader_copy.shader = _surface_texture_material_shader(true) if has_surface_textures else _gray_material_shader(true)
 	_set_material_alpha(copy, alpha)
 	return copy
-
-
-func _is_page_height_material(material: Material) -> bool:
-	var shader_material: ShaderMaterial = material as ShaderMaterial
-	if shader_material == null:
-		return false
-	return shader_material.get_shader_parameter("page_origin_m") != null
 
 
 func _set_material_alpha(material: Material, alpha: float) -> void:
@@ -1510,18 +1481,17 @@ func _page_height_material_for_descriptor(
 	previous_height_texture: Texture2D = null,
 	previous_normal_texture: Texture2D = null,
 	blend_alpha: float = 1.0,
-	previous_page_origin_m: Vector2 = Vector2.ZERO,
+	previous_page_origin_m: Vector2 = Vector2(INF, INF),
 	previous_page_extent_m: float = 0.0
 ) -> ShaderMaterial:
 	var height_texture: ImageTexture = ImageTexture.create_from_image(descriptor["height_image"] as Image)
 	var normal_texture: ImageTexture = ImageTexture.create_from_image(descriptor["normal_image"] as Image)
 	var page_origin := Vector2(float(descriptor.get("origin_x", 0.0)), float(descriptor.get("origin_z", 0.0)))
 	var page_extent: float = float(descriptor.get("outer_extent_m", 0.0))
-	if previous_page_extent_m <= 0.0:
-		previous_page_origin_m = page_origin
-		previous_page_extent_m = page_extent
 	if not is_finite(previous_page_origin_m.x) or not is_finite(previous_page_origin_m.y):
 		previous_page_origin_m = page_origin
+	if previous_page_extent_m <= 0.0:
+		previous_page_extent_m = page_extent
 	var material := ShaderMaterial.new()
 	material.shader = _page_height_material_shader()
 	material.set_shader_parameter("height_texture", height_texture)
@@ -1797,7 +1767,7 @@ func _page_height_material_shader() -> Shader:
 	var shader := Shader.new()
 	shader.code = """
 shader_type spatial;
-render_mode unshaded, cull_disabled, blend_mix;
+render_mode unshaded, cull_disabled;
 
 uniform sampler2D height_texture : filter_linear, repeat_disable;
 uniform sampler2D normal_texture : filter_linear, repeat_disable;
@@ -1815,7 +1785,6 @@ uniform vec2 coarse_page_origin_m = vec2(0.0, 0.0);
 uniform float coarse_page_extent_m = 1.0;
 uniform bool morph_enabled = false;
 uniform float morph_band_m = 0.0;
-uniform float fade_alpha = 1.0;
 uniform float inner_extent_m = 0.0;
 uniform float outer_extent_m = 0.0;
 uniform float boundary_blend_width_m = 512.0;
@@ -1912,7 +1881,6 @@ void fragment() {
 	float fog_distance_m = edge_fog_square_enabled ? square_distance_m : camera_distance_m;
 	float fog_t = edge_fog_enabled ? smoothstep(edge_fog_begin_m, edge_fog_end_m, fog_distance_m) : 0.0;
 	ALBEDO = mix(color, edge_fog_color, fog_t);
-	ALPHA = fade_alpha;
 }
 """
 	_page_height_shader = shader
