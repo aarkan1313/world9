@@ -101,6 +101,7 @@ func _check_local_detail_profile_contract(errors: Array[String]) -> void:
 	if not TerrainQualityProfileScript.profile_ids().has(TerrainQualityProfileScript.LOCAL_DETAIL_REVIEW):
 		errors.append("local_detail_profile_not_listed")
 	var settings: Dictionary = profile.get("settings", {}) as Dictionary
+	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
 	var required_keys: Array[String] = [
 		"use_local_detail",
 		"local_detail_radius_patches",
@@ -128,6 +129,17 @@ func _check_local_detail_profile_contract(errors: Array[String]) -> void:
 		errors.append("local_detail_profile_displacement_disabled")
 	if bool(settings.get("enable_local_collision_bodies", true)):
 		errors.append("local_detail_profile_collision_enabled")
+	var required_budgets: Array[String] = [
+		"local_detail_max_drain_frames",
+		"local_detail_max_patch_assign_ms",
+		"local_detail_max_surface_texture_ms",
+		"local_detail_max_param_refresh_ms",
+		"local_detail_max_toggle_displacement_texture_ms",
+		"local_detail_max_patch_move_update_ms",
+	]
+	for key in required_budgets:
+		if int(budgets.get(key, 0)) <= 0:
+			errors.append("local_detail_missing_budget:%s" % key)
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false

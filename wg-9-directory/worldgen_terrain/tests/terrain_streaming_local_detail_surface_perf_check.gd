@@ -2,13 +2,14 @@ extends SceneTree
 
 const TerrainStreamingPreviewSceneScript := preload("res://worldgen_terrain/runtime/terrain_streaming_preview_scene.gd")
 const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_world.gd")
+const TerrainQualityProfileScript := preload("res://worldgen_terrain/core/terrain_quality_profile.gd")
 
-const MAX_DRAIN_FRAMES := 140
-const MAX_PATCH_ASSIGN_MS := 120
-const MAX_SURFACE_TEXTURE_MS := 90
-const MAX_PARAM_REFRESH_MS := 20
-const MAX_TOGGLE_DISPLACEMENT_TEXTURE_MS := 45
-const MAX_PATCH_MOVE_UPDATE_MS := 35
+var max_drain_frames: int = 140
+var max_patch_assign_ms: int = 120
+var max_surface_texture_ms: int = 90
+var max_param_refresh_ms: int = 20
+var max_toggle_displacement_texture_ms: int = 45
+var max_patch_move_update_ms: int = 35
 
 
 func _init() -> void:
@@ -21,6 +22,9 @@ func _start() -> void:
 		errors.append("native_class_not_registered")
 		_report_and_quit(errors)
 		return
+	var profile: Dictionary = TerrainQualityProfileScript.profile(TerrainQualityProfileScript.LOCAL_DETAIL_REVIEW)
+	_apply_profile_budgets(profile)
+	var local_settings: Dictionary = profile.get("settings", {}) as Dictionary
 
 	var scene: Node3D = TerrainStreamingPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
@@ -31,15 +35,7 @@ func _start() -> void:
 	scene.build_budget_per_frame = 1
 	scene.warmup_build_steps = 1
 	scene.use_fast_gray_material = true
-	scene.use_local_detail = true
-	scene.local_detail_radius_patches = 0
-	scene.local_detail_max_active_patches = 1
-	scene.use_local_detail_workers = true
-	scene.use_local_detail_surface_material = true
-	scene.local_detail_surface_normal_strength = 0.75
-	scene.use_local_detail_visual_displacement = true
-	scene.local_detail_visual_displacement_strength = 0.35
-	scene.local_detail_visual_displacement_limit_m = 2.0
+	_apply_local_detail_profile_settings(scene, local_settings)
 	get_root().add_child(scene)
 
 	if not scene.setup():
@@ -57,8 +53,8 @@ func _start() -> void:
 	var move_ms: int = Time.get_ticks_msec() - move_start_ms
 	if report.get("status", "fail") != "pass":
 		errors.append("move_report_failed:%s" % str(report))
-	if move_ms > MAX_PATCH_MOVE_UPDATE_MS:
-		errors.append("move_update_ms:%d limit:%d" % [move_ms, MAX_PATCH_MOVE_UPDATE_MS])
+	if move_ms > max_patch_move_update_ms:
+		errors.append("move_update_ms:%d limit:%d" % [move_ms, max_patch_move_update_ms])
 	var move_drain_frames: int = _drain_detail_patch(scene, "1,0", errors)
 	var final_stats: Dictionary = scene.local_detail.build_stats()
 	_check_surface_perf_stats("move", final_stats, errors)
@@ -71,7 +67,7 @@ func _start() -> void:
 
 
 func _drain_detail_patch(scene: Node3D, key: String, errors: Array[String]) -> int:
-	for index in range(MAX_DRAIN_FRAMES):
+	for index in range(max_drain_frames):
 		var report: Dictionary = scene.step_viewer(0.0, Vector2.ZERO, 0.0)
 		if report.get("status", "fail") != "pass":
 			errors.append("drain_report_failed:%s:%s" % [key, str(report)])
@@ -85,7 +81,7 @@ func _drain_detail_patch(scene: Node3D, key: String, errors: Array[String]) -> i
 			return index + 1
 		OS.delay_msec(5)
 	errors.append("drain_timeout:%s:%s" % [key, JSON.stringify(scene.local_detail.build_stats())])
-	return MAX_DRAIN_FRAMES
+	return max_drain_frames
 
 
 func _check_surface_perf_stats(label: String, stats: Dictionary, errors: Array[String]) -> void:
@@ -96,14 +92,14 @@ func _check_surface_perf_stats(label: String, stats: Dictionary, errors: Array[S
 	if not bool(stats.get("use_visual_displacement", false)):
 		errors.append("%s_visual_displacement_disabled" % label)
 	var assign_ms: int = int(stats.get("last_patch_assign_ms", 0))
-	if assign_ms <= 0 or assign_ms > MAX_PATCH_ASSIGN_MS:
-		errors.append("%s_assign_ms:%d limit:%d" % [label, assign_ms, MAX_PATCH_ASSIGN_MS])
+	if assign_ms <= 0 or assign_ms > max_patch_assign_ms:
+		errors.append("%s_assign_ms:%d limit:%d" % [label, assign_ms, max_patch_assign_ms])
 	var texture_ms: int = int(stats.get("last_surface_texture_ms", 0))
-	if texture_ms <= 0 or texture_ms > MAX_SURFACE_TEXTURE_MS:
-		errors.append("%s_surface_texture_ms:%d limit:%d" % [label, texture_ms, MAX_SURFACE_TEXTURE_MS])
+	if texture_ms <= 0 or texture_ms > max_surface_texture_ms:
+		errors.append("%s_surface_texture_ms:%d limit:%d" % [label, texture_ms, max_surface_texture_ms])
 	var max_assign_ms: int = int(stats.get("max_recent_patch_assign_ms", 0))
-	if max_assign_ms > MAX_PATCH_ASSIGN_MS:
-		errors.append("%s_max_assign_ms:%d limit:%d" % [label, max_assign_ms, MAX_PATCH_ASSIGN_MS])
+	if max_assign_ms > max_patch_assign_ms:
+		errors.append("%s_max_assign_ms:%d limit:%d" % [label, max_assign_ms, max_patch_assign_ms])
 
 
 func _check_parameter_refresh(scene: Node3D, errors: Array[String]) -> void:
@@ -112,8 +108,8 @@ func _check_parameter_refresh(scene: Node3D, errors: Array[String]) -> void:
 	if not bool(stats.get("last_surface_material_reused", false)):
 		errors.append("parameter_refresh_not_reused:%s" % JSON.stringify(stats))
 	var refresh_ms: int = int(stats.get("last_surface_texture_ms", 0))
-	if refresh_ms > MAX_PARAM_REFRESH_MS:
-		errors.append("parameter_refresh_ms:%d limit:%d" % [refresh_ms, MAX_PARAM_REFRESH_MS])
+	if refresh_ms > max_param_refresh_ms:
+		errors.append("parameter_refresh_ms:%d limit:%d" % [refresh_ms, max_param_refresh_ms])
 
 
 func _check_texture_then_displacement_toggle(errors: Array[String], stats_out: Dictionary) -> void:
@@ -126,15 +122,11 @@ func _check_texture_then_displacement_toggle(errors: Array[String], stats_out: D
 	scene.build_budget_per_frame = 1
 	scene.warmup_build_steps = 1
 	scene.use_fast_gray_material = true
-	scene.use_local_detail = true
-	scene.local_detail_radius_patches = 0
-	scene.local_detail_max_active_patches = 1
-	scene.use_local_detail_workers = true
-	scene.use_local_detail_surface_material = true
-	scene.local_detail_surface_normal_strength = 0.75
+	var profile: Dictionary = TerrainQualityProfileScript.profile(TerrainQualityProfileScript.LOCAL_DETAIL_REVIEW)
+	var local_settings: Dictionary = profile.get("settings", {}) as Dictionary
+	_apply_local_detail_profile_settings(scene, local_settings)
 	scene.use_local_detail_visual_displacement = false
 	scene.local_detail_visual_displacement_strength = 0.0
-	scene.local_detail_visual_displacement_limit_m = 2.0
 	get_root().add_child(scene)
 	if not scene.setup():
 		errors.append("toggle_setup_failed:%s" % str(scene.errors))
@@ -158,10 +150,10 @@ func _check_texture_then_displacement_toggle(errors: Array[String], stats_out: D
 	var stats: Dictionary = scene.local_detail.build_stats()
 	var toggle_texture_ms: int = int(stats.get("last_surface_texture_ms", 0))
 	stats_out["toggle_displacement_texture_ms"] = toggle_texture_ms
-	if toggle_texture_ms <= 0 or toggle_texture_ms > MAX_TOGGLE_DISPLACEMENT_TEXTURE_MS:
+	if toggle_texture_ms <= 0 or toggle_texture_ms > max_toggle_displacement_texture_ms:
 		errors.append("toggle_displacement_texture_ms:%d limit:%d stats:%s" % [
 			toggle_texture_ms,
-			MAX_TOGGLE_DISPLACEMENT_TEXTURE_MS,
+			max_toggle_displacement_texture_ms,
 			JSON.stringify(stats),
 		])
 	var material_after: ShaderMaterial = patch.material_override as ShaderMaterial
@@ -177,6 +169,29 @@ func _check_texture_then_displacement_toggle(errors: Array[String], stats_out: D
 	if not bool(stats.get("use_visual_displacement", false)):
 		errors.append("toggle_displacement_not_enabled")
 	scene.queue_free()
+
+
+func _apply_profile_budgets(profile: Dictionary) -> void:
+	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
+	max_drain_frames = int(budgets.get("local_detail_max_drain_frames", max_drain_frames))
+	max_patch_assign_ms = int(budgets.get("local_detail_max_patch_assign_ms", max_patch_assign_ms))
+	max_surface_texture_ms = int(budgets.get("local_detail_max_surface_texture_ms", max_surface_texture_ms))
+	max_param_refresh_ms = int(budgets.get("local_detail_max_param_refresh_ms", max_param_refresh_ms))
+	max_toggle_displacement_texture_ms = int(budgets.get("local_detail_max_toggle_displacement_texture_ms", max_toggle_displacement_texture_ms))
+	max_patch_move_update_ms = int(budgets.get("local_detail_max_patch_move_update_ms", max_patch_move_update_ms))
+
+
+func _apply_local_detail_profile_settings(scene: Node3D, settings: Dictionary) -> void:
+	scene.use_local_detail = bool(settings.get("use_local_detail", true))
+	scene.local_detail_radius_patches = int(settings.get("local_detail_radius_patches", 0))
+	scene.local_detail_max_active_patches = int(settings.get("local_detail_max_active_patches", 1))
+	scene.use_local_detail_workers = bool(settings.get("use_local_detail_workers", true))
+	scene.use_local_detail_surface_material = bool(settings.get("use_local_detail_surface_material", true))
+	scene.local_detail_surface_normal_strength = float(settings.get("local_detail_surface_normal_strength", 0.85))
+	scene.use_local_detail_visual_displacement = bool(settings.get("use_local_detail_visual_displacement", true))
+	scene.local_detail_visual_displacement_strength = float(settings.get("local_detail_visual_displacement_strength", 0.45))
+	scene.local_detail_visual_displacement_limit_m = float(settings.get("local_detail_visual_displacement_limit_m", 2.5))
+	scene.enable_local_collision_bodies = bool(settings.get("enable_local_collision_bodies", false))
 
 
 func _report_and_quit(errors: Array[String], stats: Dictionary = {}) -> void:

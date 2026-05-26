@@ -161,6 +161,12 @@ that the local-detail node, surface material, visual displacement, and collision
 policy match the profile. This gives the remaining human-review step a stable
 launch contract without default-enabling local detail for normal walk review.
 
+The profile also owns the local-detail review performance budgets consumed by
+`terrain_streaming_local_detail_surface_perf_check.gd`, including patch assign,
+surface texture, parameter refresh, displacement-toggle texture, move-update,
+and drain-frame limits. Local-detail review settings and the gate that protects
+them should move together.
+
 ## Roadmap Use
 
 When the distant edge, motion profile, or residency budget needs tuning, change
@@ -171,7 +177,7 @@ Next profile work:
 
 ```text
 1. Add profile-specific motion thresholds now that the first fast-flight residency policy is gated.
-2. Add profile-specific local-detail motion/perf thresholds before considering default enablement.
+2. Add a dedicated high-density/257v profile only after local-detail visual review is accepted.
 3. Move far page generation/upload toward GPU compute or lower-churn native texture upload after visual review remains stable.
 4. Add optional profile tiers for high-density/257v review, review-only far radius, and hidden-edge buffer tuning.
 ```

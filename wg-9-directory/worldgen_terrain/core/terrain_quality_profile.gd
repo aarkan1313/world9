@@ -138,6 +138,14 @@ static func _local_detail_review_profile() -> Dictionary:
 		"enable_local_collision_bodies": false,
 	}, true)
 	profile_data["settings"] = settings
+	profile_data["budgets"] = {
+		"local_detail_max_drain_frames": 140,
+		"local_detail_max_patch_assign_ms": 120,
+		"local_detail_max_surface_texture_ms": 90,
+		"local_detail_max_param_refresh_ms": 20,
+		"local_detail_max_toggle_displacement_texture_ms": 45,
+		"local_detail_max_patch_move_update_ms": 35,
+	}
 	profile_data["review_only"] = true
 	return profile_data
 
