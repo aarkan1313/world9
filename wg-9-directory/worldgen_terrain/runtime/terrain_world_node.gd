@@ -125,6 +125,16 @@ func set_stream_priority_direction(direction: Vector2) -> void:
 		world.call("set_stream_priority_direction", direction)
 
 
+func apply_landform_profile(profile: Variant) -> bool:
+	if world == null or not world.has_method("apply_landform_profile"):
+		return false
+	var ok: bool = bool(world.call("apply_landform_profile", profile))
+	if ok:
+		_clear_native_chunk_workers()
+		_rebuild_existing_chunk_meshes()
+	return ok
+
+
 func clear_native_worker_backlog_for_preview() -> void:
 	_clear_native_chunk_workers()
 
@@ -628,11 +638,13 @@ func _clear_native_chunk_workers() -> void:
 
 
 func _provider_supports_native_prepared_grid() -> bool:
-	return (
-		world != null
-		and world.provider != null
-		and world.provider.has_method("native_prepared_height_grid_request")
-	)
+	if world == null or world.provider == null or not world.provider.has_method("native_prepared_height_grid_request"):
+		return false
+	if world.provider.has_method("landform_profile_report"):
+		var report: Dictionary = world.provider.call("landform_profile_report") as Dictionary
+		if not bool(report.get("native_prepared_grid_enabled", true)):
+			return false
+	return true
 
 
 func _chunk_node_matches_active_info(key: String, active_info: Dictionary) -> bool:

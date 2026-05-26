@@ -4,6 +4,7 @@ extends Node3D
 const TerrainSettingsScript := preload("res://worldgen_terrain/core/terrain_settings.gd")
 const TerrainStreamerScript := preload("res://worldgen_terrain/core/terrain_streamer.gd")
 const TerrainQualityProfileScript := preload("res://worldgen_terrain/core/terrain_quality_profile.gd")
+const TerrainLandformProfileScript := preload("res://worldgen_terrain/height/terrain_landform_profile.gd")
 const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_world.gd")
 const TerrainFarClipmapNodeScript := preload("res://worldgen_terrain/runtime/terrain_far_clipmap_node.gd")
 const TerrainLocalDetailNodeScript := preload("res://worldgen_terrain/runtime/terrain_local_detail_node.gd")
@@ -82,6 +83,7 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export_range(0.0, 1.0, 0.01) var local_detail_visual_displacement_strength: float = 0.0
 @export_range(0.0, 16.0, 0.25) var local_detail_visual_displacement_limit_m: float = 2.0
 @export var enable_local_collision_bodies: bool = false
+@export_enum("balanced_current", "strong_mountains", "compressed_scale") var landform_profile_id: String = TerrainLandformProfileScript.BALANCED_CURRENT
 
 var terrain: Node3D
 var far_clipmap: Node3D
@@ -184,6 +186,9 @@ func setup() -> bool:
 		for error in terrain.errors:
 			errors.append(str(error))
 		return false
+	if not apply_landform_profile(landform_profile_id, false):
+		errors.append("landform_profile_setup_failed:%s" % landform_profile_id)
+		return false
 	if warm_load_start_region_kernels:
 		_warm_load_visible_region_kernels()
 	if use_far_clipmap:
@@ -260,6 +265,40 @@ func apply_debug_mode(mode: String) -> void:
 		terrain.apply_debug_mode(mode)
 	if far_clipmap != null:
 		_configure_far_clipmap_node()
+
+
+func apply_landform_profile(profile_id: String, rebuild_existing: bool = true) -> bool:
+	landform_profile_id = profile_id
+	if terrain == null or terrain.world == null:
+		return true
+	var applied := false
+	if terrain.has_method("apply_landform_profile"):
+		applied = bool(terrain.call("apply_landform_profile", profile_id))
+	elif terrain.world.has_method("apply_landform_profile"):
+		applied = bool(terrain.world.call("apply_landform_profile", profile_id))
+	if not applied:
+		return false
+	if rebuild_existing:
+		if terrain.has_method("clear_native_worker_backlog_for_preview"):
+			terrain.call("clear_native_worker_backlog_for_preview")
+		if terrain.has_method("rebuild_all_active_for_preview"):
+			terrain.call("rebuild_all_active_for_preview", 0)
+		if far_clipmap != null:
+			if not far_clipmap.setup(terrain.world):
+				errors.append("far_clipmap_profile_rebuild_failed:%s" % profile_id)
+				return false
+			_preload_far_clipmap_before_start()
+		if local_detail != null:
+			local_detail.clear_patches()
+		_update_camera()
+		_update_diagnostics()
+	return true
+
+
+func landform_profile_report() -> Dictionary:
+	if terrain == null or terrain.world == null or not terrain.world.has_method("landform_profile_report"):
+		return {}
+	return terrain.world.call("landform_profile_report") as Dictionary
 
 
 func expected_active_count() -> int:

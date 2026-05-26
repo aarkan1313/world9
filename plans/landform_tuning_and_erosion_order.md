@@ -86,6 +86,8 @@ Current proof:
 
 ```text
 res://worldgen_terrain/tests/terrain_landform_profile_compare_check.gd
+res://worldgen_terrain/tests/terrain_landform_profile_tour_scene_check.gd
+res://worldgen_terrain/scenes/terrain_landform_profile_tour.tscn
 factory/runtime/godot_landform_profiles/landform_profile_report.json
 factory/runtime/godot_landform_profiles/landform_profile_contact_sheet.png
 ```
@@ -98,6 +100,16 @@ strong_mountains increases relief on at least one selected mountain-family site
 compressed_scale changes local-relief/frequency on the same selected sites
 same-coordinate adjacent grid seams stay under 1cm
 non-neutral profiles do not claim native prepared-grid support
+live profile tour exposes the same profiles through the normal walk/far stack
+```
+
+Live review controls:
+
+```text
+V: advance landform profile
+P: toggle automatic profile cycling
+N/B: next/previous representative site
+WASD + mouse: normal walk/fly controls
 ```
 
 ## Passes And Traversable Corridors

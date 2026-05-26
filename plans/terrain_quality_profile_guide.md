@@ -234,6 +234,20 @@ D:/workflows/worldgen9/factory/runtime/godot_landform_profiles/landform_profile_
 D:/workflows/worldgen9/factory/runtime/godot_landform_profiles/landform_profile_contact_sheet.png
 ```
 
+Live profile review scene:
+
+```text
+res://worldgen_terrain/scenes/terrain_landform_profile_tour.tscn
+```
+
+Controls:
+
+```text
+V advances profile
+P toggles automatic profile cycling
+N/B moves to next/previous representative site
+```
+
 Non-neutral landform profiles are review-only. They intentionally disable native
 prepared-grid/chunk payload support until the native/GPU backend consumes the
 same profile settings and passes parity.
