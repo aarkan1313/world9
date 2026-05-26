@@ -98,6 +98,17 @@ func _check_persistent_page_material_reuse(node: Node3D, errors: Array[String]) 
 	var previous_height_texture: Texture2D = second_material.get_shader_parameter("previous_height_texture") as Texture2D
 	if first_height_texture != null and previous_height_texture != first_height_texture:
 		errors.append("clipmap_previous_texture_not_preserved")
+	var shifted_gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
+	var shifted_uploads: int = int(shifted_gpu_state.get("uploads", 0))
+	node.update_viewer(Vector2.ZERO)
+	var return_stats: Dictionary = node.stats()
+	var return_gpu_state: Dictionary = return_stats.get("gpu_page_residency", {}) as Dictionary
+	if int(return_gpu_state.get("uploads", 0)) != shifted_uploads:
+		errors.append("clipmap_cached_return_uploaded:%s shifted_uploads=%d" % [str(return_gpu_state), shifted_uploads])
+	if int(return_stats.get("last_page_descriptor_texture_hits", 0)) < node.level_count:
+		errors.append("clipmap_cached_return_texture_hits:%s" % str(return_stats))
+	if int(return_stats.get("last_page_descriptor_image_builds", 0)) != 0:
+		errors.append("clipmap_cached_return_image_builds:%s" % str(return_stats))
 
 
 func _check_persistent_page_bounds(node: Node3D, errors: Array[String]) -> void:

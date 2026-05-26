@@ -58,6 +58,7 @@ far page blend activity
 far GPU page residency hits/uploads/evictions/MiB
 far page displacement bounds
 far page material reuse
+far page descriptor image builds vs GPU texture hits
 anchor/recenter frames
 near/far draw and triangle estimates
 current quality profile report
@@ -113,6 +114,11 @@ Page commits should also reuse the existing ShaderMaterial where possible.
 The height/normal texture parameters change, but the material object should not
 churn every time a page recenters; previous/current texture parameters keep the
 blend valid.
+
+When a page commit returns to an already GPU-resident page, the profile should
+show descriptor texture hits rather than rebuilding height/normal CPU images.
+That is the current lower-churn path before moving page generation/upload into
+GPU compute or a lower-level native texture upload path.
 
 ```text
 queue_backlog_frames

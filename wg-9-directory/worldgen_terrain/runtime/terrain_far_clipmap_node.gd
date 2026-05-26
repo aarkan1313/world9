@@ -59,6 +59,8 @@ var last_worker_error: String = ""
 var last_page_error: String = ""
 var last_surface_material_reused: bool = false
 var last_page_material_reused: bool = false
+var last_page_descriptor_image_builds: int = 0
+var last_page_descriptor_texture_hits: int = 0
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
 var _native_backend: Object
@@ -133,6 +135,8 @@ func clear_levels() -> void:
 	last_page_error = ""
 	last_surface_material_reused = false
 	last_page_material_reused = false
+	last_page_descriptor_image_builds = 0
+	last_page_descriptor_texture_hits = 0
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
@@ -236,6 +240,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_rebuilt_levels.clear()
 	last_scheduled_levels.clear()
 	last_deferred_levels.clear()
+	last_page_descriptor_image_builds = 0
+	last_page_descriptor_texture_hits = 0
 	var shared_origin := _shared_origin(viewer_xz)
 	if shared_origin != _pending_origin:
 		_pending_origin = shared_origin
@@ -301,6 +307,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
 		"last_page_material_reused": last_page_material_reused,
+		"last_page_descriptor_image_builds": last_page_descriptor_image_builds,
+		"last_page_descriptor_texture_hits": last_page_descriptor_texture_hits,
 	}
 
 
@@ -329,6 +337,8 @@ func stats() -> Dictionary:
 		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
 		"last_page_material_reused": last_page_material_reused,
+		"last_page_descriptor_image_builds": last_page_descriptor_image_builds,
+		"last_page_descriptor_texture_hits": last_page_descriptor_texture_hits,
 	}
 
 
@@ -443,7 +453,7 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
 	level_heightfields[level] = heightfield
 	level_surface_descriptors[level] = {}
-	var descriptor: Dictionary = _material_descriptor_from_heightfield(heightfield)
+	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
 	level_material_descriptors[level] = descriptor
 	var mesh_instance: MeshInstance3D = level_nodes[level]
 	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
@@ -496,7 +506,7 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
 	level_heightfields[level] = heightfield
 	level_surface_descriptors[level] = {}
-	var descriptor: Dictionary = _material_descriptor_from_heightfield(heightfield)
+	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
 	level_material_descriptors[level] = descriptor
 	var mesh_instance: MeshInstance3D = level_nodes[level]
 	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
@@ -1537,6 +1547,31 @@ func _surface_descriptor_from_heightfield(
 
 func _material_descriptor_from_heightfield(heightfield: Dictionary) -> Dictionary:
 	return _surface_descriptor_from_heightfield(heightfield, false, false)
+
+
+func _page_material_descriptor_from_heightfield(heightfield: Dictionary) -> Dictionary:
+	var cache_key: String = str(heightfield.get("cache_key", ""))
+	if use_persistent_page_mesh and _gpu_page_residency != null and _gpu_page_residency.has_page(cache_key):
+		last_page_descriptor_texture_hits += 1
+		var height_min: float = float(heightfield.get("height_min_m", 0.0))
+		var height_max: float = float(heightfield.get("height_max_m", height_min))
+		var level: int = int(heightfield.get("level", 0))
+		return {
+			"status": "pass",
+			"level": level,
+			"origin_x": float(heightfield.get("origin_x", 0.0)),
+			"origin_z": float(heightfield.get("origin_z", 0.0)),
+			"outer_extent_m": float(heightfield.get("outer_extent_m", 0.0)),
+			"inner_extent_m": _inner_extent_for_level(level),
+			"vertices_per_side": int(heightfield.get("vertices_per_side", vertices_per_side)),
+			"spacing_m": float(heightfield.get("spacing_m", _level_spacing(level))),
+			"height_min_m": height_min,
+			"height_max_m": height_max,
+			"height_range_m": max(0.0, height_max - height_min),
+			"cache_key": cache_key,
+		}
+	last_page_descriptor_image_builds += 1
+	return _material_descriptor_from_heightfield(heightfield)
 
 
 func _ensure_persistent_page_mesh(level: int, side: int, spacing: float, outer_extent: float, inner_extent: float) -> void:
