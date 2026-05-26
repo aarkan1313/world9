@@ -16,6 +16,7 @@ func _init() -> void:
 	var fact_ids: Dictionary = {}
 	var rugged_count := 0
 	var max_mid_strength := 0.0
+	var best_mid := Vector2.ZERO
 	for region in regions:
 		var facts: Dictionary = world.pass_corridor_facts_for_region(region.x, region.y)
 		var repeat: Dictionary = world.pass_corridor_facts_for_region(region.x, region.y)
@@ -36,14 +37,18 @@ func _init() -> void:
 			var hint: Dictionary = world.sample_pass_corridor_hint(mid.x, mid.y)
 			if hint.get("status", "fail") != "pass":
 				errors.append("hint_failed:%s" % str(hint))
-			max_mid_strength = max(max_mid_strength, float(hint.get("corridor_strength", 0.0)))
+			var mid_strength: float = float(hint.get("corridor_strength", 0.0))
+			if mid_strength > max_mid_strength:
+				max_mid_strength = mid_strength
+				best_mid = mid
 			var sample: Dictionary = world.sample(mid.x, mid.y)
 			if absf(float(sample.get("pass_corridor_hint", 0.0)) - float(hint.get("corridor_strength", 0.0))) > 0.0001:
 				errors.append("sample_hint_mismatch:%s:%s" % [str(sample), str(hint)])
 
-	var before_height: float = world.sample_height(8192.0, -4096.0)
+	var neutral_probe_height: float = world.sample_height(8192.0, -4096.0)
+	var neutral_corridor_height: float = world.sample_height(best_mid.x, best_mid.y)
 	var custom_profile := {
-		"id": "pass_placeholder_probe",
+		"id": "pass_shaping_probe",
 		"settings": {
 			"macro_relief_scale": 1.0,
 			"kernel_relief_strength": 1.0,
@@ -55,9 +60,25 @@ func _init() -> void:
 	}
 	if not world.apply_landform_profile(custom_profile):
 		errors.append("custom_profile_apply_failed")
-	var after_height: float = world.sample_height(8192.0, -4096.0)
-	if absf(before_height - after_height) > 0.0001:
-		errors.append("pass_placeholder_changed_height:%.6f" % absf(before_height - after_height))
+	var shaped_probe_height: float = world.sample_height(8192.0, -4096.0)
+	var shaped_corridor_height: float = world.sample_height(best_mid.x, best_mid.y)
+	var neutral_probe_delta: float = absf(neutral_probe_height - shaped_probe_height)
+	var corridor_delta: float = neutral_corridor_height - shaped_corridor_height
+	if neutral_probe_delta > 0.0001:
+		errors.append("pass_shape_changed_off_corridor_probe:%.6f" % neutral_probe_delta)
+	if corridor_delta < 8.0:
+		errors.append("pass_shape_too_weak:%.6f neutral:%.3f shaped:%.3f mid:%s" % [
+			corridor_delta,
+			neutral_corridor_height,
+			shaped_corridor_height,
+			str(best_mid),
+		])
+	var profile_report: Dictionary = world.landform_profile_report()
+	if bool(profile_report.get("native_prepared_grid_enabled", true)):
+		errors.append("pass_shape_native_should_be_disabled:%s" % str(profile_report))
+	var shaped_sample: Dictionary = world.sample(best_mid.x, best_mid.y)
+	if float(shaped_sample.get("pass_corridor_adjust_m", 0.0)) >= -0.0001:
+		errors.append("pass_adjust_missing:%s" % str(shaped_sample))
 
 	if fact_ids.size() < regions.size():
 		errors.append("duplicate_fact_ids:%d regions:%d" % [fact_ids.size(), regions.size()])
@@ -72,7 +93,9 @@ func _init() -> void:
 		"unique_fact_ids": fact_ids.size(),
 		"rugged_candidates": rugged_count,
 		"max_mid_corridor_strength": max_mid_strength,
-		"affects_height": false,
+		"best_mid": [best_mid.x, best_mid.y],
+		"corridor_height_delta_m": corridor_delta,
+		"affects_height": true,
 	})
 
 

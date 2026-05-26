@@ -93,6 +93,9 @@ func sample_pass_corridor_hint(
 		"corridor_strength": best_strength,
 		"corridor_id": str(best_fact.get("id", "")),
 		"corridor_kind": str(best_fact.get("kind", "")),
+		"priority": float(best_fact.get("priority", 0.0)),
+		"ruggedness": float(best_fact.get("ruggedness", 0.0)),
+		"width_m": float(best_fact.get("width_m", 0.0)),
 		"affects_height": false,
 	}
 

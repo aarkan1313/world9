@@ -50,9 +50,13 @@ kernel terrain at a shorter effective world scale while leaving region IDs and
 family selection anchored to the normal world grid.
 
 Review profiles are opt-in. The native prepared-grid/chunk payload path now
-receives the same profile parameters as the GDScript provider, so profile
-switches can use the normal native worker flow instead of blocking far/near
-refresh or falling back to multi-second synchronous GDScript generation.
+receives the same base-relief profile parameters as the GDScript provider, so
+the current review profiles can use the normal native worker flow instead of
+blocking far/near refresh or falling back to multi-second synchronous GDScript
+generation. Pass/corridor shaping is the exception for now: route facts are
+GDScript/provider-owned world facts, so profiles with `pass_corridor_strength`
+above zero intentionally disable the native prepared grid until the native
+backend also receives the same world-fact contract.
 
 ## Acceptance Checks
 
@@ -129,13 +133,15 @@ passes are macro route/topology facts
 erosion is a shaping/detail pass
 ```
 
-Implemented placeholder:
+Implemented first shaping slice:
 
 ```text
 TerrainWorldFacts emits deterministic per-region pass/corridor facts
 facts include endpoints, width, priority, ruggedness, palette/family context
-facts expose sample hints but do not alter height yet (`affects_height=false`)
-terrain_world_facts_pass_corridor_check.gd proves determinism and no height deformation
+facts expose sample hints for route strength, priority, ruggedness, and width
+default balanced terrain still has `pass_corridor_strength=0`, so it is unchanged
+opt-in profiles can lower/smooth terrain along the deterministic corridor field
+terrain_world_facts_pass_corridor_check.gd proves determinism, default no-op behavior, native fallback policy, and nonzero corridor height shaping
 ```
 
 A pass/corridor field can guide later systems:
@@ -152,6 +158,15 @@ erosion flow directions
 Do not implement passes by directly carving arbitrary visible chunks. Model them
 as deterministic world facts that the height provider can sample, then let the
 renderer consume the resulting height.
+
+Current limitations:
+
+```text
+pass/corridor shaping is conservative and downward-only
+it is not yet a real river/channel route solver
+native prepared grids are disabled for pass-shaping profiles until Rust consumes route facts
+visual acceptance is still required before promoting any pass-shaping profile to default
+```
 
 ## Where Erosion Fits
 

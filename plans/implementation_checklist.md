@@ -129,6 +129,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add same-site profile comparison probe/contact sheet/tour with height-range, p05/p95 relief, slope, local-relief, kernel-contribution, and seam checks.
 - [x] Add live `terrain_landform_profile_tour.tscn` review scene that exposes `balanced_current`, `strong_mountains`, and `compressed_scale` on representative sites. It defaults to manual profile switching so tuned profiles do not rebuild unexpectedly while flying, while far coverage remains enabled for useful scale review.
 - [x] Add deterministic pass/corridor world-fact placeholder after base scale/relief profiles are measurable.
+- [x] Add opt-in bounded pass/corridor height shaping through the height provider while keeping default terrain unchanged and documenting the native-prepared fallback policy.
 - [ ] Keep erosion after accepted base relief/scale, kernel influence tuning, useful hydrology hints, and first river/pass routing facts.
 - [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.

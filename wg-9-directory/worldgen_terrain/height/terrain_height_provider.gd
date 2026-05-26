@@ -206,7 +206,7 @@ func _sample_height_grid_single_region(origin_x: float, origin_z: float, step_m:
 				wx0 * wz1,
 				tx * wz1,
 			]
-			values[index] = _sample_height_value_with_corner_entries(x, z, world_seed, corner_entries, corner_weights)
+			values[index] = _sample_height_value_with_corner_entries(x, z, world_seed, region_size_m, corner_entries, corner_weights)
 			index += 1
 	return values
 
@@ -308,7 +308,7 @@ func _can_use_native_prepared_grid() -> bool:
 
 
 func _native_prepared_profile_supported() -> bool:
-	return true
+	return pass_corridor_strength <= 0.000001
 
 
 func _landform_profile_is_native_neutral() -> bool:
@@ -422,6 +422,7 @@ func sample(world_x: float, world_z: float, world_seed: int = 1337, region_size_
 		"kernel_relief_m": float(layers["relief"]),
 		"detail_height_m": float(layers["detail"]),
 		"valley_adjust_m": float(layers["valley"]),
+		"pass_corridor_adjust_m": float(layers.get("pass_corridor_adjust", 0.0)),
 		"pass_corridor_hint": float(pass_hint.get("corridor_strength", 0.0)),
 		"pass_corridor_id": str(pass_hint.get("corridor_id", "")),
 		"slope_hint": slope_hint(world_x, world_z, world_seed, region_size_m, slope_step_m),
@@ -458,7 +459,7 @@ func _sample_height_value(x: float, z: float, world_seed: int, region_size_m: fl
 	return f32(float(_sample_layer_values(x, z, world_seed, region_size_m)["height"]))
 
 
-func _sample_height_value_with_corner_entries(x: float, z: float, world_seed: int, corner_entries: Array[Dictionary], corner_weights: Array[float]) -> float:
+func _sample_height_value_with_corner_entries(x: float, z: float, world_seed: int, region_size_m: float, corner_entries: Array[Dictionary], corner_weights: Array[float]) -> float:
 	var sample_x: float = _scaled_coord(x)
 	var sample_z: float = _scaled_coord(z)
 	var profile_region_size_m: float = _profile_region_size_from_entries(corner_entries)
@@ -501,7 +502,9 @@ func _sample_height_value_with_corner_entries(x: float, z: float, world_seed: in
 	var valleys: float = valley_mask(sample_x, sample_z, world_seed)
 	var valley_cut: float = valleys * (110.0 + upland * 130.0) * valley_bias_strength
 	var valley_floor_noise: float = TerrainHashScript.fbm(sample_x, sample_z, 4200.0, world_seed + 401, 2) * 24.0 * valleys
-	return f32(macro + relief + detail - valley_cut + valley_floor_noise)
+	var valley_layer: float = -valley_cut + valley_floor_noise
+	var pass_adjust: float = _pass_corridor_adjustment(x, z, macro + relief + detail + valley_layer, world_seed, region_size_m)
+	return f32(macro + relief + detail + valley_layer + pass_adjust)
 
 
 func _sample_kernel_cached(entry: Dictionary, x: float, z: float, profile_region_size_m: float = 0.0) -> float:
@@ -598,13 +601,16 @@ func _sample_layer_values(x: float, z: float, world_seed: int, region_size_m: fl
 	var valley_cut: float = valleys * (110.0 + upland * 130.0) * valley_bias_strength
 	var valley_floor_noise: float = TerrainHashScript.fbm(sample_x, sample_z, 4200.0, world_seed + 401, 2) * 24.0 * valleys
 	var valley_layer: float = -valley_cut + valley_floor_noise
-	var height: float = macro + relief + detail + valley_layer
+	var unshaped_height: float = macro + relief + detail + valley_layer
+	var pass_adjust: float = _pass_corridor_adjustment(x, z, unshaped_height, world_seed, region_size_m)
+	var height: float = unshaped_height + pass_adjust
 	return {
 		"height": f32(height),
 		"macro": f32(macro),
 		"relief": f32(relief),
 		"detail": f32(detail),
 		"valley": f32(valley_layer),
+		"pass_corridor_adjust": f32(pass_adjust),
 	}
 
 
@@ -801,6 +807,23 @@ func _family_relief_boost(family: String) -> float:
 	if family == "mountain" or family == "glacial" or family == "volcanic":
 		return mountain_boost
 	return 1.0
+
+
+func _pass_corridor_adjustment(x: float, z: float, current_height_m: float, world_seed: int, region_size_m: float) -> float:
+	if pass_corridor_strength <= 0.000001:
+		return 0.0
+	var hint: Dictionary = sample_pass_corridor_hint(x, z, world_seed, region_size_m)
+	if hint.get("status", "fail") != "pass":
+		return 0.0
+	var strength: float = clampf(float(hint.get("corridor_strength", 0.0)), 0.0, 1.0)
+	if strength <= 0.000001:
+		return 0.0
+	var ruggedness: float = clampf(float(hint.get("ruggedness", 0.0)), 0.0, 1.0)
+	var priority: float = clampf(float(hint.get("priority", 0.0)), 0.0, 1.0)
+	var pass_power: float = strength * strength
+	var max_cut_m: float = pass_corridor_strength * lerpf(36.0, 220.0, ruggedness) * lerpf(0.55, 1.0, priority)
+	var high_terrain_factor: float = TerrainHashScript.smoothstep_unit((current_height_m + 90.0) / 560.0)
+	return -max_cut_m * pass_power * high_terrain_factor
 
 
 func palette_index(name: String) -> int:
