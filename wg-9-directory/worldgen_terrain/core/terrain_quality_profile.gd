@@ -2,18 +2,21 @@ class_name TerrainQualityProfile
 extends RefCounted
 
 const WALK_REVIEW := "walk_review"
+const LOCAL_DETAIL_REVIEW := "local_detail_review"
 
 
 static func profile(profile_id: String) -> Dictionary:
 	match profile_id:
 		WALK_REVIEW:
 			return _walk_review_profile()
+		LOCAL_DETAIL_REVIEW:
+			return _local_detail_review_profile()
 		_:
 			return {}
 
 
 static func profile_ids() -> Array[String]:
-	return [WALK_REVIEW]
+	return [WALK_REVIEW, LOCAL_DETAIL_REVIEW]
 
 
 static func apply_to_node(node: Object, profile_data: Dictionary) -> void:
@@ -115,6 +118,28 @@ static func _walk_review_profile() -> Dictionary:
 			"fast_gray_contrast": 1.42,
 		},
 	}
+
+
+static func _local_detail_review_profile() -> Dictionary:
+	var profile_data: Dictionary = _walk_review_profile()
+	profile_data["id"] = LOCAL_DETAIL_REVIEW
+	profile_data["description"] = "Opt-in live walk review profile for one active 1m local-detail patch with texture material and bounded visual displacement."
+	var settings: Dictionary = (profile_data["settings"] as Dictionary).duplicate(true)
+	settings.merge({
+		"use_local_detail": true,
+		"local_detail_radius_patches": 0,
+		"local_detail_max_active_patches": 1,
+		"use_local_detail_workers": true,
+		"use_local_detail_surface_material": true,
+		"local_detail_surface_normal_strength": 0.85,
+		"use_local_detail_visual_displacement": true,
+		"local_detail_visual_displacement_strength": 0.45,
+		"local_detail_visual_displacement_limit_m": 2.5,
+		"enable_local_collision_bodies": false,
+	}, true)
+	profile_data["settings"] = settings
+	profile_data["review_only"] = true
+	return profile_data
 
 
 static func _values_match(actual: Variant, expected: Variant) -> bool:

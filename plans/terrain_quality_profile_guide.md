@@ -29,6 +29,12 @@ The active default profile is:
 walk_review
 ```
 
+An opt-in review profile also exists:
+
+```text
+local_detail_review
+```
+
 It is defined in:
 
 ```text
@@ -136,6 +142,25 @@ mode and leaves coarse/fine LOD morph to the shader. CPU-side morphing remains
 for the older non-persistent mesh path, but persistent page rendering should not
 double-morph height data before the shader sees it.
 
+## Local Detail Review Profile
+
+`local_detail_review` is review-only and does not change the default walk scene.
+It starts from `walk_review`, then enables one active 1m local-detail patch with:
+
+```text
+surface texture material: on
+visual displacement: on
+displacement strength/limit: 0.45 / 2.5m
+collision bodies: off
+active patch budget: 1
+native local-detail workers: on
+```
+
+The quality-profile gate applies this profile to a live walk scene and verifies
+that the local-detail node, surface material, visual displacement, and collision
+policy match the profile. This gives the remaining human-review step a stable
+launch contract without default-enabling local detail for normal walk review.
+
 ## Roadmap Use
 
 When the distant edge, motion profile, or residency budget needs tuning, change
@@ -146,7 +171,7 @@ Next profile work:
 
 ```text
 1. Add profile-specific motion thresholds now that the first fast-flight residency policy is gated.
-2. Add high-density/local-detail profiles after the default walk profile is stable.
+2. Add profile-specific local-detail motion/perf thresholds before considering default enablement.
 3. Move far page generation/upload toward GPU compute or lower-churn native texture upload after visual review remains stable.
-4. Add optional profile tiers for review-only far radius and hidden-edge buffer tuning.
+4. Add optional profile tiers for high-density/257v review, review-only far radius, and hidden-edge buffer tuning.
 ```

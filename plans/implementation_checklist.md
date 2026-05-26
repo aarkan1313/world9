@@ -55,6 +55,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add live walk-preview local-detail review captures at `factory/runtime/godot_walk_local_detail_review/`.
 - [x] Add deterministic local-detail review manifests for isolated patch and walk-preview captures, including mesh budget, image readability stats, and subtle-displacement review flags.
 - [x] Add runtime readiness checks that lock local-detail review manifest schema, 257x257 / 1m patch budget, image stats, collision-off state, and subtle-displacement review flags.
+- [x] Add opt-in `local_detail_review` quality profile and gate that it enables one native-worker 1m patch with texture material plus bounded visual displacement while keeping collision off.
 - [x] Optimize the normal `T` then `Y` review workflow by filling missing displacement residuals through the native backend.
 - [x] Add headless regression coverage for the normal `T` then `Y` review workflow; current toggle texture work is ~14ms.
 - [x] Align the walk-preview near chunk window with the far-clipmap underlay; handoff samples now test at 0.0 height delta.

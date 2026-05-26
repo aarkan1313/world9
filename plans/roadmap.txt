@@ -123,6 +123,7 @@ Live review: T/Y toggle local detail texture material and visual displacement in
 Review perf: active local detail surface materials reuse existing textures for strength/limit-only changes
 Render review: local-detail base, texture-material, and bounded displacement captures plus manifest write to `factory/runtime/godot_local_detail_displacement/`; current metadata flags subtle displacement
 Production review perf: native backend now generates local-detail visual-displacement residuals; surface/displacement assignment is ~20ms instead of ~160ms in the perf gate
+Quality profile: `local_detail_review` is review-only and starts from `walk_review`, then enables one native-worker 1m patch with texture material plus bounded visual displacement while keeping collision bodies off
 Walk review captures: actual `TerrainWalkPreviewScene` base/texture/displacement frames plus manifest write to `factory/runtime/godot_walk_local_detail_review/`; current metadata flags subtle displacement
 Local detail release guard: runtime readiness checks local-detail review manifest schema, 257x257 / 1m patch budget, image stats, collision-off walk state, and subtle-displacement flags
 Review workflow gate: headless perf test now covers the normal T then Y toggle path; current displacement texture work is ~14ms

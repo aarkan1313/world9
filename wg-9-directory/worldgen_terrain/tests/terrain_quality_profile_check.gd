@@ -16,6 +16,7 @@ func _start() -> void:
 	if not TerrainQualityProfileScript.profile_ids().has(TerrainQualityProfileScript.WALK_REVIEW):
 		errors.append("walk_profile_not_listed")
 	_check_profile_contract(profile, errors)
+	_check_local_detail_profile_contract(errors)
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
@@ -90,3 +91,67 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 	var visibility: Dictionary = TerrainQualityProfileScript.visibility_contract(profile)
 	if float(visibility.get("hidden_buffer_m", 0.0)) <= 0.0:
 		errors.append("visibility_hidden_buffer:%.3f" % float(visibility.get("hidden_buffer_m", 0.0)))
+
+
+func _check_local_detail_profile_contract(errors: Array[String]) -> void:
+	var profile: Dictionary = TerrainQualityProfileScript.profile(TerrainQualityProfileScript.LOCAL_DETAIL_REVIEW)
+	if profile.is_empty():
+		errors.append("local_detail_profile_missing")
+		return
+	if not TerrainQualityProfileScript.profile_ids().has(TerrainQualityProfileScript.LOCAL_DETAIL_REVIEW):
+		errors.append("local_detail_profile_not_listed")
+	var settings: Dictionary = profile.get("settings", {}) as Dictionary
+	var required_keys: Array[String] = [
+		"use_local_detail",
+		"local_detail_radius_patches",
+		"local_detail_max_active_patches",
+		"use_local_detail_workers",
+		"use_local_detail_surface_material",
+		"local_detail_surface_normal_strength",
+		"use_local_detail_visual_displacement",
+		"local_detail_visual_displacement_strength",
+		"local_detail_visual_displacement_limit_m",
+		"enable_local_collision_bodies",
+	]
+	for key in required_keys:
+		if not settings.has(key):
+			errors.append("local_detail_missing_setting:%s" % key)
+	if not bool(profile.get("review_only", false)):
+		errors.append("local_detail_profile_not_review_only")
+	if not bool(settings.get("use_local_detail", false)):
+		errors.append("local_detail_profile_disabled")
+	if int(settings.get("local_detail_max_active_patches", 0)) != 1:
+		errors.append("local_detail_profile_patch_budget:%d" % int(settings.get("local_detail_max_active_patches", 0)))
+	if not bool(settings.get("use_local_detail_surface_material", false)):
+		errors.append("local_detail_profile_surface_disabled")
+	if not bool(settings.get("use_local_detail_visual_displacement", false)):
+		errors.append("local_detail_profile_displacement_disabled")
+	if bool(settings.get("enable_local_collision_bodies", true)):
+		errors.append("local_detail_profile_collision_enabled")
+	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
+	scene.auto_setup_on_ready = false
+	scene.capture_mouse_on_ready = false
+	scene.show_diagnostics_overlay = false
+	scene.quality_profile_id = TerrainQualityProfileScript.LOCAL_DETAIL_REVIEW
+	TerrainQualityProfileScript.apply_to_node(scene, profile)
+	get_root().add_child(scene)
+	var pre_setup_report: Dictionary = scene.quality_profile_report()
+	if pre_setup_report.get("status", "fail") != "pass":
+		errors.append("local_detail_profile_pre_setup:%s" % str(pre_setup_report))
+	if not scene.setup():
+		errors.append("local_detail_profile_setup_failed:%s" % str(scene.errors))
+	else:
+		var live_report: Dictionary = scene.quality_profile_report()
+		if live_report.get("status", "fail") != "pass":
+			errors.append("local_detail_profile_live:%s" % str(live_report))
+		if scene.local_detail == null:
+			errors.append("local_detail_profile_node_missing")
+		else:
+			var stats: Dictionary = scene.local_detail.build_stats()
+			if not bool(stats.get("use_surface_texture_material", false)):
+				errors.append("local_detail_profile_node_surface_disabled")
+			if not bool(stats.get("use_visual_displacement", false)):
+				errors.append("local_detail_profile_node_displacement_disabled")
+			if bool(stats.get("collision_enabled", true)):
+				errors.append("local_detail_profile_node_collision_enabled")
+	scene.queue_free()
