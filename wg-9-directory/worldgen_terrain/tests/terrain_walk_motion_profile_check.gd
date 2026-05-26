@@ -71,10 +71,14 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 	var max_native_workers := 0
 	var max_far_pending := 0
 	var max_page_blends := 0
+	var max_gpu_pages := 0
+	var max_gpu_page_mib := 0.0
+	var max_gpu_evictions := 0
 	var max_step_ms := 0
 	var total_chunk_created := 0
 	var total_chunk_retired := 0
 	var total_far_rebuild_delta := 0
+	var final_far_stats: Dictionary = {}
 	for frame_index in range(FRAME_COUNT):
 		var start_ms: int = Time.get_ticks_msec()
 		var stream_report: Dictionary = scene.step_viewer(FRAME_DELTA_S * PROFILE_SPEED_MULTIPLIER, Vector2(0.0, 1.0), 0.0)
@@ -83,6 +87,8 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		max_step_ms = max(max_step_ms, step_ms)
 		var terrain_stats: Dictionary = scene.terrain.build_stats()
 		var far_stats: Dictionary = scene.far_clipmap.stats() if scene.far_clipmap != null else {}
+		final_far_stats = far_stats
+		var gpu_state: Dictionary = far_stats.get("gpu_page_residency", {}) as Dictionary
 		var active_count: int = int(stream_report.get("active_count", 0))
 		var base_active_count: int = int(stream_report.get("base_active_count", active_count))
 		var built_count: int = scene.built_chunk_count()
@@ -112,6 +118,9 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		max_native_workers = max(max_native_workers, native_workers)
 		max_far_pending = max(max_far_pending, far_pending)
 		max_page_blends = max(max_page_blends, page_blends)
+		max_gpu_pages = max(max_gpu_pages, int(gpu_state.get("count", 0)))
+		max_gpu_page_mib = maxf(max_gpu_page_mib, float(gpu_state.get("total_mib", 0.0)))
+		max_gpu_evictions = max(max_gpu_evictions, int(gpu_state.get("evictions", 0)))
 		if queued + native_queued > WARN_QUEUE_BACKLOG:
 			queue_backlog_frames += 1
 		frame_reports.append({
@@ -129,6 +138,9 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"far_pending": far_pending,
 			"far_workers": int(far_stats.get("active_worker_count", 0)),
 			"page_blends": page_blends,
+			"gpu_pages": int(gpu_state.get("count", 0)),
+			"gpu_page_uploads": int(gpu_state.get("uploads", 0)),
+			"gpu_page_evictions": int(gpu_state.get("evictions", 0)),
 			"far_rebuild_delta": far_delta,
 			"anchor_moved": anchor_moved,
 			"far_rebuilt_levels": (far_stats.get("last_rebuilt_levels", []) as Array).duplicate(),
@@ -175,11 +187,15 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"max_native_workers": max_native_workers,
 			"max_far_pending": max_far_pending,
 			"max_page_blends": max_page_blends,
+			"max_gpu_pages": max_gpu_pages,
+			"max_gpu_page_mib": max_gpu_page_mib,
+			"max_gpu_evictions": max_gpu_evictions,
 			"total_chunk_created": total_chunk_created,
 			"total_chunk_retired": total_chunk_retired,
 			"total_far_rebuild_delta": total_far_rebuild_delta,
 			"final_position": [scene.viewer_position_xz.x, scene.viewer_position_xz.y],
 			"final_diagnostics": scene.diagnostics_text(),
+			"final_gpu_page_residency": final_far_stats.get("gpu_page_residency", {}),
 		},
 		"frames": frame_reports,
 	}

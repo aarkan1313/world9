@@ -56,6 +56,7 @@ far clipmap worker activity
 far page rebuild deltas
 far page blend activity
 far GPU page residency hits/uploads/evictions/MiB
+far page displacement bounds
 anchor/recenter frames
 near/far draw and triangle estimates
 current quality profile report
@@ -100,6 +101,12 @@ be observed.
 The same far stats now include GPU page residency. A healthy profile should not
 show runaway uploads or evictions for active pages; those indicate page churn or
 an undersized residency budget before they become visible stutter.
+
+Persistent page meshes are shader-displaced, so they must also carry custom
+visibility bounds that cover the current and previous height pages during a
+blend. Without that, the renderer can cull a visually displaced page as though
+it were still a flat mesh at y=0, which reads as angle-dependent holes or
+approach pop-in rather than a generation bug.
 
 ```text
 queue_backlog_frames

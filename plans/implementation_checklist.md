@@ -114,6 +114,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Move persistent far-page clipmap recenter payloads onto native workers, cache completed page heights, and keep previous/current height-page blend active on worker commits.
 - [x] Preload the walk profile's initial movement-biased chunk row and split motion-profile residency diagnostics into base-window readiness versus optional prefetch-row readiness.
 - [x] Add first GPU-resident far page texture residency cache behind the current provider contract, with protected-key eviction, live diagnostics, walk-profile budget knobs, and a fast gate.
+- [x] Harden persistent far page displacement bounds with per-level custom AABBs that cover current and previous height pages during shader blend, so renderer culling cannot cut displaced terrain.
 - [ ] Promote the far clipmap from CPU-built page meshes to persistent texture-displaced rings after GPU page residency, motion, and visual review stay stable.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.

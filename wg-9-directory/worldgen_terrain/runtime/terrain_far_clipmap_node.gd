@@ -431,6 +431,7 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	last_page_error = ""
 	var height: PackedFloat32Array = result["height_samples"] as PackedFloat32Array
 	height = _morph_outer_transition_band(level, origin, outer_extent, spacing, side, height)
+	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
 	var normals := PackedVector3Array()
 	normals.resize(side * side)
 	for z in range(side):
@@ -463,6 +464,7 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		previous_page_extent
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
+	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
 	level_origins[level] = origin
 	level_build_counts[level] = int(level_build_counts[level]) + 1
 	_set_level_geometry_counts(level, side * side, _clipmap_index_count(side, spacing, outer_extent, inner_extent))
@@ -482,6 +484,7 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var height: PackedFloat32Array = payload["height"] as PackedFloat32Array
 	_cache_page_payload(level, origin, outer_extent, spacing, side, height)
 	height = _morph_outer_transition_band(level, origin, outer_extent, spacing, side, height)
+	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
 	var normals := PackedVector3Array()
 	normals.resize(side * side)
 	for z in range(side):
@@ -514,6 +517,7 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 		previous_page_extent
 	)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
+	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
 	level_origins[level] = origin
 	level_build_counts[level] = int(level_build_counts[level]) + 1
 	_set_level_geometry_counts(level, side * side, (payload["indices"] as PackedInt32Array).size())
@@ -752,6 +756,7 @@ func _rebuild_level(level: int, origin: Vector2, use_transition: bool = true) ->
 	mesh_instance.mesh = mesh
 	mesh_instance.material_override = _material_for_level(level)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
+	mesh_instance.custom_aabb = AABB()
 	if use_transition:
 		_start_level_fade(level)
 	else:
@@ -804,6 +809,7 @@ func _assign_level_payload(payload: Dictionary, use_transition: bool = true) -> 
 	mesh_instance.mesh = mesh
 	mesh_instance.material_override = _material_for_level(level)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
+	mesh_instance.custom_aabb = AABB()
 	if use_transition:
 		_start_level_fade(level)
 	else:
@@ -831,6 +837,7 @@ func _begin_level_transition(level: int) -> void:
 	ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	ghost.mesh = current_mesh
 	ghost.position = current.position
+	ghost.custom_aabb = current.custom_aabb
 	ghost.material_override = _material_copy_with_alpha(current.material_override, 1.0)
 	add_child(ghost)
 	level_transition_nodes[level] = ghost
@@ -1560,6 +1567,37 @@ func _ensure_persistent_page_mesh(level: int, side: int, spacing: float, outer_e
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	mesh_instance.mesh = mesh
 	mesh_instance.set_meta("persistent_page_mesh_key", mesh_key)
+
+
+func _apply_persistent_page_custom_aabb(
+	level: int,
+	heightfield: Dictionary,
+	previous_heightfield: Dictionary = {}
+) -> void:
+	if level < 0 or level >= level_nodes.size() or not use_persistent_page_mesh:
+		return
+	if heightfield.is_empty():
+		return
+	var outer_extent: float = max(1.0, float(heightfield.get("outer_extent_m", _level_outer_extent(level))))
+	var min_y: float = float(heightfield.get("height_min_m", 0.0))
+	var max_y: float = float(heightfield.get("height_max_m", 0.0))
+	if not previous_heightfield.is_empty():
+		min_y = minf(min_y, float(previous_heightfield.get("height_min_m", min_y)))
+		max_y = maxf(max_y, float(previous_heightfield.get("height_max_m", max_y)))
+	if not is_finite(min_y) or not is_finite(max_y):
+		min_y = -1024.0
+		max_y = 1024.0
+	if max_y < min_y:
+		var swap := min_y
+		min_y = max_y
+		max_y = swap
+	var height_range: float = max(1.0, max_y - min_y)
+	var padding_y: float = maxf(32.0, maxf(_level_spacing(level) * 2.0, height_range * 0.08))
+	var mesh_instance: MeshInstance3D = level_nodes[level] as MeshInstance3D
+	mesh_instance.custom_aabb = AABB(
+		Vector3(-outer_extent, min_y - padding_y, -outer_extent),
+		Vector3(outer_extent * 2.0, height_range + padding_y * 2.0, outer_extent * 2.0)
+	)
 
 
 func _page_height_material_for_descriptor(

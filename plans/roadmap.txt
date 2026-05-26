@@ -61,6 +61,7 @@ native clipmap payload: far levels use native centered vertex/normal/UV and hole
 async far clipmap: walk/streaming preview schedules far level rebuilds on native workers instead of rebuilding in the movement frame
 page-backed far workers: persistent page-mode clipmap recentering now uses native workers, caches worker-completed height pages, and commits only when the full page set is ready so previous/current height-page blend remains the transition mechanism
 GPU page residency: persistent far page height/normal textures now use a bounded residency cache with protected active page keys and upload/hit/eviction/MiB diagnostics; this is the first GPU-resident page step, not the final texture-displaced ring renderer
+persistent page bounds: shader-displaced far pages now set custom visibility AABBs from current and previous height-page ranges so engine culling cannot treat them as flat y=0 pages during blend
 rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
 visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
 far clipmap transition policy: page-backed clipmap geometry stays opaque; do not alpha-crossfade whole square pages/rings, and smooth recenter/LOD only through world-space previous/current height-page blend, coarse/fine morph bands, and outer-edge-only visibility masking

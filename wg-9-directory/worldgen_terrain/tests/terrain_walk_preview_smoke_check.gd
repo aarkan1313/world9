@@ -255,6 +255,17 @@ func _check_page_clipmap_shader_contract(scene: Node3D, errors: Array[String]) -
 		errors.append("page_shader_previous_extent_invalid")
 	if float(material0.get_shader_parameter("morph_band_m")) <= 0.0:
 		errors.append("page_shader_morph_band_invalid")
+	var heightfield0: Dictionary = scene.far_clipmap.level_heightfields[0] as Dictionary
+	var custom_bounds: AABB = level0.custom_aabb
+	if custom_bounds.size.y <= 0.0:
+		errors.append("page_mesh_custom_aabb_missing:%s" % str(custom_bounds))
+	elif not heightfield0.is_empty():
+		var min_y: float = float(heightfield0.get("height_min_m", 0.0))
+		var max_y: float = float(heightfield0.get("height_max_m", 0.0))
+		if custom_bounds.position.y > min_y:
+			errors.append("page_mesh_custom_aabb_min:%.3f min:%.3f" % [custom_bounds.position.y, min_y])
+		if custom_bounds.position.y + custom_bounds.size.y < max_y:
+			errors.append("page_mesh_custom_aabb_max:%.3f max:%.3f" % [custom_bounds.position.y + custom_bounds.size.y, max_y])
 
 
 func _check_review_site_diversity(scene: Node3D, errors: Array[String]) -> void:

@@ -76,7 +76,26 @@ func _check_far_clipmap_residency_integration(errors: Array[String]) -> void:
 		errors.append("clipmap_gpu_uploads:%s" % str(gpu_state))
 	if float(gpu_state.get("total_mib", 0.0)) <= 0.0:
 		errors.append("clipmap_gpu_total_mib:%s" % str(gpu_state))
+	_check_persistent_page_bounds(node, errors)
 	node.queue_free()
+
+
+func _check_persistent_page_bounds(node: Node3D, errors: Array[String]) -> void:
+	if node.level_nodes.is_empty() or node.level_heightfields.is_empty():
+		errors.append("clipmap_bounds_missing_levels")
+		return
+	var mesh_instance: MeshInstance3D = node.level_nodes[0] as MeshInstance3D
+	var heightfield: Dictionary = node.level_heightfields[0] as Dictionary
+	var bounds: AABB = mesh_instance.custom_aabb
+	if bounds.size.y <= 0.0:
+		errors.append("clipmap_bounds_empty:%s" % str(bounds))
+		return
+	var min_y: float = float(heightfield.get("height_min_m", 0.0))
+	var max_y: float = float(heightfield.get("height_max_m", 0.0))
+	if bounds.position.y > min_y:
+		errors.append("clipmap_bounds_min:%.3f min:%.3f" % [bounds.position.y, min_y])
+	if bounds.position.y + bounds.size.y < max_y:
+		errors.append("clipmap_bounds_max:%.3f max:%.3f" % [bounds.position.y + bounds.size.y, max_y])
 
 
 func _descriptor(count: int, base_height: float) -> Dictionary:
