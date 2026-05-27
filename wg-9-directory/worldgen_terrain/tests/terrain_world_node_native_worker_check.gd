@@ -306,8 +306,8 @@ func _check_pass_corridor_profile_rebuilds_with_cpu_fallback(errors: Array[Strin
 	if not corridor_node.apply_landform_profile(profile, true):
 		errors.append("corridor_profile_apply_failed")
 	var report: Dictionary = corridor_node.world.landform_profile_report()
-	if bool(report.get("native_prepared_grid_enabled", true)):
-		errors.append("corridor_profile_native_still_enabled:%s" % str(report))
+	if not bool(report.get("native_prepared_grid_enabled", false)):
+		errors.append("corridor_profile_native_disabled:%s" % str(report))
 	var after_stats: Dictionary = corridor_node.build_stats()
 	if int(after_stats.get("active_native_workers", 0)) != 0 or int(after_stats.get("queued_native_worker_builds", 0)) != 0:
 		errors.append("corridor_profile_left_native_work:%s" % str(after_stats))

@@ -60,8 +60,8 @@ func _init() -> void:
 	if off_delta_m > 0.0001:
 		errors.append("off_corridor_anchor_changed:%.6f" % off_delta_m)
 	var profile_report: Dictionary = world.landform_profile_report()
-	if bool(profile_report.get("native_prepared_grid_enabled", true)):
-		errors.append("pass_profile_native_should_be_disabled:%s" % str(profile_report))
+	if not bool(profile_report.get("native_prepared_grid_enabled", false)):
+		errors.append("pass_profile_native_should_be_enabled:%s" % str(profile_report))
 
 	var out_dir: String = TerrainSettingsScript.workspace_path(OUT_DIR)
 	DirAccess.make_dir_recursive_absolute(out_dir)
@@ -78,7 +78,7 @@ func _init() -> void:
 		"mid_cut_m": mid_cut_m,
 		"off_corridor_anchor_delta_m": off_delta_m,
 		"metrics": metrics,
-		"native_prepared_grid_enabled": bool(profile_report.get("native_prepared_grid_enabled", true)),
+		"native_prepared_grid_enabled": bool(profile_report.get("native_prepared_grid_enabled", false)),
 		"contact_sheet": "pass_corridor_visual_probe_contact_sheet.png",
 	}
 	_save_report(report_path, report, errors)

@@ -58,13 +58,13 @@ func _check_saved_scene_startup(packed: PackedScene, errors: Array[String]) -> v
 	if int(packed_instance.call("built_chunk_count")) <= 0:
 		errors.append("packed_no_built_chunks")
 	var profile_report: Dictionary = report.get("landform_profile", {}) as Dictionary
-	if bool(profile_report.get("native_prepared_grid_enabled", true)):
-		errors.append("packed_shaped_native_should_be_disabled:%s" % str(profile_report))
+	if not bool(profile_report.get("native_prepared_grid_enabled", false)):
+		errors.append("packed_shaped_native_should_be_enabled:%s" % str(profile_report))
 	var terrain: Node = packed_instance.get("terrain") as Node
 	if terrain == null:
 		errors.append("packed_missing_terrain")
-	elif terrain.get("use_native_chunk_payloads") == true or terrain.get("use_native_chunk_workers") == true:
-		errors.append("packed_corridor_native_path_active")
+	elif terrain.get("use_native_chunk_payloads") != true or terrain.get("use_native_chunk_workers") != true:
+		errors.append("packed_corridor_native_path_inactive")
 	packed_instance.queue_free()
 	await process_frame
 
@@ -94,8 +94,8 @@ func _check_reduced_script_contract(errors: Array[String]) -> void:
 	if not bool(report.get("corridor_shaping_enabled", false)):
 		errors.append("initial_shaping_disabled")
 	var profile_report: Dictionary = report.get("landform_profile", {}) as Dictionary
-	if bool(profile_report.get("native_prepared_grid_enabled", true)):
-		errors.append("shaped_native_should_be_disabled:%s" % str(profile_report))
+	if not bool(profile_report.get("native_prepared_grid_enabled", false)):
+		errors.append("shaped_native_should_be_enabled:%s" % str(profile_report))
 	var current_site: Dictionary = report.get("current_site", {}) as Dictionary
 	if float(current_site.get("expected_cut_m", 0.0)) < 8.0:
 		errors.append("expected_cut_too_low:%s" % str(current_site))

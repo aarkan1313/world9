@@ -270,7 +270,7 @@ func _apply_corridor_profile(rebuild_existing: bool) -> void:
 
 
 func _apply_corridor_backend_policy() -> void:
-	var native_allowed: bool = not corridor_shaping_enabled
+	var native_allowed := true
 	if terrain != null:
 		terrain.use_native_chunk_payloads = use_native_chunk_payloads and native_allowed
 		terrain.use_native_chunk_workers = use_native_chunk_workers and native_allowed

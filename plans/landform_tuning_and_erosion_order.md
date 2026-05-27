@@ -56,13 +56,10 @@ world scale while leaving region IDs and family selection anchored to the normal
 world grid.
 
 Review profiles are opt-in. The native prepared-grid/chunk payload path now
-receives the same base-relief profile parameters as the GDScript provider, so
-the current review profiles can use the normal native worker flow instead of
-blocking far/near refresh or falling back to multi-second synchronous GDScript
-generation. Pass/corridor shaping is the exception for now: route facts are
-GDScript/provider-owned world facts, so profiles with `pass_corridor_strength`
-above zero intentionally disable the native prepared grid until the native
-backend also receives the same world-fact contract.
+receives the same base-relief profile parameters and deterministic
+pass/corridor shaping contract as the GDScript provider, so the current review
+profiles can use the normal native worker flow instead of blocking far/near
+refresh or falling back to multi-second synchronous GDScript generation.
 
 Do not promote a default scale/relief profile until terrain has enough material
 context to judge it honestly. `medium_scale` and `compressed_scale` remain
@@ -161,18 +158,16 @@ facts include endpoints, width, priority, ruggedness, palette/family context
 facts expose sample hints for route strength, priority, ruggedness, and width
 default balanced terrain still has `pass_corridor_strength=0`, so it is unchanged
 opt-in profiles can lower/smooth terrain along the deterministic corridor field
-terrain_world_facts_pass_corridor_check.gd proves determinism, default no-op behavior, native fallback policy, and nonzero corridor height shaping
+terrain_world_facts_pass_corridor_check.gd proves determinism, default no-op behavior, native prepared-grid parity, and nonzero corridor height shaping
 terrain_pass_corridor_visual_probe_check.gd writes a neutral/shaped/cut/mask contact sheet for one high-terrain corridor candidate
 ```
 
 The live corridor tour is tabled as an acceptance gate. Corridor shaping
-currently disables native prepared grids because route facts are not yet in the
-Rust/native page path, so it cannot honestly behave like the landform tour
-without either lagging or shrinking the review area too far. Keep
-`terrain_pass_corridor_tour.tscn` as an experimental CPU-only scene for
-spot-checking, but do not use it to accept corridor quality. The acceptance
-gate should return after corridor/route facts are available to native/GPU page
-generation.
+now has native prepared-grid support, but the live tour should still remain
+experimental until the page/ring renderer is stable enough to run it at
+landform-tour scale without hiding transitions, shrinking the review area, or
+lagging. Keep `terrain_pass_corridor_tour.tscn` as a spot-check scene, but do
+not use it to accept corridor quality yet.
 
 A pass/corridor field can guide later systems:
 
@@ -194,10 +189,10 @@ Current limitations:
 ```text
 pass/corridor shaping is conservative and downward-only
 it is not yet a real river/channel route solver
-native prepared grids are disabled for pass-shaping profiles until Rust consumes route facts
+native prepared grids now support pass-shaping profiles through the Rust route-fact port
 visual acceptance is still required before promoting any pass-shaping profile to default
-the live corridor tour is experimental CPU-only infrastructure, not a current acceptance gate
-native-disabled profile changes degrade through bounded CPU fallback work instead of blocking/crashing scene startup
+the live corridor tour is experimental infrastructure, not a current acceptance gate
+future native-disabled profile changes still degrade through bounded CPU fallback work instead of blocking/crashing scene startup
 ```
 
 ## Where Erosion Fits

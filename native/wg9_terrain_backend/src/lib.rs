@@ -4,6 +4,15 @@ use godot::prelude::*;
 const BACKEND_SCHEMA: &str = "worldgen9.native_backend.v1";
 const BACKEND_CLASS_NAME: &str = "Wg9TerrainNativeBackend";
 const MAX_NATIVE_GRID_VERTICES: usize = 1_048_576;
+const PROVINCE_SIZE_REGIONS: i64 = 4;
+const REGION_PALETTES: [(&str, [&str; 3]); 6] = [
+    ("alpine", ["mountain", "glacial", "grassland"]),
+    ("drylands", ["badlands", "desert", "karst"]),
+    ("humid_hills", ["rainforest", "mountain", "grassland"]),
+    ("volcanic_coast", ["volcanic", "coast", "rainforest"]),
+    ("coastal_ridges", ["coast", "mountain", "glacial"]),
+    ("open_steppe", ["grassland", "badlands", "desert"]),
+];
 
 struct Wg9TerrainBackendExtension;
 
@@ -43,6 +52,7 @@ impl Wg9TerrainNativeBackend {
         status.set("supports_clipmap_mesh_payload_generation", true);
         status.set("supports_surface_detail_generation", true);
         status.set("supports_threaded_calls", true);
+        status.set("supports_pass_corridor_prepared_generation", true);
         status.set("supports_gpu_generation", false);
         status.set(
             "next_step",
@@ -596,6 +606,7 @@ struct PreparedEntry {
     profile_mountain_boost: f64,
     profile_regional_scale_multiplier: f64,
     profile_valley_bias_strength: f64,
+    profile_pass_corridor_strength: f64,
     angle_i: i64,
     offset_u: f64,
     offset_v: f64,
@@ -608,6 +619,7 @@ struct NativeProfile {
     mountain_boost: f64,
     regional_scale_multiplier: f64,
     valley_bias_strength: f64,
+    pass_corridor_strength: f64,
 }
 
 impl Default for NativeProfile {
@@ -618,6 +630,7 @@ impl Default for NativeProfile {
             mountain_boost: 1.0,
             regional_scale_multiplier: 1.0,
             valley_bias_strength: 1.0,
+            pass_corridor_strength: 0.0,
         }
     }
 }
@@ -674,6 +687,8 @@ fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, Strin
                 dict_f64(&entry, "profile_regional_scale_multiplier", 1.0);
             let profile_valley_bias_strength =
                 dict_f64(&entry, "profile_valley_bias_strength", 1.0);
+            let profile_pass_corridor_strength =
+                dict_f64(&entry, "profile_pass_corridor_strength", 0.0);
             let offset_u = dict_f64(&entry, "offset_u", 0.0);
             let offset_v = dict_f64(&entry, "offset_v", 0.0);
             let numeric_values = [
@@ -689,6 +704,7 @@ fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, Strin
                 profile_mountain_boost,
                 profile_regional_scale_multiplier,
                 profile_valley_bias_strength,
+                profile_pass_corridor_strength,
                 offset_u,
                 offset_v,
             ];
@@ -718,6 +734,7 @@ fn parse_corners(corner_entries: &AnyArray) -> Result<Vec<PreparedCorner>, Strin
                 profile_mountain_boost,
                 profile_regional_scale_multiplier,
                 profile_valley_bias_strength,
+                profile_pass_corridor_strength,
                 angle_i: dict_i64(&entry, "angle_i", 0),
                 offset_u,
                 offset_v,
@@ -823,7 +840,16 @@ fn sample_height_with_corners(
     let valleys = valley_mask(sample_x, sample_z, world_seed);
     let valley_cut = valleys * (110.0 + upland * 130.0) * profile.valley_bias_strength;
     let valley_floor_noise = fbm(sample_x, sample_z, 4200.0, world_seed + 401, 2) * 24.0 * valleys;
-    (macro_height + relief + detail - valley_cut + valley_floor_noise) as f32
+    let unshaped_height = macro_height + relief + detail - valley_cut + valley_floor_noise;
+    let pass_adjust = pass_corridor_adjustment(
+        x,
+        z,
+        unshaped_height,
+        world_seed,
+        region_size_m,
+        profile.pass_corridor_strength,
+    );
+    (unshaped_height + pass_adjust) as f32
 }
 
 fn profile_from_corners(corners: &[PreparedCorner]) -> NativeProfile {
@@ -835,6 +861,7 @@ fn profile_from_corners(corners: &[PreparedCorner]) -> NativeProfile {
                 mountain_boost: entry.profile_mountain_boost,
                 regional_scale_multiplier: entry.profile_regional_scale_multiplier,
                 valley_bias_strength: entry.profile_valley_bias_strength,
+                pass_corridor_strength: entry.profile_pass_corridor_strength,
             };
         }
     }
@@ -925,6 +952,219 @@ fn valley_mask(x: f64, z: f64, world_seed: i64) -> f64 {
     smoothstep_unit((combined - 0.16) / 0.52)
 }
 
+fn pass_corridor_adjustment(
+    x: f64,
+    z: f64,
+    current_height_m: f64,
+    world_seed: i64,
+    region_size_m: f64,
+    pass_corridor_strength: f64,
+) -> f64 {
+    if pass_corridor_strength <= 0.000001 {
+        return 0.0;
+    }
+    let hint = sample_pass_corridor_hint(x, z, world_seed, region_size_m);
+    if hint.strength <= 0.000001 {
+        return 0.0;
+    }
+    let pass_power = hint.strength * hint.strength;
+    let max_cut_m = pass_corridor_strength
+        * lerp(36.0, 220.0, hint.ruggedness.clamp(0.0, 1.0))
+        * lerp(0.55, 1.0, hint.priority.clamp(0.0, 1.0));
+    let high_terrain_factor = smoothstep_unit((current_height_m + 90.0) / 560.0);
+    -max_cut_m * pass_power * high_terrain_factor
+}
+
+#[derive(Clone, Copy)]
+struct CorridorHint {
+    strength: f64,
+    priority: f64,
+    ruggedness: f64,
+}
+
+fn sample_pass_corridor_hint(
+    world_x: f64,
+    world_z: f64,
+    world_seed: i64,
+    region_size_m: f64,
+) -> CorridorHint {
+    let rx = (world_x / region_size_m).floor() as i64;
+    let rz = (world_z / region_size_m).floor() as i64;
+    let mut best = CorridorHint {
+        strength: 0.0,
+        priority: 0.0,
+        ruggedness: 0.0,
+    };
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let fact = corridor_for_region(rx + dx, rz + dz, world_seed, region_size_m);
+            let strength = corridor_strength_at(&fact, world_x, world_z);
+            if strength > best.strength {
+                best = CorridorHint {
+                    strength,
+                    priority: fact.priority,
+                    ruggedness: fact.ruggedness,
+                };
+            }
+        }
+    }
+    best
+}
+
+#[derive(Clone, Copy)]
+struct CorridorFact {
+    start_x: f64,
+    start_z: f64,
+    end_x: f64,
+    end_z: f64,
+    width_m: f64,
+    priority: f64,
+    ruggedness: f64,
+}
+
+fn corridor_for_region(
+    rx: i64,
+    rz: i64,
+    world_seed: i64,
+    region_size_m: f64,
+) -> CorridorFact {
+    let families = region_families(rx, rz, world_seed);
+    let ruggedness = ruggedness_for_families(&families);
+    let side_a = stable_hash(&["pass_side_a", &rx.to_string(), &rz.to_string(), &world_seed.to_string()]) % 4;
+    let side_roll =
+        stable_hash(&["pass_side_b", &rx.to_string(), &rz.to_string(), &world_seed.to_string()]) % 100;
+    let side_b = if side_roll < 72 {
+        (side_a + 2) % 4
+    } else {
+        (side_a + 1 + (side_roll % 2) * 2) % 4
+    };
+    let t_a = 0.18
+        + (stable_hash(&["pass_t_a", &rx.to_string(), &rz.to_string(), &world_seed.to_string()])
+            % 6400) as f64
+            / 10000.0;
+    let t_b = 0.18
+        + (stable_hash(&["pass_t_b", &rx.to_string(), &rz.to_string(), &world_seed.to_string()])
+            % 6400) as f64
+            / 10000.0;
+    let origin_x = rx as f64 * region_size_m;
+    let origin_z = rz as f64 * region_size_m;
+    let start = point_on_region_side(side_a as i64, t_a, region_size_m);
+    let end = point_on_region_side(side_b as i64, t_b, region_size_m);
+    CorridorFact {
+        start_x: origin_x + start.0,
+        start_z: origin_z + start.1,
+        end_x: origin_x + end.0,
+        end_z: origin_z + end.1,
+        width_m: region_size_m * lerp(0.035, 0.075, ruggedness),
+        priority: 0.35 + ruggedness * 0.65,
+        ruggedness,
+    }
+}
+
+fn point_on_region_side(side: i64, t: f64, region_size_m: f64) -> (f64, f64) {
+    let clamped_t = t.clamp(0.0, 1.0);
+    match side {
+        0 => (clamped_t * region_size_m, 0.0),
+        1 => (region_size_m, clamped_t * region_size_m),
+        2 => (clamped_t * region_size_m, region_size_m),
+        _ => (0.0, clamped_t * region_size_m),
+    }
+}
+
+fn corridor_strength_at(fact: &CorridorFact, world_x: f64, world_z: f64) -> f64 {
+    let seg_x = fact.end_x - fact.start_x;
+    let seg_z = fact.end_z - fact.start_z;
+    let len_sq = (seg_x * seg_x + seg_z * seg_z).max(0.000001);
+    let point_x = world_x - fact.start_x;
+    let point_z = world_z - fact.start_z;
+    let t = ((point_x * seg_x + point_z * seg_z) / len_sq).clamp(0.0, 1.0);
+    let closest_x = fact.start_x + seg_x * t;
+    let closest_z = fact.start_z + seg_z * t;
+    let dx = world_x - closest_x;
+    let dz = world_z - closest_z;
+    let distance_m = (dx * dx + dz * dz).sqrt();
+    1.0 - smoothstep_unit(distance_m / fact.width_m.max(0.000001))
+}
+
+fn region_families(rx: i64, rz: i64, world_seed: i64) -> [&'static str; 3] {
+    let prx = rx.div_euclid(PROVINCE_SIZE_REGIONS);
+    let prz = rz.div_euclid(PROVINCE_SIZE_REGIONS);
+    let primary = province_palette_name(prx, prz, world_seed);
+    let roll =
+        stable_hash(&["palette_local", &rx.to_string(), &rz.to_string(), &prx.to_string(), &prz.to_string(), &world_seed.to_string()]) % 100;
+    let palette_name = if roll < 72 {
+        primary
+    } else if roll < 94 {
+        let compatible = palette_compatibility(primary);
+        let compatible_index =
+            stable_hash(&["palette_compatible", &rx.to_string(), &rz.to_string(), &world_seed.to_string()])
+                as usize
+                % compatible.len();
+        compatible[compatible_index]
+    } else {
+        let rare_index =
+            stable_hash(&["palette_rare", &rx.to_string(), &rz.to_string(), &world_seed.to_string()])
+                as usize
+                % REGION_PALETTES.len();
+        REGION_PALETTES[rare_index].0
+    };
+    palette_families(palette_name)
+}
+
+fn province_palette_name(prx: i64, prz: i64, world_seed: i64) -> &'static str {
+    let index = stable_hash(&[
+        "province_palette",
+        &prx.to_string(),
+        &prz.to_string(),
+        &world_seed.to_string(),
+    ]) as usize
+        % REGION_PALETTES.len();
+    REGION_PALETTES[index].0
+}
+
+fn palette_families(name: &str) -> [&'static str; 3] {
+    for (palette_name, families) in REGION_PALETTES {
+        if palette_name == name {
+            return families;
+        }
+    }
+    REGION_PALETTES[0].1
+}
+
+fn palette_compatibility(name: &str) -> [&'static str; 3] {
+    match name {
+        "alpine" => ["coastal_ridges", "humid_hills", "open_steppe"],
+        "drylands" => ["open_steppe", "volcanic_coast", "coastal_ridges"],
+        "humid_hills" => ["alpine", "volcanic_coast", "coastal_ridges"],
+        "volcanic_coast" => ["coastal_ridges", "humid_hills", "drylands"],
+        "coastal_ridges" => ["alpine", "volcanic_coast", "humid_hills"],
+        "open_steppe" => ["drylands", "alpine", "coastal_ridges"],
+        _ => ["coastal_ridges", "humid_hills", "open_steppe"],
+    }
+}
+
+fn ruggedness_for_families(families: &[&str; 3]) -> f64 {
+    let mut total = 0.0;
+    let mut weight = 0.0;
+    for (index, family) in families.iter().enumerate() {
+        let bias = 1.0 / (index as f64 + 1.0);
+        total += rugged_family_value(family) * bias;
+        weight += bias;
+    }
+    (total / weight.max(0.000001)).clamp(0.0, 1.0)
+}
+
+fn rugged_family_value(family: &str) -> f64 {
+    match family {
+        "mountain" => 1.0,
+        "glacial" => 0.95,
+        "volcanic" => 0.82,
+        "karst" => 0.62,
+        "badlands" => 0.52,
+        _ => 0.18,
+    }
+}
+
 fn ridged_noise(x: f64, z: f64, scale_m: f64, world_seed: i64, octaves: i64) -> f64 {
     let value = fbm(x, z, scale_m, world_seed, octaves);
     let ridged = 1.0 - value.abs();
@@ -973,6 +1213,16 @@ fn hash_grid(ix: i64, iz: i64, world_seed: i64, salt: i64) -> f64 {
     n = (n ^ (n >> 13)) * 1_274_126_177_i128;
     n = (n ^ (n >> 16)) & mask;
     (n as f64) / 4_294_967_295.0
+}
+
+fn stable_hash(parts: &[&str]) -> u32 {
+    let text = parts.join("|");
+    let mut h: u32 = 0x811c9dc5;
+    for byte in text.bytes() {
+        h ^= byte as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
 }
 
 fn fade(t: f64) -> f64 {

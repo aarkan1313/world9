@@ -74,11 +74,12 @@ func _init() -> void:
 			str(best_mid),
 		])
 	var profile_report: Dictionary = world.landform_profile_report()
-	if bool(profile_report.get("native_prepared_grid_enabled", true)):
-		errors.append("pass_shape_native_should_be_disabled:%s" % str(profile_report))
+	if not bool(profile_report.get("native_prepared_grid_enabled", false)):
+		errors.append("pass_shape_native_should_be_enabled:%s" % str(profile_report))
 	var shaped_sample: Dictionary = world.sample(best_mid.x, best_mid.y)
 	if float(shaped_sample.get("pass_corridor_adjust_m", 0.0)) >= -0.0001:
 		errors.append("pass_adjust_missing:%s" % str(shaped_sample))
+	_check_native_pass_corridor_grid(world, best_mid, shaped_corridor_height, errors)
 
 	if fact_ids.size() < regions.size():
 		errors.append("duplicate_fact_ids:%d regions:%d" % [fact_ids.size(), regions.size()])
@@ -96,7 +97,38 @@ func _init() -> void:
 		"best_mid": [best_mid.x, best_mid.y],
 		"corridor_height_delta_m": corridor_delta,
 		"affects_height": true,
+		"native_prepared_grid_enabled": bool(profile_report.get("native_prepared_grid_enabled", false)),
 	})
+
+
+func _check_native_pass_corridor_grid(world: RefCounted, best_mid: Vector2, shaped_corridor_height: float, errors: Array[String]) -> void:
+	var provider: RefCounted = world.provider
+	if provider == null:
+		errors.append("native_pass_provider_missing")
+		return
+	if not provider.has_method("sample_height_grid_native_prepared"):
+		errors.append("native_pass_method_missing")
+		return
+	var native: Dictionary = provider.call(
+		"sample_height_grid_native_prepared",
+		best_mid.x,
+		best_mid.y,
+		32.0,
+		1,
+		1,
+		world.seed,
+		world.region_size_m
+	) as Dictionary
+	if native.get("status", "fail") != "pass":
+		errors.append("native_pass_grid_failed:%s" % str(native))
+		return
+	var values: PackedFloat32Array = native.get("values", PackedFloat32Array()) as PackedFloat32Array
+	if values.size() != 1:
+		errors.append("native_pass_grid_size:%d" % values.size())
+		return
+	var delta: float = absf(float(values[0]) - shaped_corridor_height)
+	if delta > 0.05:
+		errors.append("native_pass_grid_delta:%.6f native:%.3f scalar:%.3f" % [delta, values[0], shaped_corridor_height])
 
 
 func _select_regions(world: RefCounted) -> Array[Vector2i]:
