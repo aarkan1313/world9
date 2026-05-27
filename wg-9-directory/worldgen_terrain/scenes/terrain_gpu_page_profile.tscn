@@ -1,9 +1,9 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://worldgen_terrain/runtime/terrain_walk_preview_scene.gd" id="1_gpu_page_review"]
+[ext_resource type="Script" path="res://worldgen_terrain/runtime/terrain_walk_preview_scene.gd" id="1_gpu_page_profile"]
 
-[node name="TerrainGpuPageReview" type="Node3D"]
-script = ExtResource("1_gpu_page_review")
+[node name="TerrainGpuPageProfile" type="Node3D"]
+script = ExtResource("1_gpu_page_profile")
 quality_profile_id = "gpu_page_review"
 debug_mode = "elevation_color"
 vertices_per_side = 129
@@ -16,7 +16,7 @@ preload_active_chunk_limit = 0
 seed = 1337
 chunk_size_m = 512.0
 move_speed_mps = 18.0
-fast_multiplier = 60.0
+fast_multiplier = 90.0
 slow_multiplier = 0.25
 build_when_idle = false
 show_diagnostics_overlay = true

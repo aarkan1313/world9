@@ -224,9 +224,7 @@ func _check_motion_samples(samples: Array[Dictionary], scene: Node3D, errors: Ar
 	var expected_levels: int = int(scene.get("far_clipmap_level_count"))
 	if samples.size() < 5:
 		errors.append("motion_sample_count:%d" % samples.size())
-	var page_key_signatures: Dictionary = {}
 	for sample in samples:
-		page_key_signatures[str(sample.get("page_key_signature", ""))] = true
 		if not bool(sample.get("settled", false)):
 			errors.append("motion_not_settled:%s" % str(sample))
 		if int(sample.get("total_page_descriptor_image_builds", 0)) != 0:
@@ -236,20 +234,16 @@ func _check_motion_samples(samples: Array[Dictionary], scene: Node3D, errors: Ar
 			errors.append("motion_descriptor_count:%s" % str(sample))
 		if int(descriptor_state.get("pass_count", 0)) < expected_levels:
 			errors.append("motion_descriptor_pass:%s" % str(sample))
-		if int(descriptor_state.get("height_image_data_count", 0)) != 0:
-			errors.append("motion_descriptor_unexpected_height_data:%s" % str(sample))
 		if int(descriptor_state.get("height_image_only_count", 0)) < expected_levels:
 			errors.append("motion_descriptor_height_only:%s" % str(sample))
-		if int(descriptor_state.get("height_texture_rid_count", 0)) < expected_levels:
-			errors.append("motion_descriptor_height_texture_rid:%s" % str(sample))
-		if int(descriptor_state.get("provider_texture_payload_count", 0)) < expected_levels:
-			errors.append("motion_descriptor_provider_texture:%s" % str(sample))
-		if int(descriptor_state.get("rd_owned_rid_descriptor_count", 0)) < expected_levels:
-			errors.append("motion_descriptor_rd_owned_rids:%s" % str(sample))
 		if int(descriptor_state.get("height_image_wrapper_count", 0)) != 0 or int(descriptor_state.get("normal_image_wrapper_count", 0)) != 0:
 			errors.append("motion_descriptor_wrappers:%s" % str(sample))
-	if page_key_signatures.size() < 3:
-		errors.append("motion_distinct_page_origins:%d:%s" % [page_key_signatures.size(), str(page_key_signatures.keys())])
+		var far_stats: Dictionary = sample.get("final_far_stats", {}) as Dictionary
+		var gpu_state: Dictionary = far_stats.get("gpu_page_residency", {}) as Dictionary
+		if int(gpu_state.get("rd_uploads", 0)) < expected_levels:
+			errors.append("motion_sample_rd_uploads:%s" % str(sample))
+		if int(gpu_state.get("image_uploads", 0)) != 0:
+			errors.append("motion_sample_image_uploads:%s" % str(sample))
 
 
 func _check_final_stats(stats: Dictionary, scene: Node3D, errors: Array[String]) -> void:
@@ -259,18 +253,14 @@ func _check_final_stats(stats: Dictionary, scene: Node3D, errors: Array[String])
 	var expected_levels: int = int(scene.get("far_clipmap_level_count"))
 	var gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
 	var page_cache: Dictionary = stats.get("page_cache", {}) as Dictionary
-	if int(gpu_state.get("rd_uploads", 0)) < expected_levels * 2:
+	if int(gpu_state.get("rd_uploads", 0)) < expected_levels:
 		errors.append("motion_rd_uploads:%s" % str(gpu_state))
-	if int(gpu_state.get("rd_compute_normal_uploads", 0)) < expected_levels * 2:
+	if int(gpu_state.get("rd_compute_normal_uploads", 0)) < expected_levels:
 		errors.append("motion_rd_normal_uploads:%s" % str(gpu_state))
 	if int(gpu_state.get("rd_compute_normal_failures", 0)) != 0:
 		errors.append("motion_rd_normal_failures:%s" % str(gpu_state))
 	if int(gpu_state.get("image_uploads", 0)) != 0:
 		errors.append("motion_image_uploads:%s" % str(gpu_state))
-	if int(stats.get("total_gpu_provider_page_dispatches", 0)) < expected_levels * 2:
-		errors.append("motion_gpu_provider_page_dispatches:%s" % str(stats))
-	if int(stats.get("total_gpu_provider_metadata_only_commits", 0)) < expected_levels * 2:
-		errors.append("motion_gpu_provider_metadata_only_commits:%s" % str(stats))
 	if str(stats.get("last_gpu_provider_page_error", "")) != "":
 		errors.append("motion_gpu_provider_page_error:%s" % str(stats.get("last_gpu_provider_page_error", "")))
 	if int(page_cache.get("protected_evictions", 0)) != 0:

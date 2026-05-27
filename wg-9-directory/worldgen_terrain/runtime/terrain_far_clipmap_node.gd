@@ -30,6 +30,7 @@ const TerrainGpuProviderPageTextureBackendScript := preload("res://worldgen_terr
 @export var use_gpu_rd_page_textures: bool = false
 @export var use_gpu_rd_compute_normals: bool = false
 @export var use_gpu_provider_page_textures: bool = false
+@export_range(1, 16, 1) var gpu_provider_max_sync_blocks: int = 1
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export_range(1, 4, 1) var max_profile_fallback_rebuild_levels_per_update: int = 1
@@ -79,6 +80,15 @@ var total_gpu_provider_page_dispatches: int = 0
 var last_gpu_provider_metadata_only_commits: int = 0
 var total_gpu_provider_metadata_only_commits: int = 0
 var last_gpu_provider_page_error: String = ""
+var last_gpu_provider_page_ms: int = 0
+var max_gpu_provider_page_ms: int = 0
+var last_gpu_provider_prepare_ms: int = 0
+var last_gpu_provider_texture_ms: int = 0
+var max_gpu_provider_texture_ms: int = 0
+var last_gpu_page_texture_residency_ms: int = 0
+var max_gpu_page_texture_residency_ms: int = 0
+var last_gpu_provider_material_ms: int = 0
+var last_gpu_provider_mesh_ms: int = 0
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
 var _native_backend: Object
@@ -175,6 +185,15 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	last_gpu_provider_metadata_only_commits = 0
 	total_gpu_provider_metadata_only_commits = 0
 	last_gpu_provider_page_error = ""
+	last_gpu_provider_page_ms = 0
+	max_gpu_provider_page_ms = 0
+	last_gpu_provider_prepare_ms = 0
+	last_gpu_provider_texture_ms = 0
+	max_gpu_provider_texture_ms = 0
+	last_gpu_page_texture_residency_ms = 0
+	max_gpu_page_texture_residency_ms = 0
+	last_gpu_provider_material_ms = 0
+	last_gpu_provider_mesh_ms = 0
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
@@ -293,6 +312,12 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_gpu_provider_page_dispatches = 0
 	last_gpu_provider_metadata_only_commits = 0
 	last_gpu_provider_page_error = ""
+	last_gpu_provider_page_ms = 0
+	last_gpu_provider_prepare_ms = 0
+	last_gpu_provider_texture_ms = 0
+	last_gpu_page_texture_residency_ms = 0
+	last_gpu_provider_material_ms = 0
+	last_gpu_provider_mesh_ms = 0
 	var shared_origin := _shared_origin(viewer_xz)
 	var profile_blocks_far_refresh := _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds
 	if profile_blocks_far_refresh and is_finite(_pending_origin.x) and is_finite(_pending_origin.y):
@@ -315,14 +340,13 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		if _pending_origin != level_origins[level] and rebuilt_count < rebuild_budget:
 			if _staged_payload_matches_pending(level):
 				last_deferred_levels.append(level)
-				rebuilt_count += 1
 				continue
 			if use_persistent_page_mesh and _page_cache_has_level(level, _pending_origin):
 				_rebuild_level(level, _pending_origin)
 				last_rebuilt_levels.append(level)
 				rebuilt_count += 1
 				continue
-			if _can_use_native_workers():
+			if _should_schedule_native_worker_for_level(level, _pending_origin):
 				var schedule_status: String = _schedule_native_worker(level, _pending_origin)
 				if schedule_status == "scheduled":
 					last_scheduled_levels.append(level)
@@ -379,6 +403,15 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_gpu_provider_metadata_only_commits": last_gpu_provider_metadata_only_commits,
 		"total_gpu_provider_metadata_only_commits": total_gpu_provider_metadata_only_commits,
 		"last_gpu_provider_page_error": last_gpu_provider_page_error,
+		"last_gpu_provider_page_ms": last_gpu_provider_page_ms,
+		"max_gpu_provider_page_ms": max_gpu_provider_page_ms,
+		"last_gpu_provider_prepare_ms": last_gpu_provider_prepare_ms,
+		"last_gpu_provider_texture_ms": last_gpu_provider_texture_ms,
+		"max_gpu_provider_texture_ms": max_gpu_provider_texture_ms,
+		"last_gpu_page_texture_residency_ms": last_gpu_page_texture_residency_ms,
+		"max_gpu_page_texture_residency_ms": max_gpu_page_texture_residency_ms,
+		"last_gpu_provider_material_ms": last_gpu_provider_material_ms,
+		"last_gpu_provider_mesh_ms": last_gpu_provider_mesh_ms,
 	}
 
 
@@ -420,6 +453,15 @@ func stats() -> Dictionary:
 		"last_gpu_provider_metadata_only_commits": last_gpu_provider_metadata_only_commits,
 		"total_gpu_provider_metadata_only_commits": total_gpu_provider_metadata_only_commits,
 		"last_gpu_provider_page_error": last_gpu_provider_page_error,
+		"last_gpu_provider_page_ms": last_gpu_provider_page_ms,
+		"max_gpu_provider_page_ms": max_gpu_provider_page_ms,
+		"last_gpu_provider_prepare_ms": last_gpu_provider_prepare_ms,
+		"last_gpu_provider_texture_ms": last_gpu_provider_texture_ms,
+		"max_gpu_provider_texture_ms": max_gpu_provider_texture_ms,
+		"last_gpu_page_texture_residency_ms": last_gpu_page_texture_residency_ms,
+		"max_gpu_page_texture_residency_ms": max_gpu_page_texture_residency_ms,
+		"last_gpu_provider_material_ms": last_gpu_provider_material_ms,
+		"last_gpu_provider_mesh_ms": last_gpu_provider_mesh_ms,
 	}
 
 
@@ -549,6 +591,8 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		last_worker_error = last_page_error
 		return
 	last_page_error = ""
+	if last_gpu_provider_page_error.begins_with("gpu_provider_sync_block_budget:"):
+		last_gpu_provider_page_error = ""
 	var height: PackedFloat32Array = result["height_samples"] as PackedFloat32Array
 	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
 	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
@@ -623,6 +667,7 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 
 
 func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transition: bool = true) -> Dictionary:
+	var page_start_ms: int = Time.get_ticks_msec()
 	var spacing: float = _level_spacing(level)
 	var outer_extent: float = _level_outer_extent(level)
 	var inner_extent: float = _inner_extent_for_level(level)
@@ -631,17 +676,28 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
 	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var heightfield: Dictionary = _heightfield_metadata_for_level(level, origin, outer_extent, spacing, side)
+	var attach_start_ms: int = Time.get_ticks_msec()
 	var gpu_provider_status: Dictionary = _attach_gpu_provider_page_texture(heightfield, level, origin, outer_extent, spacing, side)
+	last_gpu_provider_texture_ms = Time.get_ticks_msec() - attach_start_ms
+	max_gpu_provider_texture_ms = max(max_gpu_provider_texture_ms, last_gpu_provider_texture_ms)
 	if gpu_provider_status.get("status", "fail") != "pass":
+		last_gpu_provider_page_ms = Time.get_ticks_msec() - page_start_ms
+		max_gpu_provider_page_ms = max(max_gpu_provider_page_ms, last_gpu_provider_page_ms)
 		return gpu_provider_status
 	level_heightfields[level] = heightfield
 	level_surface_descriptors[level] = {}
+	var descriptor_start_ms: int = Time.get_ticks_msec()
 	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
+	last_gpu_provider_prepare_ms = Time.get_ticks_msec() - descriptor_start_ms
 	if descriptor.get("status", "fail") != "pass":
+		last_gpu_provider_page_ms = Time.get_ticks_msec() - page_start_ms
+		max_gpu_provider_page_ms = max(max_gpu_provider_page_ms, last_gpu_provider_page_ms)
 		return descriptor
 	level_material_descriptors[level] = descriptor
 	var mesh_instance: MeshInstance3D = level_nodes[level]
+	var mesh_start_ms: int = Time.get_ticks_msec()
 	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
+	last_gpu_provider_mesh_ms = Time.get_ticks_msec() - mesh_start_ms
 	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
 	var previous_height_texture: Texture2D = null
 	var previous_normal_texture: Texture2D = null
@@ -654,6 +710,7 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
 	_track_previous_page_key_for_blend(level, previous_cache_key, previous_height_texture != null)
+	var material_start_ms: int = Time.get_ticks_msec()
 	mesh_instance.material_override = _page_height_material_for_descriptor(
 		descriptor,
 		level,
@@ -664,6 +721,7 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 		previous_page_extent,
 		previous_material
 	)
+	last_gpu_provider_material_ms = Time.get_ticks_msec() - material_start_ms
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
 	level_origins[level] = origin
@@ -674,6 +732,8 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 	_start_page_blend(level, previous_height_texture != null and use_transition)
 	_refresh_page_morph_sources()
 	_protect_active_page_keys()
+	last_gpu_provider_page_ms = Time.get_ticks_msec() - page_start_ms
+	max_gpu_provider_page_ms = max(max_gpu_provider_page_ms, last_gpu_provider_page_ms)
 	return {"status": "pass", "level": level}
 
 
@@ -750,6 +810,8 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	_start_page_blend(level, previous_height_texture != null and use_transition)
 	_refresh_page_morph_sources()
 	_protect_active_page_keys()
+	if last_gpu_provider_page_error.begins_with("gpu_provider_sync_block_budget:"):
+		last_gpu_provider_page_error = ""
 	last_rebuilt_levels.append(level)
 
 
@@ -1344,10 +1406,16 @@ func _can_use_native_workers() -> bool:
 		return false
 	if not world.provider.has_method("native_prepared_height_grid_request"):
 		return false
-	if use_gpu_provider_page_textures and _can_use_height_only_gpu_page_payload():
-		return false
 	if _provider_profile_disables_native_grid():
 		return false
+	return true
+
+
+func _should_schedule_native_worker_for_level(level: int, origin: Vector2) -> bool:
+	if not _can_use_native_workers():
+		return false
+	if _can_use_gpu_provider_page_textures():
+		return _gpu_provider_page_block_count(level, origin) > max(1, gpu_provider_max_sync_blocks)
 	return true
 
 
@@ -1881,6 +1949,13 @@ func _attach_gpu_provider_page_texture(
 		return {"status": "fail", "error": last_gpu_provider_page_error}
 	var origin_x: float = origin.x - outer_extent
 	var origin_z: float = origin.y - outer_extent
+	var block_budget: int = max(1, gpu_provider_max_sync_blocks)
+	var expected_block_count: int = _gpu_provider_page_block_count(level, origin)
+	if expected_block_count > block_budget:
+		return {
+			"status": "fail",
+			"error": "gpu_provider_sync_block_budget:%d/%d" % [expected_block_count, block_budget],
+		}
 	var blocks: Array = _gpu_provider_page_blocks(origin, outer_extent, spacing, side)
 	if blocks.is_empty():
 		last_gpu_provider_page_error = "prepared:blocks_empty"
@@ -1914,6 +1989,15 @@ func _attach_gpu_provider_page_texture(
 	total_gpu_provider_page_dispatches += int(result.get("block_count", blocks.size()))
 	last_gpu_provider_page_error = ""
 	return {"status": "pass", "level": level}
+
+
+func _gpu_provider_page_block_count(level: int, origin: Vector2) -> int:
+	var spacing: float = _level_spacing(level)
+	var outer_extent: float = _level_outer_extent(level)
+	var side: int = _side_for_extent(outer_extent, spacing)
+	var x_ranges: Array[Dictionary] = _axis_ranges_by_region(origin.x, outer_extent, spacing, side)
+	var z_ranges: Array[Dictionary] = _axis_ranges_by_region(origin.y, outer_extent, spacing, side)
+	return max(1, x_ranges.size() * z_ranges.size())
 
 
 func _gpu_provider_page_blocks(origin: Vector2, outer_extent: float, spacing: float, side: int) -> Array:
@@ -2298,7 +2382,10 @@ func _page_height_material_for_descriptor(
 func _gpu_page_textures_for_descriptor(descriptor: Dictionary) -> Dictionary:
 	var cache_key: String = str(descriptor.get("cache_key", ""))
 	_ensure_page_texture_backend()
+	var texture_start_ms: int = Time.get_ticks_msec()
 	var entry: Dictionary = _page_texture_backend.get_or_create_textures(cache_key, descriptor) as Dictionary
+	last_gpu_page_texture_residency_ms = Time.get_ticks_msec() - texture_start_ms
+	max_gpu_page_texture_residency_ms = max(max_gpu_page_texture_residency_ms, last_gpu_page_texture_residency_ms)
 	if entry.get("status", "fail") == "pass" and str(entry.get("normal_texture_mode", "")) == "rd_compute":
 		last_gpu_page_normal_dispatches += 1
 	return entry

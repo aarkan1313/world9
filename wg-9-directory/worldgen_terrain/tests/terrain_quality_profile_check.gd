@@ -210,7 +210,7 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 		errors.append("gpu_page_profile_normal_budget:%s" % str(budgets))
 	if int(budgets.get("gpu_page_review_min_rd_compute_normal_uploads", 0)) <= 0:
 		errors.append("gpu_page_profile_rd_compute_normal_budget:%s" % str(budgets))
-	if int(budgets.get("gpu_page_review_min_provider_page_dispatches", 0)) <= 0:
+	if int(budgets.get("gpu_page_review_min_provider_page_dispatches", -1)) < 0:
 		errors.append("gpu_page_profile_provider_dispatch_budget:%s" % str(budgets))
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
@@ -238,7 +238,8 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 			if not bool(gpu_state.get("use_rd_compute_normals", false)):
 				errors.append("gpu_page_profile_rd_compute_not_configured:%s" % str(gpu_state))
 			if _rendering_device_available():
-				if int(stats.get("total_gpu_provider_page_dispatches", 0)) < int(scene.get("far_clipmap_level_count")):
+				var min_provider_dispatches: int = int(budgets.get("gpu_page_review_min_provider_page_dispatches", 0))
+				if int(stats.get("total_gpu_provider_page_dispatches", 0)) < min_provider_dispatches:
 					errors.append("gpu_page_profile_provider_dispatches:%s" % str(stats))
 				if str(stats.get("last_gpu_provider_page_error", "")) != "":
 					errors.append("gpu_page_profile_provider_error:%s" % str(stats))

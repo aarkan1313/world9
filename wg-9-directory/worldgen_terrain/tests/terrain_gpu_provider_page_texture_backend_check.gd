@@ -102,6 +102,7 @@ func _check_far_clipmap_provider_texture_opt_in(errors: Array[String]) -> void:
 	node.use_gpu_rd_page_textures = true
 	node.use_gpu_rd_compute_normals = true
 	node.use_gpu_provider_page_textures = true
+	node.gpu_provider_max_sync_blocks = 16
 	node.gpu_page_residency_max_pages = 8
 	get_root().add_child(node)
 	if not node.setup(world):
@@ -161,6 +162,7 @@ func _check_far_clipmap_provider_texture_cross_region(errors: Array[String]) -> 
 	node.use_gpu_rd_page_textures = true
 	node.use_gpu_rd_compute_normals = true
 	node.use_gpu_provider_page_textures = true
+	node.gpu_provider_max_sync_blocks = 16
 	node.gpu_page_residency_max_pages = 4
 	get_root().add_child(node)
 	if not node.setup(world):

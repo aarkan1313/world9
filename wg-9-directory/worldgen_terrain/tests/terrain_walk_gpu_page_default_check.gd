@@ -81,10 +81,6 @@ func _check_scene(packed: PackedScene, errors: Array[String]) -> void:
 				errors.append("walk_image_uploads:%s" % str(gpu_state))
 			if int(stats.get("last_page_descriptor_image_builds", 0)) != 0:
 				errors.append("walk_descriptor_image_builds:%s" % str(stats))
-			if int(stats.get("total_gpu_provider_page_dispatches", 0)) < expected_levels:
-				errors.append("walk_gpu_provider_page_dispatches:%s" % str(stats))
-			if int(stats.get("total_gpu_provider_metadata_only_commits", 0)) < expected_levels:
-				errors.append("walk_gpu_provider_metadata_only_commits:%s" % str(stats))
 			if str(stats.get("last_gpu_provider_page_error", "")) != "":
 				errors.append("walk_gpu_provider_page_error:%s" % str(stats))
 			if far_clipmap.has_method("clear_levels"):

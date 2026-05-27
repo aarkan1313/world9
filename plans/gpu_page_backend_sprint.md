@@ -169,6 +169,24 @@ The current durable direction is persistent terrain pages:
 - Paced `gpu_page_review` / `terrain_gpu_page_review.tscn` far-page commits to
   one clipmap level per update so the explicit review scene proves the same
   no-readback renderer path without committing all levels in one visible hitch.
+- Added `terrain_gpu_page_profile.tscn` and
+  `terrain_gpu_page_hitch_profile_check.gd` as the focused far-page hitch
+  profiler. The check drives fast motion across page recenters, writes
+  `factory/runtime/godot_gpu_page_profile/gpu_page_hitch_profile_report.json`,
+  and records per-frame step time, provider-page commit time, provider texture
+  dispatch time, RD residency/material time, metadata-only commit counts, and
+  ImageTexture/upload/eviction state.
+- `TerrainFarClipmapNode` now exposes GPU provider-page phase timings in
+  `stats()` so future hitch reports can distinguish provider descriptor work,
+  renderer-device texture dispatch, texture residency/normal compute, mesh
+  setup, and material assignment.
+- The live provider-texture path is now bounded by
+  `far_clipmap_gpu_provider_max_sync_blocks`. Pages that would require multiple
+  synchronous region blocks are routed through the existing async/native
+  height-page path instead of blocking the movement frame. Multi-region GPU
+  provider dispatch remains covered by the isolated provider backend gate and
+  should be re-promoted only after descriptor staging/prefetch removes the
+  visible recenter hitch.
 
 ## Important Constraint
 
