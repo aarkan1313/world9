@@ -359,45 +359,28 @@ func compute_prepared_provider_height_page(
 	world_seed: int,
 	region_size_m: float
 ) -> Dictionary:
-	var validation: String = _validate_provider_request(prepared_request, origin_x, origin_z, step_m, count_x, count_z, region_size_m)
-	if not validation.is_empty():
-		return {"status": "fail", "error": validation}
 	var setup_result: Dictionary = setup()
 	if setup_result.get("status", "fail") != "pass":
 		return setup_result
 	var pipeline_result: Dictionary = _ensure_provider_pipeline()
 	if pipeline_result.get("status", "fail") != "pass":
 		return pipeline_result
-	var flattened: Dictionary = _flatten_provider_entries(prepared_request)
-	if flattened.get("status", "fail") != "pass":
-		return flattened
-
-	var profile: Dictionary = flattened["profile"] as Dictionary
-	var sample_count: int = count_x * count_z
-	var params := PackedByteArray()
-	params.resize(64)
-	var param_values: Array[float] = [
+	var descriptor: Dictionary = build_prepared_provider_page_descriptor(
+		prepared_request,
 		origin_x,
 		origin_z,
 		step_m,
-		region_size_m,
-		float(count_x),
-		float(count_z),
-		float(world_seed),
-		float(prepared_request.get("base_rx", 0)),
-		float(prepared_request.get("base_rz", 0)),
-		float(flattened.get("entry_count", 0)),
-		float(profile.get("macro_relief_scale", 1.0)),
-		float(profile.get("regional_scale_multiplier", 1.0)),
-		float(profile.get("valley_bias_strength", 1.0)),
-		0.0,
-		0.0,
-		0.0,
-	]
-	for index in range(param_values.size()):
-		params.encode_float(index * 4, param_values[index])
-	var entries_bytes: PackedByteArray = flattened["entry_bytes"] as PackedByteArray
-	var kernel_bytes: PackedByteArray = flattened["kernel_bytes"] as PackedByteArray
+		count_x,
+		count_z,
+		world_seed,
+		region_size_m
+	)
+	if descriptor.get("status", "fail") != "pass":
+		return descriptor
+	var sample_count: int = count_x * count_z
+	var params: PackedByteArray = descriptor["params_bytes"] as PackedByteArray
+	var entries_bytes: PackedByteArray = descriptor["entry_bytes"] as PackedByteArray
+	var kernel_bytes: PackedByteArray = descriptor["kernel_bytes"] as PackedByteArray
 	var output := PackedByteArray()
 	output.resize(sample_count * 4)
 
@@ -457,8 +440,65 @@ func compute_prepared_provider_height_page(
 		"count_z": count_z,
 		"world_seed": world_seed,
 		"region_size_m": region_size_m,
+		"entry_count": int(descriptor.get("entry_count", 0)),
+		"kernel_value_count": int(descriptor.get("kernel_value_count", 0)),
+	}
+
+
+func build_prepared_provider_page_descriptor(
+	prepared_request: Dictionary,
+	origin_x: float,
+	origin_z: float,
+	step_m: float,
+	count_x: int,
+	count_z: int,
+	world_seed: int,
+	region_size_m: float
+) -> Dictionary:
+	var validation: String = _validate_provider_request(prepared_request, origin_x, origin_z, step_m, count_x, count_z, region_size_m)
+	if not validation.is_empty():
+		return {"status": "fail", "error": validation}
+	var flattened: Dictionary = _flatten_provider_entries(prepared_request)
+	if flattened.get("status", "fail") != "pass":
+		return flattened
+	var profile: Dictionary = flattened["profile"] as Dictionary
+	var params := PackedByteArray()
+	params.resize(64)
+	var param_values: Array[float] = [
+		origin_x,
+		origin_z,
+		step_m,
+		region_size_m,
+		float(count_x),
+		float(count_z),
+		float(world_seed),
+		float(prepared_request.get("base_rx", 0)),
+		float(prepared_request.get("base_rz", 0)),
+		float(flattened.get("entry_count", 0)),
+		float(profile.get("macro_relief_scale", 1.0)),
+		float(profile.get("regional_scale_multiplier", 1.0)),
+		float(profile.get("valley_bias_strength", 1.0)),
+		0.0,
+		0.0,
+		0.0,
+	]
+	for index in range(param_values.size()):
+		params.encode_float(index * 4, param_values[index])
+	return {
+		"status": "pass",
+		"schema": "worldgen9.gpu_provider_page_descriptor.v1",
+		"params_bytes": params,
+		"entry_bytes": flattened["entry_bytes"] as PackedByteArray,
+		"kernel_bytes": flattened["kernel_bytes"] as PackedByteArray,
 		"entry_count": int(flattened.get("entry_count", 0)),
 		"kernel_value_count": int(flattened.get("kernel_value_count", 0)),
+		"origin_x": origin_x,
+		"origin_z": origin_z,
+		"step_m": step_m,
+		"count_x": count_x,
+		"count_z": count_z,
+		"world_seed": world_seed,
+		"region_size_m": region_size_m,
 	}
 
 

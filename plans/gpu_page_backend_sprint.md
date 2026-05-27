@@ -122,6 +122,10 @@ The current durable direction is persistent terrain pages:
   relief, detail noise, and valley shaping in one GPU dispatch with CPU-provider
   parity. Pass/corridor shaping is explicitly rejected in this proof path until
   route facts are moved into a GPU-friendly descriptor.
+- Split prepared-provider page inputs into a reusable
+  `worldgen9.gpu_provider_page_descriptor.v1` descriptor so the later
+  renderer-device/no-readback path can consume the same validated params,
+  entry bytes, and kernel bytes without changing terrain math.
 
 ## Important Constraint
 

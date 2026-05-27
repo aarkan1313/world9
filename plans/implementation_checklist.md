@@ -145,6 +145,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add first isolated GPU macro-height page generation backend/gate with CPU parity, RF byte output, pipeline reuse, negative-origin infinite-coordinate coverage, and profile-scale coverage before any live streaming integration.
 - [x] Add first isolated GPU DEM-kernel sampling primitive/gate using a real runtime kernel, mirrored bilinear sampling, negative coordinates, rotation, and UV offsets before full provider blending.
 - [x] Add first isolated GPU prepared-provider page assembly gate: prepared corner entries, real kernel arrays, macro relief, corner-blended kernel relief, detail, and valley shaping with tight CPU-provider parity, while explicitly gating out pass/corridor facts.
+- [x] Split GPU prepared-provider page inputs into a reusable descriptor contract and gate corridor-shaped descriptors to fail fast until route facts are GPU-ready.
 - [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.

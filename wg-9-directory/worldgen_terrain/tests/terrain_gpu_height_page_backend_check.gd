@@ -219,6 +219,28 @@ func _check_prepared_provider_case(backend: RefCounted, errors: Array[String]) -
 	if prepared.get("status", "fail") != "pass":
 		errors.append("provider_prepared:%s" % str(prepared))
 		return
+	var descriptor: Dictionary = backend.build_prepared_provider_page_descriptor(
+		prepared,
+		origin_x,
+		origin_z,
+		step_m,
+		count_x,
+		count_z,
+		world_seed,
+		region_size_m
+	)
+	if descriptor.get("status", "fail") != "pass":
+		errors.append("provider_descriptor:%s" % str(descriptor))
+		return
+	if str(descriptor.get("schema", "")) != "worldgen9.gpu_provider_page_descriptor.v1":
+		errors.append("provider_descriptor_schema:%s" % str(descriptor))
+	if (descriptor.get("params_bytes", PackedByteArray()) as PackedByteArray).size() != 64:
+		errors.append("provider_params_bytes:%d" % (descriptor.get("params_bytes", PackedByteArray()) as PackedByteArray).size())
+	if int(descriptor.get("entry_count", 0)) <= 0:
+		errors.append("provider_entry_count:%s" % str(descriptor))
+	if int(descriptor.get("kernel_value_count", 0)) <= 0:
+		errors.append("provider_kernel_value_count:%s" % str(descriptor))
+	_check_provider_corridor_rejection(backend, prepared, origin_x, origin_z, step_m, count_x, count_z, world_seed, region_size_m, errors)
 	var result: Dictionary = backend.compute_prepared_provider_height_page(
 		prepared,
 		origin_x,
@@ -249,3 +271,38 @@ func _check_prepared_provider_case(backend: RefCounted, errors: Array[String]) -
 		errors.append("provider_max_delta:%s" % str(comparison))
 	if float(comparison.get("mean_delta_m", 999.0)) > MAX_PROVIDER_MEAN_DELTA_M:
 		errors.append("provider_mean_delta:%s" % str(comparison))
+
+
+func _check_provider_corridor_rejection(
+	backend: RefCounted,
+	prepared: Dictionary,
+	origin_x: float,
+	origin_z: float,
+	step_m: float,
+	count_x: int,
+	count_z: int,
+	world_seed: int,
+	region_size_m: float,
+	errors: Array[String]
+) -> void:
+	var corridor_prepared: Dictionary = prepared.duplicate(true)
+	var corners: Array = corridor_prepared["corner_entries"] as Array
+	for corner_value in corners:
+		var corner: Dictionary = corner_value as Dictionary
+		var entries: Array = corner.get("entries", []) as Array
+		if not entries.is_empty():
+			var entry: Dictionary = entries[0] as Dictionary
+			entry["profile_pass_corridor_strength"] = 1.0
+			break
+	var descriptor: Dictionary = backend.build_prepared_provider_page_descriptor(
+		corridor_prepared,
+		origin_x,
+		origin_z,
+		step_m,
+		count_x,
+		count_z,
+		world_seed,
+		region_size_m
+	)
+	if descriptor.get("status", "pass") == "pass":
+		errors.append("provider_corridor_descriptor_passed")
