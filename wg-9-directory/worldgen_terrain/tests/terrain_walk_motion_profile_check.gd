@@ -81,6 +81,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 	var page_descriptor_texture_hit_frames := 0
 	var total_page_descriptor_texture_hits := 0
 	var total_page_descriptor_image_builds := 0
+	var total_page_descriptor_preencoded_hits := 0
 	var max_step_ms := 0
 	var total_chunk_created := 0
 	var total_chunk_retired := 0
@@ -133,10 +134,12 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			page_material_reuse_frames += 1
 		var descriptor_texture_hits: int = int(far_stats.get("last_page_descriptor_texture_hits", 0))
 		var descriptor_image_builds: int = int(far_stats.get("last_page_descriptor_image_builds", 0))
+		var descriptor_preencoded_hits: int = int(far_stats.get("last_page_descriptor_preencoded_hits", 0))
 		if descriptor_texture_hits > 0:
 			page_descriptor_texture_hit_frames += 1
 		total_page_descriptor_texture_hits += descriptor_texture_hits
 		total_page_descriptor_image_builds += descriptor_image_builds
+		total_page_descriptor_preencoded_hits += descriptor_preencoded_hits
 		if queued + native_queued > WARN_QUEUE_BACKLOG:
 			queue_backlog_frames += 1
 		frame_reports.append({
@@ -160,6 +163,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"page_material_reused": bool(far_stats.get("last_page_material_reused", false)),
 			"page_descriptor_texture_hits": descriptor_texture_hits,
 			"page_descriptor_image_builds": descriptor_image_builds,
+			"page_descriptor_preencoded_hits": descriptor_preencoded_hits,
 			"far_rebuild_delta": far_delta,
 			"anchor_moved": anchor_moved,
 			"far_rebuilt_levels": (far_stats.get("last_rebuilt_levels", []) as Array).duplicate(),
@@ -179,6 +183,8 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		errors.append("no_recenter_frames_observed")
 	if max_page_blends <= 0:
 		errors.append("no_page_blend_activity_observed")
+	if total_page_descriptor_preencoded_hits <= 0:
+		errors.append("no_preencoded_page_descriptor_hits")
 	var max_allowed_gpu_uploads: int = _max_allowed_gpu_page_uploads(scene)
 	if max_gpu_uploads > max_allowed_gpu_uploads:
 		errors.append("gpu_page_uploads:%d limit:%d" % [max_gpu_uploads, max_allowed_gpu_uploads])
@@ -222,6 +228,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"page_descriptor_texture_hit_frames": page_descriptor_texture_hit_frames,
 			"total_page_descriptor_texture_hits": total_page_descriptor_texture_hits,
 			"total_page_descriptor_image_builds": total_page_descriptor_image_builds,
+			"total_page_descriptor_preencoded_hits": total_page_descriptor_preencoded_hits,
 			"total_chunk_created": total_chunk_created,
 			"total_chunk_retired": total_chunk_retired,
 			"total_far_rebuild_delta": total_far_rebuild_delta,

@@ -64,6 +64,7 @@ var last_surface_material_reused: bool = false
 var last_page_material_reused: bool = false
 var last_page_descriptor_image_builds: int = 0
 var last_page_descriptor_texture_hits: int = 0
+var last_page_descriptor_preencoded_hits: int = 0
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
 var _native_backend: Object
@@ -146,6 +147,7 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	last_page_material_reused = false
 	last_page_descriptor_image_builds = 0
 	last_page_descriptor_texture_hits = 0
+	last_page_descriptor_preencoded_hits = 0
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
@@ -256,6 +258,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_deferred_levels.clear()
 	last_page_descriptor_image_builds = 0
 	last_page_descriptor_texture_hits = 0
+	last_page_descriptor_preencoded_hits = 0
 	var shared_origin := _shared_origin(viewer_xz)
 	var profile_blocks_far_refresh := _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds
 	if profile_blocks_far_refresh and is_finite(_pending_origin.x) and is_finite(_pending_origin.y):
@@ -332,6 +335,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_page_material_reused": last_page_material_reused,
 		"last_page_descriptor_image_builds": last_page_descriptor_image_builds,
 		"last_page_descriptor_texture_hits": last_page_descriptor_texture_hits,
+		"last_page_descriptor_preencoded_hits": last_page_descriptor_preencoded_hits,
 	}
 
 
@@ -363,6 +367,7 @@ func stats() -> Dictionary:
 		"last_page_material_reused": last_page_material_reused,
 		"last_page_descriptor_image_builds": last_page_descriptor_image_builds,
 		"last_page_descriptor_texture_hits": last_page_descriptor_texture_hits,
+		"last_page_descriptor_preencoded_hits": last_page_descriptor_preencoded_hits,
 	}
 
 
@@ -549,6 +554,10 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 			for x in range(side):
 				normals[z * side + x] = _normal_at(height, side, x, z, spacing)
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
+	if payload.has("height_image_data") and payload.has("normal_image_data"):
+		heightfield["height_image_data"] = payload["height_image_data"] as PackedByteArray
+		heightfield["normal_image_data"] = payload["normal_image_data"] as PackedByteArray
+		heightfield["texture_payload_mode"] = str(payload.get("texture_payload_mode", ""))
 	level_heightfields[level] = heightfield
 	level_surface_descriptors[level] = {}
 	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
@@ -1663,8 +1672,57 @@ func _page_material_descriptor_from_heightfield(heightfield: Dictionary) -> Dict
 			"height_range_m": max(0.0, height_max - height_min),
 			"cache_key": cache_key,
 		}
+	var preencoded: Dictionary = _page_descriptor_from_preencoded_heightfield(heightfield)
+	if preencoded.get("status", "fail") == "pass":
+		last_page_descriptor_preencoded_hits += 1
+		return preencoded
 	last_page_descriptor_image_builds += 1
 	return _material_descriptor_from_heightfield(heightfield)
+
+
+func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Dictionary:
+	var side: int = int(heightfield.get("vertices_per_side", 0))
+	if side < 2:
+		return {"status": "fail", "error": "side:%d" % side}
+	var height_data: PackedByteArray = heightfield.get("height_image_data", PackedByteArray()) as PackedByteArray
+	var normal_data: PackedByteArray = heightfield.get("normal_image_data", PackedByteArray()) as PackedByteArray
+	var expected_height_bytes: int = side * side * 4
+	var expected_normal_bytes: int = side * side * 12
+	if height_data.size() != expected_height_bytes or normal_data.size() != expected_normal_bytes:
+		return {
+			"status": "fail",
+			"error": "preencoded_size:%d/%d expected:%d/%d" % [
+				height_data.size(),
+				normal_data.size(),
+				expected_height_bytes,
+				expected_normal_bytes,
+			],
+		}
+	var height_image: Image = Image.create_from_data(side, side, false, Image.FORMAT_RF, height_data)
+	var normal_image: Image = Image.create_from_data(side, side, false, Image.FORMAT_RGBF, normal_data)
+	if height_image == null or normal_image == null:
+		return {"status": "fail", "error": "preencoded_image_create_failed"}
+	var height_min: float = float(heightfield.get("height_min_m", 0.0))
+	var height_max: float = float(heightfield.get("height_max_m", height_min))
+	var level: int = int(heightfield.get("level", 0))
+	return {
+		"status": "pass",
+		"level": level,
+		"origin_x": float(heightfield.get("origin_x", 0.0)),
+		"origin_z": float(heightfield.get("origin_z", 0.0)),
+		"outer_extent_m": float(heightfield.get("outer_extent_m", 0.0)),
+		"inner_extent_m": _inner_extent_for_level(level),
+		"vertices_per_side": side,
+		"spacing_m": float(heightfield.get("spacing_m", _level_spacing(level))),
+		"height_min_m": height_min,
+		"height_max_m": height_max,
+		"height_range_m": max(0.0, height_max - height_min),
+		"height_image": height_image,
+		"normal_image": normal_image,
+		"normal_values": heightfield.get("normals", PackedVector3Array()) as PackedVector3Array,
+		"cache_key": str(heightfield.get("cache_key", "")),
+		"texture_payload_mode": str(heightfield.get("texture_payload_mode", "")),
+	}
 
 
 func _ensure_persistent_page_mesh(level: int, side: int, spacing: float, outer_extent: float, inner_extent: float) -> void:

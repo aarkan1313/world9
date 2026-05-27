@@ -207,6 +207,53 @@ impl Wg9TerrainNativeBackend {
     }
 
     #[func]
+    pub fn build_page_texture_data_from_height_normals(
+        &self,
+        height: PackedFloat32Array,
+        normals: PackedVector3Array,
+        vertices_per_side: i64,
+    ) -> VarDictionary {
+        let count = match validated_grid_count(vertices_per_side) {
+            Ok(value) => value,
+            Err(error) => return fail_dictionary(error),
+        };
+        let expected = count * count;
+        let height_values = height.as_slice();
+        if let Some(error) = validate_height_values(height_values, expected) {
+            return fail_dictionary(error);
+        }
+        let normal_values = normals.as_slice();
+        if normal_values.len() != expected {
+            return fail_dictionary(format!(
+                "normal_size:{} expected:{}",
+                normal_values.len(),
+                expected
+            ));
+        }
+        let mut height_data = Vec::with_capacity(expected * 4);
+        for value in height_values {
+            height_data.extend_from_slice(&value.to_le_bytes());
+        }
+        let mut normal_data = Vec::with_capacity(expected * 12);
+        for normal in normal_values {
+            normal_data.extend_from_slice(&(normal.x * 0.5 + 0.5).to_le_bytes());
+            normal_data.extend_from_slice(&(normal.y * 0.5 + 0.5).to_le_bytes());
+            normal_data.extend_from_slice(&(normal.z * 0.5 + 0.5).to_le_bytes());
+        }
+
+        let mut payload = VarDictionary::new();
+        payload.set("schema", BACKEND_SCHEMA);
+        payload.set("backend_class", BACKEND_CLASS_NAME);
+        payload.set("status", "pass");
+        payload.set("vertices_per_side", vertices_per_side);
+        payload.set("height_image_data", &PackedByteArray::from(height_data));
+        payload.set("normal_image_data", &PackedByteArray::from(normal_data));
+        payload.set("height_image_format", "rf");
+        payload.set("normal_image_format", "rgbf");
+        payload
+    }
+
+    #[func]
     pub fn build_visual_displacement_from_height(
         &self,
         height: PackedFloat32Array,

@@ -83,6 +83,8 @@ func _start() -> void:
 	var surface_texture_ms: int = int(stats_after_drain.get("last_surface_texture_ms", 0))
 	if page_async and str(stats_after_drain.get("last_worker_payload_mode", "")) != "height_page":
 		errors.append("surface_page_worker_payload_mode:%s" % str(stats_after_drain))
+	if page_async and not _has_native_image_data_descriptor(scene):
+		errors.append("surface_page_descriptor_not_preencoded:%s" % str(scene.far_clipmap.level_material_descriptors))
 	if int(stats_after_drain.get("pending_rebuild_count", 0)) != 0:
 		errors.append("surface_pending_after_drain:%d" % int(stats_after_drain.get("pending_rebuild_count", 0)))
 	if _count_delta(counts_before_cross, counts_after_drain) != expected_level_count:
@@ -107,6 +109,7 @@ func _start() -> void:
 		"pending_after_first": pending_after_first,
 		"workers_after_first": workers_after_first,
 		"last_worker_payload_mode": str(stats_after_drain.get("last_worker_payload_mode", "")),
+		"last_page_descriptor_preencoded_hits": int(stats_after_drain.get("last_page_descriptor_preencoded_hits", 0)),
 		"surface_texture_ms": surface_texture_ms,
 	}
 	_report_and_quit(scene, errors, report)
@@ -145,6 +148,16 @@ func _expected_levels(scene: Node3D) -> Array[int]:
 	for index in range(_expected_level_count(scene)):
 		levels.append(index)
 	return levels
+
+
+func _has_native_image_data_descriptor(scene: Node3D) -> bool:
+	if scene.far_clipmap == null:
+		return false
+	for descriptor_value in scene.far_clipmap.level_material_descriptors:
+		var descriptor: Dictionary = descriptor_value as Dictionary
+		if str(descriptor.get("texture_payload_mode", "")) == "native_image_data":
+			return true
+	return false
 
 
 func _count_delta(before: Array, after: Array) -> int:

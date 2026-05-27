@@ -81,6 +81,27 @@ func _check_normal_payload(
 		if normals[index].distance_to(mesh_normals[index]) > FLOAT_EPSILON:
 			errors.append("normal_payload_mismatch:%d:%s expected:%s" % [index, str(normals[index]), str(mesh_normals[index])])
 			return
+	var texture_payload: Dictionary = backend.call("build_page_texture_data_from_height_normals", height, normals, count) as Dictionary
+	if texture_payload.get("status", "fail") != "pass":
+		errors.append("texture_payload_failed:%s" % str(texture_payload))
+		return
+	var height_data: PackedByteArray = texture_payload["height_image_data"] as PackedByteArray
+	var normal_data: PackedByteArray = texture_payload["normal_image_data"] as PackedByteArray
+	if height_data.size() != count * count * 4:
+		errors.append("texture_height_bytes:%d" % height_data.size())
+	if normal_data.size() != count * count * 12:
+		errors.append("texture_normal_bytes:%d" % normal_data.size())
+	var height_image: Image = Image.create_from_data(count, count, false, Image.FORMAT_RF, height_data)
+	var normal_image: Image = Image.create_from_data(count, count, false, Image.FORMAT_RGBF, normal_data)
+	if absf(height_image.get_pixel(2, 2).r - float(height[12])) > FLOAT_EPSILON:
+		errors.append("texture_height_pixel:%.6f expected:%.6f" % [height_image.get_pixel(2, 2).r, float(height[12])])
+	var decoded_normal := Vector3(
+		normal_image.get_pixel(2, 2).r * 2.0 - 1.0,
+		normal_image.get_pixel(2, 2).g * 2.0 - 1.0,
+		normal_image.get_pixel(2, 2).b * 2.0 - 1.0
+	).normalized()
+	if decoded_normal.distance_to(normals[12]) > FLOAT_EPSILON:
+		errors.append("texture_normal_pixel:%s expected:%s" % [str(decoded_normal), str(normals[12])])
 
 
 func _check_invalid_clipmap_inputs(
@@ -100,6 +121,11 @@ func _check_invalid_clipmap_inputs(
 	var zero_normal_step: Dictionary = backend.call("build_normal_payload_from_height", height, count, 0.0) as Dictionary
 	if zero_normal_step.get("status", "pass") != "fail":
 		errors.append("normal_zero_step_passed:%s" % str(zero_normal_step))
+	var bad_normals := PackedVector3Array()
+	bad_normals.resize(1)
+	var bad_texture: Dictionary = backend.call("build_page_texture_data_from_height_normals", height, bad_normals, count) as Dictionary
+	if bad_texture.get("status", "pass") != "fail":
+		errors.append("texture_bad_normals_passed:%s" % str(bad_texture))
 
 
 func _expected_clipmap_indices(count: int, spacing: float, outer_extent: float, inner_extent: float) -> PackedInt32Array:

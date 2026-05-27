@@ -156,11 +156,28 @@ func _build_payload(request: Dictionary) -> Dictionary:
 				"error": "normal_payload:%s" % (str(normal_payload["error"]) if normal_payload.has("error") else "unknown"),
 				"level": int(request["level"]),
 			}
+		var normals: PackedVector3Array = normal_payload["normals"] as PackedVector3Array
+		var texture_payload: Dictionary = backend.call(
+			"build_page_texture_data_from_height_normals",
+			height,
+			normals,
+			side
+		) as Dictionary
+		var texture_status: String = str(texture_payload["status"]) if texture_payload.has("status") else "fail"
+		if texture_status != "pass":
+			return {
+				"status": "fail",
+				"error": "texture_payload:%s" % (str(texture_payload["error"]) if texture_payload.has("error") else "unknown"),
+				"level": int(request["level"]),
+			}
 		return {
 			"status": "pass",
 			"payload_mode": "height_page",
 			"height": height,
-			"normals": normal_payload["normals"] as PackedVector3Array,
+			"normals": normals,
+			"height_image_data": texture_payload["height_image_data"] as PackedByteArray,
+			"normal_image_data": texture_payload["normal_image_data"] as PackedByteArray,
+			"texture_payload_mode": "native_image_data",
 			"level": int(request["level"]),
 			"origin_x": float(request["origin_x"]),
 			"origin_z": float(request["origin_z"]),
