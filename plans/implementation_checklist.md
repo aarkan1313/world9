@@ -142,7 +142,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Skip CPU `Image` wrapper construction for opt-in direct-RD far-page descriptors so GPU review hands raw RF/RGBF bytes straight to `Texture2DRD`, with ImageTexture fallback built only if RD cannot be used.
 - [x] Add `TerrainPageTextureBackend` so descriptor-to-texture fallback, direct-RD page residency, protected keys, and diagnostics are behind a backend boundary instead of living directly in `TerrainFarClipmapNode`.
 - [x] Promote `walk_review` far pages to direct `Texture2DRD` residency plus renderer-device computed normal textures, and add a renderer-enabled saved-walk-scene gate proving zero ImageTexture uploads.
-- [x] Add first isolated GPU macro-height page generation backend/gate with CPU parity, RF byte output, pipeline reuse, and explicit unsupported-case rejection before any live streaming integration.
+- [x] Add first isolated GPU macro-height page generation backend/gate with CPU parity, RF byte output, pipeline reuse, negative-origin infinite-coordinate coverage, and profile-scale coverage before any live streaming integration.
 - [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.

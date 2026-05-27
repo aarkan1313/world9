@@ -103,15 +103,15 @@ The current durable direction is persistent terrain pages:
 - Added `TerrainGpuHeightPageBackend` as the first isolated GPU height-page
   generation proof. It uses a local `RenderingDevice` compute shader to produce
   RF macro-height page bytes from stable page parameters, validates against the
-  authoritative CPU hash/noise math, and explicitly rejects unsupported request
-  shapes instead of silently emitting wrong terrain.
+  authoritative CPU hash/noise math, and covers positive/negative world origins
+  plus macro and regional profile scaling.
 - Fixed the GPU macro-height shader hash path to match the existing
   GDScript/Rust wide-multiply hash semantics; a failed offset-page parity case
   caught the bug before live integration.
 - Added `terrain_gpu_height_page_backend_check.gd` to the renderer-enabled GPU
-  suite. It proves positive-origin/default-scale macro pages, byte layout,
-  pipeline reuse, and fail-fast handling for unsupported negative origins,
-  regional scale, and macro scale.
+  suite. It proves positive-origin pages, negative-origin pages, profile-scaled
+  pages, byte layout, pipeline reuse, and fail-fast handling for malformed
+  request dimensions/scales.
 
 ## Important Constraint
 
@@ -160,9 +160,8 @@ Acceptance for the next slice:
 - GPU-resident material masks.
 - GPU page generation from DEM/provider facts.
 - Full live walk scene height generation on GPU compute.
-- Negative-origin GPU hash/parity support for true infinite world-space pages.
-- GPU profile/regional scale, DEM-kernel relief, pass/corridor facts, hydrology
-  facts, and erosion facts.
+- DEM-kernel relief, pass/corridor facts, hydrology facts, erosion facts, and
+  any final provider branches beyond the macro-height/page-profile proof.
 - Re-promoting corridor tour as an acceptance gate.
 
 Those remain roadmap work, not accepted finished systems.

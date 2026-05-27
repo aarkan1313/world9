@@ -222,8 +222,6 @@ func _validate_request(
 ) -> String:
 	if not is_finite(origin_x) or not is_finite(origin_z):
 		return "origin_nonfinite"
-	if origin_x < 0.0 or origin_z < 0.0:
-		return "negative_origin_not_supported:%.3f,%.3f" % [origin_x, origin_z]
 	if not is_finite(step_m) or step_m <= 0.0:
 		return "step_m:%f" % step_m
 	if count_x < 1 or count_z < 1:
@@ -232,12 +230,8 @@ func _validate_request(
 		return "sample_count:%d" % (count_x * count_z)
 	if not is_finite(macro_relief_scale) or macro_relief_scale <= 0.0:
 		return "macro_relief_scale:%f" % macro_relief_scale
-	if absf(macro_relief_scale - 1.0) > 0.000001:
-		return "macro_relief_scale_not_supported:%f" % macro_relief_scale
 	if not is_finite(regional_scale_multiplier) or regional_scale_multiplier <= 0.0:
 		return "regional_scale_multiplier:%f" % regional_scale_multiplier
-	if absf(regional_scale_multiplier - 1.0) > 0.000001:
-		return "regional_scale_multiplier_not_supported:%f" % regional_scale_multiplier
 	return ""
 
 

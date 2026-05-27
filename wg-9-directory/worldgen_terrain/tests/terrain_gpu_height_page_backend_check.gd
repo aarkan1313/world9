@@ -36,22 +36,35 @@ func _start() -> void:
 		)
 		_check_case(
 			backend,
-			"origin_offset_default_scale",
+			"origin_offset_macro_scale",
 			8192.0,
 			4096.0,
 			128.0,
 			25,
 			25,
 			1441,
+			1.35,
 			1.0,
-			1.0,
+			errors
+		)
+		_check_case(
+			backend,
+			"negative_origin_regional_scale",
+			-8192.0,
+			4096.0,
+			128.0,
+			25,
+			25,
+			1441,
+			0.85,
+			1.2,
 			errors
 		)
 		_check_invalid_requests(backend, errors)
 	var state: Dictionary = backend.debug_state()
 	if int(state.get("compile_count", 0)) != 1:
 		errors.append("compile_count:%s" % str(state))
-	if int(state.get("dispatch_count", 0)) < 2:
+	if int(state.get("dispatch_count", 0)) < 3:
 		errors.append("dispatch_count:%s" % str(state))
 	backend.shutdown()
 	if not errors.is_empty():
@@ -115,12 +128,6 @@ func _check_invalid_requests(backend: RefCounted, errors: Array[String]) -> void
 	var bad_scale: Dictionary = backend.compute_macro_height_page(0.0, 0.0, 16.0, 4, 4, 1337, 1.0, 0.0)
 	if bad_scale.get("status", "pass") == "pass":
 		errors.append("bad_scale_passed")
-	var unsupported_negative: Dictionary = backend.compute_macro_height_page(-16.0, 0.0, 16.0, 4, 4)
-	if unsupported_negative.get("status", "pass") == "pass":
-		errors.append("unsupported_negative_passed")
-	var unsupported_regional_scale: Dictionary = backend.compute_macro_height_page(0.0, 0.0, 16.0, 4, 4, 1337, 1.0, 1.2)
-	if unsupported_regional_scale.get("status", "pass") == "pass":
-		errors.append("unsupported_regional_scale_passed")
-	var unsupported_macro_scale: Dictionary = backend.compute_macro_height_page(0.0, 0.0, 16.0, 4, 4, 1337, 1.2, 1.0)
-	if unsupported_macro_scale.get("status", "pass") == "pass":
-		errors.append("unsupported_macro_scale_passed")
+	var bad_macro_scale: Dictionary = backend.compute_macro_height_page(0.0, 0.0, 16.0, 4, 4, 1337, 0.0, 1.0)
+	if bad_macro_scale.get("status", "pass") == "pass":
+		errors.append("bad_macro_scale_passed")
