@@ -25,6 +25,7 @@ The current durable direction is persistent terrain pages:
 - Added direct `Texture2DRD` capability and residency checks.
 - Added an opt-in far-clipmap integration flag, `use_gpu_rd_page_textures`, for direct RD page textures from preencoded RF/RGBF bytes.
 - Added a review-only `TerrainQualityProfile.GPU_PAGE_REVIEW` contract that routes the normal walk-preview scene through direct RD page residency without changing the saved default walk profile.
+- Added saved review scene `res://worldgen_terrain/scenes/terrain_gpu_page_review.tscn`.
 - Renderer-enabled proof currently passes on D3D12 / RTX 5090 Laptop GPU.
 - The probe validates:
   - storage-buffer dispatch
@@ -46,6 +47,10 @@ The current durable direction is persistent terrain pages:
   - direct RD residency under the profile path
   - zero ImageTexture uploads for the profile's far pages
   - explicit scene/clipmap teardown without RID leaks
+- The saved GPU page review scene gate validates:
+  - the `.tscn` has the GPU review profile id
+  - the saved scene enables the GPU page-normal/RD texture flags
+  - the saved scene reaches direct RD page uploads with zero ImageTexture uploads
 
 ## Important Constraint
 
@@ -78,7 +83,7 @@ Acceptance for the next slice:
 - no per-frame renderer device creation in live terrain
 - no forced GPU readback in the default walk scene
 - direct RD texture residency remains opt-in until visual/perf acceptance
-- `gpu_page_review` is the review profile for this path; `walk_review` remains the production-safe/default review profile
+- `gpu_page_review` and `terrain_gpu_page_review.tscn` are the review entry points for this path; `walk_review` and `terrain_walk_preview.tscn` remain the production-safe/default review path
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
 

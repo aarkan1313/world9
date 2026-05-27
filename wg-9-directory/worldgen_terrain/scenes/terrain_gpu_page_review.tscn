@@ -1,0 +1,53 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://worldgen_terrain/runtime/terrain_walk_preview_scene.gd" id="1_gpu_page_review"]
+
+[node name="TerrainGpuPageReview" type="Node3D"]
+script = ExtResource("1_gpu_page_review")
+quality_profile_id = "gpu_page_review"
+debug_mode = "elevation_color"
+vertices_per_side = 129
+visible_radius_chunks = 3
+build_budget_per_frame = 8
+max_lod = 2
+warmup_build_steps = 4
+preload_active_chunks_before_start = true
+preload_active_chunk_limit = 0
+seed = 1337
+chunk_size_m = 512.0
+move_speed_mps = 18.0
+fast_multiplier = 60.0
+slow_multiplier = 0.25
+build_when_idle = false
+show_diagnostics_overlay = true
+use_fast_gray_material = true
+use_native_chunk_payloads = true
+use_native_chunk_workers = true
+max_native_chunk_workers = 6
+review_sync_hole_fill_radius_chunks = 1
+review_sync_hole_fill_max_chunks_per_frame = 2
+use_lod_mesh_density = false
+use_mesh_skirts = false
+mesh_skirt_depth_m = 48.0
+use_far_clipmap = true
+far_clipmap_level_count = 4
+far_clipmap_rebuild_levels_per_update = 4
+far_clipmap_transition_fade_seconds = 0.35
+use_far_clipmap_native_workers = true
+use_persistent_page_clipmap = true
+far_clipmap_page_cache_max_pages = 64
+far_clipmap_gpu_page_residency_max_pages = 64
+use_far_clipmap_gpu_page_normal_backend = true
+use_far_clipmap_gpu_rd_page_textures = true
+distance_fog_depth_begin_m = 30000.0
+distance_fog_depth_end_m = 33000.0
+distance_fog_color = Color(0.18, 0.18, 0.18, 1)
+fast_gray_exposure = 0.42
+fast_gray_contrast = 1.42
+eye_height_m = 2.0
+look_pitch_deg = -8.0
+mouse_sensitivity = 0.0024
+capture_mouse_on_ready = true
+free_fly_enabled = true
+fly_start_height_m = 48.0
+fly_min_ground_clearance_m = 4.0
