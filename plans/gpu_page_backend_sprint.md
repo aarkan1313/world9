@@ -116,6 +116,12 @@ The current durable direction is persistent terrain pages:
   compute path. The gate loads a real normalized runtime kernel, samples it with
   the same mirrored bilinear rules used by `TerrainHeightProvider`, and proves
   GPU/CPU parity across negative coordinates, rotation, and UV offsets.
+- Added an isolated prepared-provider page assembly compute path. It consumes
+  the same prepared corner entries as the native prepared-grid path, flattens
+  real runtime kernel arrays, and computes macro height, corner-blended kernel
+  relief, detail noise, and valley shaping in one GPU dispatch with CPU-provider
+  parity. Pass/corridor shaping is explicitly rejected in this proof path until
+  route facts are moved into a GPU-friendly descriptor.
 
 ## Important Constraint
 
@@ -164,10 +170,9 @@ Acceptance for the next slice:
 - GPU-resident material masks.
 - GPU page generation from DEM/provider facts.
 - Full live walk scene height generation on GPU compute.
-- Full DEM-kernel relief blending across region corners; the current GPU proof
-  validates the primitive kernel sampler, not the complete provider blend.
+- Live streaming integration of the prepared-provider GPU page path.
 - Pass/corridor facts, hydrology facts, erosion facts, and any final provider
-  branches beyond the macro-height/page-profile/kernel-sampler proof.
+  branches beyond the macro-height/page-profile/kernel/provider-page proof.
 - Re-promoting corridor tour as an acceptance gate.
 
 Those remain roadmap work, not accepted finished systems.

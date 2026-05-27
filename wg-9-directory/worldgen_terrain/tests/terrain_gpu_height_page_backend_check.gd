@@ -2,10 +2,14 @@ extends SceneTree
 
 const TerrainGpuHeightPageBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_height_page_backend.gd")
 const RuntimeKernelPackScript := preload("res://worldgen_terrain/runtime/runtime_kernel_pack.gd")
+const TerrainHeightProviderScript := preload("res://worldgen_terrain/height/terrain_height_provider.gd")
+const TerrainSettingsScript := preload("res://worldgen_terrain/core/terrain_settings.gd")
 
 const MAX_DELTA_M: float = 0.08
 const MAX_MEAN_DELTA_M: float = 0.015
 const MAX_KERNEL_DELTA: float = 0.0001
+const MAX_PROVIDER_DELTA_M: float = 0.12
+const MAX_PROVIDER_MEAN_DELTA_M: float = 0.03
 
 
 func _init() -> void:
@@ -64,15 +68,20 @@ func _start() -> void:
 		)
 		_check_invalid_requests(backend, errors)
 		_check_kernel_sample_case(backend, errors)
+		_check_prepared_provider_case(backend, errors)
 	var state: Dictionary = backend.debug_state()
 	if int(state.get("compile_count", 0)) != 1:
 		errors.append("compile_count:%s" % str(state))
 	if int(state.get("kernel_compile_count", 0)) != 1:
 		errors.append("kernel_compile_count:%s" % str(state))
+	if int(state.get("provider_compile_count", 0)) != 1:
+		errors.append("provider_compile_count:%s" % str(state))
 	if int(state.get("dispatch_count", 0)) < 3:
 		errors.append("dispatch_count:%s" % str(state))
 	if int(state.get("kernel_dispatch_count", 0)) < 1:
 		errors.append("kernel_dispatch_count:%s" % str(state))
+	if int(state.get("provider_dispatch_count", 0)) < 1:
+		errors.append("provider_dispatch_count:%s" % str(state))
 	backend.shutdown()
 	if not errors.is_empty():
 		for error in errors:
@@ -182,3 +191,61 @@ func _check_kernel_sample_case(backend: RefCounted, errors: Array[String]) -> vo
 		errors.append("kernel_max_delta:%s" % str(comparison))
 	if float(comparison.get("mean_delta", 999.0)) > MAX_KERNEL_DELTA:
 		errors.append("kernel_mean_delta:%s" % str(comparison))
+
+
+func _check_prepared_provider_case(backend: RefCounted, errors: Array[String]) -> void:
+	var pack = RuntimeKernelPackScript.new()
+	if not pack.load_default():
+		errors.append("provider_pack:%s" % str(pack.errors))
+		return
+	var provider = TerrainHeightProviderScript.new()
+	provider.setup(pack)
+	var origin_x := 1024.0
+	var origin_z := 2048.0
+	var step_m := 128.0
+	var count_x := 17
+	var count_z := 13
+	var world_seed := 1337
+	var region_size_m: float = TerrainSettingsScript.REGION_SIZE_M
+	var prepared: Dictionary = provider.native_prepared_height_grid_request(
+		origin_x,
+		origin_z,
+		step_m,
+		count_x,
+		count_z,
+		world_seed,
+		region_size_m
+	)
+	if prepared.get("status", "fail") != "pass":
+		errors.append("provider_prepared:%s" % str(prepared))
+		return
+	var result: Dictionary = backend.compute_prepared_provider_height_page(
+		prepared,
+		origin_x,
+		origin_z,
+		step_m,
+		count_x,
+		count_z,
+		world_seed,
+		region_size_m
+	)
+	if result.get("status", "fail") != "pass":
+		errors.append("provider_compute:%s" % str(result))
+		return
+	var expected: PackedFloat32Array = provider.sample_height_grid(
+		origin_x,
+		origin_z,
+		step_m,
+		count_x,
+		count_z,
+		world_seed,
+		region_size_m
+	)
+	var comparison: Dictionary = backend.compare_values_to_reference(result, expected)
+	if comparison.get("status", "fail") != "pass":
+		errors.append("provider_compare:%s" % str(comparison))
+		return
+	if float(comparison.get("max_delta_m", 999.0)) > MAX_PROVIDER_DELTA_M:
+		errors.append("provider_max_delta:%s" % str(comparison))
+	if float(comparison.get("mean_delta_m", 999.0)) > MAX_PROVIDER_MEAN_DELTA_M:
+		errors.append("provider_mean_delta:%s" % str(comparison))
