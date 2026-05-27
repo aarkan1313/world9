@@ -17,6 +17,7 @@ func _start() -> void:
 		return
 	_check_direct_rd_residency(errors)
 	_check_direct_rd_compute_normal_residency(errors)
+	_check_external_rd_height_texture_residency(errors)
 	_check_far_clipmap_rd_opt_in(errors)
 	_check_far_clipmap_height_only_worker_opt_in(errors)
 	if not errors.is_empty():
@@ -78,6 +79,37 @@ func _check_direct_rd_compute_normal_residency(errors: Array[String]) -> void:
 		errors.append("rd_compute_height_only_uploads:%s" % str(height_only_state))
 	if int(height_only_state.get("image_uploads", 0)) != 0:
 		errors.append("rd_compute_height_only_image_uploads:%s" % str(height_only_state))
+	residency.clear()
+
+
+func _check_external_rd_height_texture_residency(errors: Array[String]) -> void:
+	var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+	if rd == null:
+		errors.append("external_rd_height_no_device")
+		return
+	var descriptor: Dictionary = _external_rd_height_descriptor(rd, 16, 12.0)
+	if descriptor.get("status", "fail") != "pass":
+		errors.append("external_rd_height_descriptor:%s" % str(descriptor))
+		return
+	var residency = TerrainGpuPageResidencyScript.new()
+	residency.configure(2, true, true)
+	var entry: Dictionary = residency.get_or_create_textures("rd_external_height", descriptor)
+	if entry.get("status", "fail") != "pass":
+		errors.append("rd_external_height_failed:%s" % str(entry))
+		return
+	if str(entry.get("texture_backend", "")) != "rd":
+		errors.append("rd_external_height_backend:%s" % str(entry))
+	if str(entry.get("height_texture_mode", "")) != "rd_external":
+		errors.append("rd_external_height_mode:%s" % str(entry))
+	if str(entry.get("normal_texture_mode", "")) != "rd_compute":
+		errors.append("rd_external_height_normal_mode:%s" % str(entry))
+	var state: Dictionary = residency.debug_state()
+	if int(state.get("rd_uploads", 0)) != 1:
+		errors.append("rd_external_height_uploads:%s" % str(state))
+	if int(state.get("image_uploads", 0)) != 0:
+		errors.append("rd_external_height_image_uploads:%s" % str(state))
+	if int(state.get("rd_compute_normal_uploads", 0)) != 1:
+		errors.append("rd_external_height_compute_uploads:%s" % str(state))
 	residency.clear()
 
 
@@ -217,5 +249,37 @@ func _height_only_descriptor(count: int, base_height: float) -> Dictionary:
 		"spacing_m": 4.0,
 		"height_image_data": height_data,
 		"height_image": Image.create_from_data(count, count, false, Image.FORMAT_RF, height_data),
+		"height_image_only": true,
+	}
+
+
+func _external_rd_height_descriptor(rd: RenderingDevice, count: int, base_height: float) -> Dictionary:
+	var height_data := PackedByteArray()
+	height_data.resize(count * count * 4)
+	for index in range(count * count):
+		height_data.encode_float(index * 4, base_height + float(index) * 0.125)
+	var format := RDTextureFormat.new()
+	format.width = count
+	format.height = count
+	format.depth = 1
+	format.array_layers = 1
+	format.mipmaps = 1
+	format.format = RenderingDevice.DATA_FORMAT_R32_SFLOAT
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	format.usage_bits = (
+		RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+		| RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	)
+	var height_rid: RID = rd.texture_create(format, RDTextureView.new(), [height_data])
+	if not height_rid.is_valid():
+		return {"status": "fail", "error": "external_height_texture_create_failed"}
+	return {
+		"status": "pass",
+		"vertices_per_side": count,
+		"spacing_m": 4.0,
+		"height_texture_rid": height_rid,
+		"height_texture_owned_by_residency": true,
+		"height_bytes": height_data.size(),
 		"height_image_only": true,
 	}

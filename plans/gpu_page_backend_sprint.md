@@ -126,6 +126,13 @@ The current durable direction is persistent terrain pages:
   `worldgen9.gpu_provider_page_descriptor.v1` descriptor so the later
   renderer-device/no-readback path can consume the same validated params,
   entry bytes, and kernel bytes without changing terrain math.
+- Extended `TerrainGpuPageResidency` so it can accept an externally supplied
+  main-renderer-device `R32F` height texture RID, wrap it as `Texture2DRD`,
+  compute the normal texture on the same renderer device, and own/free the RID
+  through the existing bounded page residency lifecycle.
+- The RD residency gate now validates the no-readback handoff shape required by
+  live GPU height generation: a GPU-produced height texture can enter the page
+  cache without CPU `Image` wrappers or ImageTexture uploads.
 
 ## Important Constraint
 
@@ -147,6 +154,7 @@ height page bytes + page metadata
   -> TerrainPageTextureBackend
     -> ImageTexture fallback
     -> bounded Texture2DRD residency
+    -> externally supplied renderer-device height texture residency
     -> opt-in main RenderingDevice compute-to-texture normal path
   -> existing page residency/material commit contract
 ```
@@ -167,6 +175,8 @@ Acceptance for the next slice:
   the direct-RD path is promoted into `walk_review`
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
+- renderer-device height texture ownership is explicit; externally supplied page
+  RIDs must declare whether residency owns cleanup
 
 ## Not Done Yet
 
@@ -175,6 +185,8 @@ Acceptance for the next slice:
 - GPU page generation from DEM/provider facts.
 - Full live walk scene height generation on GPU compute.
 - Live streaming integration of the prepared-provider GPU page path.
+- Main-renderer-device provider-page compute dispatch that writes directly to
+  the externally supplied/owned height texture descriptor path.
 - Pass/corridor facts, hydrology facts, erosion facts, and any final provider
   branches beyond the macro-height/page-profile/kernel/provider-page proof.
 - Re-promoting corridor tour as an acceptance gate.

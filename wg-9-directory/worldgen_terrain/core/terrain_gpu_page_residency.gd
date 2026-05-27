@@ -124,7 +124,9 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 		return {"status": "fail", "error": "rd_side:%d" % side}
 	var height_data: PackedByteArray = descriptor.get("height_image_data", PackedByteArray()) as PackedByteArray
 	var normal_data: PackedByteArray = descriptor.get("normal_image_data", PackedByteArray()) as PackedByteArray
-	if height_data.size() != side * side * 4:
+	var supplied_height_rid: RID = descriptor.get("height_texture_rid", RID()) as RID
+	var has_supplied_height_rid := supplied_height_rid.is_valid()
+	if not has_supplied_height_rid and height_data.size() != side * side * 4:
 		return {"status": "fail", "error": "rd_missing_preencoded_data"}
 	if not use_rd_compute_normals and normal_data.size() != side * side * 12:
 		return {"status": "fail", "error": "rd_missing_preencoded_data"}
@@ -139,11 +141,16 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 	)
 	if use_rd_compute_normals:
 		texture_usage |= RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
-	var height_rid: RID = _create_rd_texture(rd, side, RenderingDevice.DATA_FORMAT_R32_SFLOAT, height_data, texture_usage)
+	var height_rid: RID = supplied_height_rid
+	var height_texture_mode := "rd_external" if has_supplied_height_rid else "preencoded"
+	var height_texture_owned_by_residency := bool(descriptor.get("height_texture_owned_by_residency", false))
+	if not has_supplied_height_rid:
+		height_rid = _create_rd_texture(rd, side, RenderingDevice.DATA_FORMAT_R32_SFLOAT, height_data, texture_usage)
+		height_texture_owned_by_residency = true
 	var normal_result: Dictionary = _create_rd_normal_texture(rd, side, descriptor, height_rid, normal_data)
 	var normal_rid: RID = normal_result.get("normal_rid", RID()) as RID
 	if not height_rid.is_valid() or not normal_rid.is_valid():
-		if height_rid.is_valid():
+		if height_rid.is_valid() and height_texture_owned_by_residency:
 			rd.free_rid(height_rid)
 		if normal_rid.is_valid():
 			rd.free_rid(normal_rid)
@@ -165,11 +172,13 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 		"height_texture_rid": height_rid,
 		"normal_texture_rid": normal_rid,
 		"normal_compute_uniform_set": normal_result.get("uniform_set", RID()),
-		"height_bytes": height_data.size(),
+		"height_texture_owned_by_residency": height_texture_owned_by_residency,
+		"height_bytes": int(descriptor.get("height_bytes", side * side * 4)) if has_supplied_height_rid else height_data.size(),
 		"normal_bytes": int(normal_result.get("normal_bytes", normal_data.size())),
 		"width": side,
 		"height": side,
 		"texture_backend": "rd",
+		"height_texture_mode": height_texture_mode,
 		"normal_texture_mode": str(normal_result.get("mode", "preencoded")),
 	}
 
@@ -491,7 +500,7 @@ func _release_page_resources(cache_key: String, allow_pool: bool) -> void:
 				normal_texture.set("texture_rd_rid", RID())
 			if uniform_set.is_valid():
 				rd.free_rid(uniform_set)
-			if height_rid.is_valid():
+			if height_rid.is_valid() and bool(entry.get("height_texture_owned_by_residency", true)):
 				rd.free_rid(height_rid)
 			if normal_rid.is_valid():
 				rd.free_rid(normal_rid)
