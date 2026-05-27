@@ -70,6 +70,10 @@ The current durable direction is persistent terrain pages:
   available, sync commits and native workers now use RF height bytes only and
   skip CPU/native RGBF normal-byte generation. The old RF/RGBF payload stays as
   the fallback when RD compute is not available.
+- Direct-RD page descriptors now avoid constructing CPU `Image` wrappers when
+  raw RF/RGBF bytes can be handed directly to `Texture2DRD`; fallback
+  ImageTexture descriptors are still built on demand if direct RD cannot be
+  used.
 
 ## Important Constraint
 

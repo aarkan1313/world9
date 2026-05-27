@@ -1406,9 +1406,15 @@ func _worker_request_matches_origin(level: int, request: Dictionary, origin: Vec
 
 
 func _can_use_height_only_gpu_page_payload() -> bool:
+	if not _can_use_direct_rd_page_textures():
+		return false
+	return use_gpu_rd_compute_normals
+
+
+func _can_use_direct_rd_page_textures() -> bool:
 	if not use_persistent_page_mesh:
 		return false
-	if not use_gpu_rd_page_textures or not use_gpu_rd_compute_normals:
+	if not use_gpu_rd_page_textures:
 		return false
 	if not ClassDB.class_exists("Texture2DRD") or not RenderingServer.has_method("get_rendering_device"):
 		return false
@@ -1842,11 +1848,14 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 				expected_normal_bytes,
 			],
 		}
-	var height_image: Image = Image.create_from_data(side, side, false, Image.FORMAT_RF, height_data)
+	var can_use_direct_rd: bool = _can_use_direct_rd_page_textures()
+	var height_image: Image = null
 	var normal_image: Image = null
-	if normal_data.size() == expected_normal_bytes:
+	if not can_use_direct_rd:
+		height_image = Image.create_from_data(side, side, false, Image.FORMAT_RF, height_data)
+	if not can_use_direct_rd and normal_data.size() == expected_normal_bytes:
 		normal_image = Image.create_from_data(side, side, false, Image.FORMAT_RGBF, normal_data)
-	if height_image == null or (normal_data_required and normal_image == null):
+	if not can_use_direct_rd and (height_image == null or (normal_data_required and normal_image == null)):
 		return {"status": "fail", "error": "preencoded_image_create_failed"}
 	var height_min: float = float(heightfield.get("height_min_m", 0.0))
 	var height_max: float = float(heightfield.get("height_max_m", height_min))
@@ -1863,12 +1872,13 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 		"height_min_m": height_min,
 		"height_max_m": height_max,
 		"height_range_m": max(0.0, height_max - height_min),
-		"height_image": height_image,
 		"normal_values": heightfield.get("normals", PackedVector3Array()) as PackedVector3Array,
 		"cache_key": str(heightfield.get("cache_key", "")),
 		"texture_payload_mode": str(heightfield.get("texture_payload_mode", "")),
 		"height_image_data": height_data,
 	}
+	if height_image != null:
+		descriptor["height_image"] = height_image
 	if normal_image != null:
 		descriptor["normal_image"] = normal_image
 	if normal_data.size() == expected_normal_bytes:

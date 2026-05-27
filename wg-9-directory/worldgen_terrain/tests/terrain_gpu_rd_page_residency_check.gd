@@ -119,6 +119,10 @@ func _check_far_clipmap_rd_opt_in(errors: Array[String]) -> void:
 			errors.append("clipmap_sync_height_only_missing:%s" % str(heightfield.keys()))
 		if heightfield.has("normal_image_data"):
 			errors.append("clipmap_sync_normal_bytes_present")
+	for descriptor_value in node.level_material_descriptors:
+		var descriptor: Dictionary = descriptor_value as Dictionary
+		if descriptor.has("height_image") or descriptor.has("normal_image"):
+			errors.append("clipmap_sync_cpu_images_present:%s" % str(descriptor.keys()))
 	node.clear_levels(true)
 	node.queue_free()
 
@@ -172,6 +176,10 @@ func _check_far_clipmap_height_only_worker_opt_in(errors: Array[String]) -> void
 			errors.append("height_only_flag_missing:%s" % str(heightfield.keys()))
 		if heightfield.has("normal_image_data"):
 			errors.append("height_only_normal_bytes_present")
+	for descriptor_value in node.level_material_descriptors:
+		var descriptor: Dictionary = descriptor_value as Dictionary
+		if descriptor.has("height_image") or descriptor.has("normal_image"):
+			errors.append("height_only_cpu_images_present:%s" % str(descriptor.keys()))
 	node.clear_levels(true)
 	node.queue_free()
 
