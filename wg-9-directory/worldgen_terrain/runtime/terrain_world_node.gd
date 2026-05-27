@@ -22,6 +22,7 @@ const HydrologyTileCacheScript := preload("res://worldgen_terrain/hydrology/hydr
 @export var use_native_chunk_payloads: bool = false
 @export var use_native_chunk_workers: bool = false
 @export_range(1, 8, 1) var max_native_chunk_workers: int = 2
+@export_range(1, 16, 1) var max_native_chunk_worker_results_per_update: int = 1
 @export var use_lod_mesh_density: bool = false
 @export var use_mesh_skirts: bool = false
 @export var mesh_skirt_depth_m: float = 50.0
@@ -62,6 +63,8 @@ var _max_recent_build_samples: int = 64
 var _native_chunk_workers: Dictionary = {}
 var _native_worker_requests: Dictionary = {}
 var _native_worker_queue: Array[Dictionary] = []
+var _native_worker_results_applied_this_update: int = 0
+var _last_native_worker_results_applied: int = 0
 
 
 func _ready() -> void:
@@ -97,6 +100,8 @@ func setup_world(mode: String = TerrainWorldScript.PROVIDER_PROCEDURAL, p_seed: 
 
 func update_viewer(position_xz: Vector2) -> Dictionary:
 	TerrainNativeChunkPayloadWorkerScript.cleanup_detached_workers()
+	_native_worker_results_applied_this_update = 0
+	_last_native_worker_results_applied = 0
 	if world == null:
 		if not setup_world(provider_mode, seed):
 			return {"status": "fail", "errors": errors}
@@ -325,6 +330,8 @@ func build_stats() -> Dictionary:
 		"cpu_chunk_payload_count": _cpu_chunk_payload_count,
 		"active_native_workers": _native_chunk_workers.size(),
 		"queued_native_worker_builds": _native_worker_queue.size(),
+		"last_native_worker_results_applied": _last_native_worker_results_applied,
+		"max_native_chunk_worker_results_per_update": max_native_chunk_worker_results_per_update,
 		"avg_recent_chunk_build_ms": float(total_recent) / float(max(1, recent_count)),
 		"max_recent_chunk_build_ms": max_recent,
 	}
@@ -525,8 +532,11 @@ func _pump_native_worker_queue() -> void:
 
 
 func _poll_native_chunk_workers() -> void:
+	var result_budget: int = max(1, max_native_chunk_worker_results_per_update)
 	var keys: Array = _native_chunk_workers.keys()
 	for key_value in keys:
+		if _native_worker_results_applied_this_update >= result_budget:
+			break
 		var key: String = str(key_value)
 		var worker: RefCounted = _native_chunk_workers[key] as RefCounted
 		if not worker.is_done():
@@ -567,6 +577,8 @@ func _poll_native_chunk_workers() -> void:
 			payload = _build_cpu_chunk_payload_from_request(request)
 			build_ms = Time.get_ticks_msec() - fallback_start_ms
 		_assign_chunk_payload(key, payload, build_ms)
+		_native_worker_results_applied_this_update += 1
+		_last_native_worker_results_applied = _native_worker_results_applied_this_update
 	_prune_native_worker_queue()
 	_pump_native_worker_queue()
 

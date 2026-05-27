@@ -31,6 +31,7 @@ const TerrainGpuProviderPageTextureBackendScript := preload("res://worldgen_terr
 @export var use_gpu_rd_compute_normals: bool = false
 @export var use_gpu_provider_page_textures: bool = false
 @export_range(1, 16, 1) var gpu_provider_max_sync_blocks: int = 1
+@export_range(1, 8, 1) var max_staged_payload_commits_per_update: int = 1
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export_range(1, 4, 1) var max_profile_fallback_rebuild_levels_per_update: int = 1
@@ -89,6 +90,9 @@ var last_gpu_page_texture_residency_ms: int = 0
 var max_gpu_page_texture_residency_ms: int = 0
 var last_gpu_provider_material_ms: int = 0
 var last_gpu_provider_mesh_ms: int = 0
+var last_staged_payload_commits: int = 0
+var last_staged_payload_commit_ms: int = 0
+var max_staged_payload_commit_ms: int = 0
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
 var _native_backend: Object
@@ -96,6 +100,7 @@ var _native_workers: Dictionary = {}
 var _native_worker_requests: Dictionary = {}
 var _staged_native_payloads: Dictionary = {}
 var _staged_native_origin := Vector2(INF, INF)
+var _staged_native_commit_ready: bool = false
 var _gray_shader_opaque: Shader
 var _gray_shader_fade: Shader
 var _surface_texture_shader_opaque: Shader
@@ -194,9 +199,13 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	max_gpu_page_texture_residency_ms = 0
 	last_gpu_provider_material_ms = 0
 	last_gpu_provider_mesh_ms = 0
+	last_staged_payload_commits = 0
+	last_staged_payload_commit_ms = 0
+	max_staged_payload_commit_ms = 0
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
+	_staged_native_commit_ready = false
 	if _page_cache != null:
 		_page_cache.clear()
 	if _page_texture_backend != null:
@@ -318,6 +327,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_gpu_page_texture_residency_ms = 0
 	last_gpu_provider_material_ms = 0
 	last_gpu_provider_mesh_ms = 0
+	last_staged_payload_commits = 0
+	last_staged_payload_commit_ms = 0
 	var shared_origin := _shared_origin(viewer_xz)
 	var profile_blocks_far_refresh := _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds
 	if profile_blocks_far_refresh and is_finite(_pending_origin.x) and is_finite(_pending_origin.y):
@@ -412,6 +423,10 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"max_gpu_page_texture_residency_ms": max_gpu_page_texture_residency_ms,
 		"last_gpu_provider_material_ms": last_gpu_provider_material_ms,
 		"last_gpu_provider_mesh_ms": last_gpu_provider_mesh_ms,
+		"last_staged_payload_commits": last_staged_payload_commits,
+		"last_staged_payload_commit_ms": last_staged_payload_commit_ms,
+		"max_staged_payload_commit_ms": max_staged_payload_commit_ms,
+		"staged_native_commit_ready": _staged_native_commit_ready,
 	}
 
 
@@ -462,6 +477,10 @@ func stats() -> Dictionary:
 		"max_gpu_page_texture_residency_ms": max_gpu_page_texture_residency_ms,
 		"last_gpu_provider_material_ms": last_gpu_provider_material_ms,
 		"last_gpu_provider_mesh_ms": last_gpu_provider_mesh_ms,
+		"last_staged_payload_commits": last_staged_payload_commits,
+		"last_staged_payload_commit_ms": last_staged_payload_commit_ms,
+		"max_staged_payload_commit_ms": max_staged_payload_commit_ms,
+		"staged_native_commit_ready": _staged_native_commit_ready,
 	}
 
 
@@ -474,6 +493,7 @@ func invalidate_pages_for_profile_change() -> void:
 	if _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds:
 		_staged_native_payloads.clear()
 		_staged_native_origin = Vector2(INF, INF)
+		_staged_native_commit_ready = false
 		last_page_error = "profile_native_backend_required"
 		pending_rebuild_count = 0
 		return
@@ -482,6 +502,7 @@ func invalidate_pages_for_profile_change() -> void:
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
+	_staged_native_commit_ready = false
 	if _page_cache != null:
 		_page_cache.clear()
 	if _page_texture_backend != null:
@@ -1488,6 +1509,7 @@ func _clear_native_workers(wait_for_running: bool = false) -> void:
 	_native_worker_requests.clear()
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
+	_staged_native_commit_ready = false
 	active_worker_count = 0
 
 
@@ -1657,6 +1679,7 @@ func _clear_staged_payloads_for_other_origin(origin: Vector2) -> void:
 		return
 	_staged_native_payloads.clear()
 	_staged_native_origin = origin
+	_staged_native_commit_ready = false
 
 
 func _staged_payload_matches_pending(level: int) -> bool:
@@ -1667,16 +1690,32 @@ func _staged_payload_matches_pending(level: int) -> bool:
 
 func _commit_staged_payloads_if_ready() -> void:
 	if _staged_native_origin != _pending_origin:
+		_staged_native_commit_ready = false
 		return
-	if _staged_native_payloads.size() < level_nodes.size():
-		return
-	for level in range(level_nodes.size()):
-		if not _staged_native_payloads.has(level):
+	if not _staged_native_commit_ready:
+		if _staged_native_payloads.size() < level_nodes.size():
 			return
+		for level in range(level_nodes.size()):
+			if not _staged_native_payloads.has(level):
+				return
+		_staged_native_commit_ready = true
+	var commit_start_ms: int = Time.get_ticks_msec()
+	var commit_budget: int = max(1, max_staged_payload_commits_per_update)
+	var committed_count := 0
 	for level in range(level_nodes.size()):
+		if committed_count >= commit_budget:
+			break
+		if not _staged_native_payloads.has(level):
+			continue
 		_assign_level_payload(_staged_native_payloads[level] as Dictionary, use_persistent_page_mesh)
-	_staged_native_payloads.clear()
-	_staged_native_origin = _pending_origin
+		_staged_native_payloads.erase(level)
+		committed_count += 1
+	last_staged_payload_commits = committed_count
+	last_staged_payload_commit_ms = Time.get_ticks_msec() - commit_start_ms
+	max_staged_payload_commit_ms = max(max_staged_payload_commit_ms, last_staged_payload_commit_ms)
+	if _staged_native_payloads.is_empty():
+		_staged_native_commit_ready = false
+		_staged_native_origin = _pending_origin
 
 
 func _clipmap_indices(side: int, spacing: float, outer_extent: float, inner_extent: float) -> PackedInt32Array:

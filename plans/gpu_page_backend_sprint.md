@@ -187,6 +187,15 @@ The current durable direction is persistent terrain pages:
   provider dispatch remains covered by the isolated provider backend gate and
   should be re-promoted only after descriptor staging/prefetch removes the
   visible recenter hitch.
+- Async staged far-page payloads now commit through
+  `max_staged_payload_commits_per_update` instead of swapping every staged
+  clipmap level in one update. The hitch profiler records staged commit count
+  and staged commit time so frame-pacing regressions are visible without
+  lowering terrain quality.
+- Native near-chunk worker completions are now paced through
+  `max_native_chunk_worker_results_per_update`. The focused hitch profiler
+  records per-frame terrain build deltas and worker-result commits so near
+  chunk completion bursts are visible separately from far-page GPU work.
 
 ## Important Constraint
 
@@ -253,6 +262,11 @@ Acceptance for the next slice:
 - the provider-texture path must not build a CPU `height_samples` array before
   dispatching the GPU texture except when falling back from an unavailable or
   failed GPU path
+- staged async far-page commits must stay budgeted so direct-RD texture/normal
+  uploads do not land as one all-level recenter burst
+- native near-chunk worker result application must stay budgeted separately
+  from worker count; worker parallelism may stay high without applying every
+  completed chunk mesh in one movement frame
 
 ## Not Done Yet
 

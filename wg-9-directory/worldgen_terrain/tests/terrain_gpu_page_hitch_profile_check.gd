@@ -12,6 +12,7 @@ const MAX_HARD_STEP_MS := 220
 const MAX_GPU_PROVIDER_PAGE_MS := 180
 const MAX_GPU_TEXTURE_RESIDENCY_MS := 180
 const MAX_METADATA_COMMITS_PER_FRAME := 1
+const MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME := 1
 
 
 func _init() -> void:
@@ -121,12 +122,23 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 	var max_provider_page_ms := 0
 	var max_texture_residency_ms := 0
 	var max_metadata_commits_per_frame := 0
+	var max_staged_payload_commits_per_frame := 0
+	var max_staged_payload_commit_ms := 0
+	var total_staged_payload_commits := 0
+	var max_terrain_last_chunk_build_ms := 0
+	var max_terrain_native_worker_elapsed_ms := 0
+	var max_terrain_active_native_workers := 0
+	var max_terrain_queued_native_worker_builds := 0
+	var max_terrain_build_delta := 0
+	var max_terrain_native_worker_results_applied := 0
 	var total_metadata_commits := 0
 	var total_provider_dispatches := 0
+	var total_terrain_build_delta := 0
 	var recenter_frames := 0
 	var commit_frames := 0
 	var previous_build_counts: Array = _far_build_counts(scene)
 	var previous_anchor: Vector2 = _far_anchor(scene)
+	var previous_terrain_builds: int = _terrain_total_builds(scene)
 	for frame_index in range(FRAME_COUNT):
 		var direction: Vector2 = _direction_for_frame(frame_index)
 		var frame_start_us: int = Time.get_ticks_usec()
@@ -142,21 +154,41 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 		await process_frame
 		var frame_ms: int = int((Time.get_ticks_usec() - frame_start_us + 500) / 1000)
 		var far_stats: Dictionary = _far_stats(scene)
+		var terrain_stats: Dictionary = _terrain_stats(scene)
 		var gpu_state: Dictionary = far_stats.get("gpu_page_residency", {}) as Dictionary
 		var build_counts: Array = _far_build_counts(scene)
 		var build_delta: int = _count_delta(previous_build_counts, build_counts)
 		var anchor: Vector2 = _far_anchor(scene)
 		var anchor_moved: bool = anchor.distance_to(previous_anchor) > 0.001
+		var terrain_total_builds: int = int(terrain_stats.get("total_chunk_builds", 0))
+		var terrain_build_delta: int = max(0, terrain_total_builds - previous_terrain_builds)
 		var metadata_commits: int = int(far_stats.get("last_gpu_provider_metadata_only_commits", 0))
+		var staged_payload_commits: int = int(far_stats.get("last_staged_payload_commits", 0))
 		var provider_ms: int = int(far_stats.get("last_gpu_provider_page_ms", 0))
 		var residency_ms: int = int(far_stats.get("last_gpu_page_texture_residency_ms", 0))
+		var staged_commit_ms: int = int(far_stats.get("last_staged_payload_commit_ms", 0))
+		var terrain_last_chunk_build_ms: int = int(terrain_stats.get("last_chunk_build_ms", 0))
+		var terrain_native_worker_elapsed_ms: int = int(terrain_stats.get("last_native_worker_elapsed_ms", 0))
+		var terrain_active_native_workers: int = int(terrain_stats.get("active_native_workers", 0))
+		var terrain_queued_native_worker_builds: int = int(terrain_stats.get("queued_native_worker_builds", 0))
+		var terrain_native_worker_results_applied: int = int(terrain_stats.get("last_native_worker_results_applied", 0))
 		step_ms_values.append(step_ms)
 		frame_ms_values.append(frame_ms)
 		max_provider_page_ms = max(max_provider_page_ms, provider_ms)
 		max_texture_residency_ms = max(max_texture_residency_ms, residency_ms)
 		max_metadata_commits_per_frame = max(max_metadata_commits_per_frame, metadata_commits)
+		max_staged_payload_commits_per_frame = max(max_staged_payload_commits_per_frame, staged_payload_commits)
+		max_staged_payload_commit_ms = max(max_staged_payload_commit_ms, staged_commit_ms)
+		max_terrain_last_chunk_build_ms = max(max_terrain_last_chunk_build_ms, terrain_last_chunk_build_ms)
+		max_terrain_native_worker_elapsed_ms = max(max_terrain_native_worker_elapsed_ms, terrain_native_worker_elapsed_ms)
+		max_terrain_active_native_workers = max(max_terrain_active_native_workers, terrain_active_native_workers)
+		max_terrain_queued_native_worker_builds = max(max_terrain_queued_native_worker_builds, terrain_queued_native_worker_builds)
+		max_terrain_build_delta = max(max_terrain_build_delta, terrain_build_delta)
+		max_terrain_native_worker_results_applied = max(max_terrain_native_worker_results_applied, terrain_native_worker_results_applied)
 		total_metadata_commits += metadata_commits
+		total_staged_payload_commits += staged_payload_commits
 		total_provider_dispatches += int(far_stats.get("last_gpu_provider_page_dispatches", 0))
+		total_terrain_build_delta += terrain_build_delta
 		if anchor_moved or build_delta > 0:
 			recenter_frames += 1
 		if metadata_commits > 0:
@@ -171,6 +203,9 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 			"far_rebuild_delta": build_delta,
 			"anchor_moved": anchor_moved,
 			"metadata_only_commits": metadata_commits,
+			"staged_payload_commits": staged_payload_commits,
+			"staged_payload_commit_ms": staged_commit_ms,
+			"staged_payload_commit_ready": bool(far_stats.get("staged_native_commit_ready", false)),
 			"provider_dispatches": int(far_stats.get("last_gpu_provider_page_dispatches", 0)),
 			"gpu_provider_page_ms": provider_ms,
 			"gpu_provider_texture_ms": int(far_stats.get("last_gpu_provider_texture_ms", 0)),
@@ -181,9 +216,18 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 			"image_uploads": int(gpu_state.get("image_uploads", 0)),
 			"rd_normal_uploads": int(gpu_state.get("rd_compute_normal_uploads", 0)),
 			"page_count": int(gpu_state.get("count", 0)),
+			"terrain_build_delta": terrain_build_delta,
+			"terrain_last_chunk_build_ms": terrain_last_chunk_build_ms,
+			"terrain_last_native_worker_elapsed_ms": terrain_native_worker_elapsed_ms,
+			"terrain_active_native_workers": terrain_active_native_workers,
+			"terrain_queued_native_worker_builds": terrain_queued_native_worker_builds,
+			"terrain_native_worker_results_applied": terrain_native_worker_results_applied,
+			"terrain_recent_build_count": int(terrain_stats.get("recent_build_count", 0)),
+			"terrain_max_recent_chunk_build_ms": int(terrain_stats.get("max_recent_chunk_build_ms", 0)),
 		})
 		previous_build_counts = build_counts
 		previous_anchor = anchor
+		previous_terrain_builds = terrain_total_builds
 
 	var final_far_stats: Dictionary = _far_stats(scene)
 	var final_gpu_state: Dictionary = final_far_stats.get("gpu_page_residency", {}) as Dictionary
@@ -193,8 +237,18 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 		"recenter_frames": recenter_frames,
 		"commit_frames": commit_frames,
 		"total_metadata_only_commits": total_metadata_commits,
+		"total_staged_payload_commits": total_staged_payload_commits,
 		"total_provider_dispatches": total_provider_dispatches,
 		"max_metadata_commits_per_frame": max_metadata_commits_per_frame,
+		"max_staged_payload_commits_per_frame": max_staged_payload_commits_per_frame,
+		"max_staged_payload_commit_ms": max_staged_payload_commit_ms,
+		"total_terrain_build_delta": total_terrain_build_delta,
+		"max_terrain_build_delta": max_terrain_build_delta,
+		"max_terrain_last_chunk_build_ms": max_terrain_last_chunk_build_ms,
+		"max_terrain_native_worker_elapsed_ms": max_terrain_native_worker_elapsed_ms,
+		"max_terrain_active_native_workers": max_terrain_active_native_workers,
+		"max_terrain_queued_native_worker_builds": max_terrain_queued_native_worker_builds,
+		"max_terrain_native_worker_results_applied": max_terrain_native_worker_results_applied,
 		"max_gpu_provider_page_ms": max_provider_page_ms,
 		"max_gpu_texture_residency_ms": max_texture_residency_ms,
 		"final_gpu_page_residency": final_gpu_state,
@@ -215,6 +269,7 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 			"max_gpu_provider_page_ms": MAX_GPU_PROVIDER_PAGE_MS,
 			"max_gpu_texture_residency_ms": MAX_GPU_TEXTURE_RESIDENCY_MS,
 			"max_metadata_commits_per_frame": MAX_METADATA_COMMITS_PER_FRAME,
+			"max_staged_payload_commits_per_frame": MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME,
 		},
 		"summary": summary,
 		"frames": frames,
@@ -245,6 +300,8 @@ func _validate_profile(summary: Dictionary, errors: Array[String]) -> void:
 		errors.append("gpu_texture_residency_ms:%d limit:%d" % [int(summary.get("max_gpu_texture_residency_ms", 0)), MAX_GPU_TEXTURE_RESIDENCY_MS])
 	if int(summary.get("max_metadata_commits_per_frame", 0)) > MAX_METADATA_COMMITS_PER_FRAME:
 		errors.append("metadata_commits_per_frame:%d limit:%d" % [int(summary.get("max_metadata_commits_per_frame", 0)), MAX_METADATA_COMMITS_PER_FRAME])
+	if int(summary.get("max_staged_payload_commits_per_frame", 0)) > MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME:
+		errors.append("staged_payload_commits_per_frame:%d limit:%d" % [int(summary.get("max_staged_payload_commits_per_frame", 0)), MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME])
 	if int(summary.get("recenter_frames", 0)) <= 0:
 		errors.append("no_recenter_frames")
 	if int(final_gpu_state.get("image_uploads", 0)) != 0:
@@ -258,6 +315,17 @@ func _far_stats(scene: Node3D) -> Dictionary:
 	if far_clipmap == null or not far_clipmap.has_method("stats"):
 		return {}
 	return far_clipmap.call("stats") as Dictionary
+
+
+func _terrain_stats(scene: Node3D) -> Dictionary:
+	var terrain_node: Node = scene.get("terrain") as Node
+	if terrain_node == null or not terrain_node.has_method("build_stats"):
+		return {}
+	return terrain_node.call("build_stats") as Dictionary
+
+
+func _terrain_total_builds(scene: Node3D) -> int:
+	return int(_terrain_stats(scene).get("total_chunk_builds", 0))
 
 
 func _far_build_counts(scene: Node3D) -> Array:
