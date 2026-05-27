@@ -20,6 +20,8 @@ The current durable direction is persistent terrain pages:
 - Added `--suite gpu` to `tools/godot_runtime_gate.py`.
 - The GPU suite runs renderer-enabled, not headless.
 - The headless path reports missing `RenderingDevice` as unsupported instead of failing.
+- Added `TerrainGpuPageNormalBackend` with persistent local `RenderingDevice` state and cached shader/pipeline RIDs.
+- Added an opt-in far-clipmap integration flag, `use_gpu_page_normal_backend`, for GPU-generated RGBF normal bytes in sync/fallback page commits.
 - Renderer-enabled proof currently passes on D3D12 / RTX 5090 Laptop GPU.
 - The probe validates:
   - storage-buffer dispatch
@@ -27,6 +29,10 @@ The current durable direction is persistent terrain pages:
   - terrain-style height-page normal encoding
   - RGBF byte layout compatible with the existing far page texture payload path
   - CPU parity within `0.0001`
+- The backend gate validates:
+  - repeated page-normal dispatch through one compiled pipeline
+  - same-size RGBF output byte layout
+  - opt-in far-clipmap consumption of GPU-generated normal page data
 
 ## Important Constraint
 

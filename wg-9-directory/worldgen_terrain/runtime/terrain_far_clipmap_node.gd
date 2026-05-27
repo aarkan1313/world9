@@ -7,6 +7,7 @@ const TerrainFarClipmapPayloadWorkerScript := preload("res://worldgen_terrain/me
 const TerrainPageRequestScript := preload("res://worldgen_terrain/core/terrain_page_request.gd")
 const TerrainPageCacheScript := preload("res://worldgen_terrain/core/terrain_page_cache.gd")
 const TerrainGpuPageResidencyScript := preload("res://worldgen_terrain/core/terrain_gpu_page_residency.gd")
+const TerrainGpuPageNormalBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_page_normal_backend.gd")
 
 @export var level_count: int = 3
 @export var vertices_per_side: int = 129
@@ -24,6 +25,7 @@ const TerrainGpuPageResidencyScript := preload("res://worldgen_terrain/core/terr
 @export var use_persistent_page_mesh: bool = false
 @export_range(0, 256, 1) var page_cache_max_pages: int = 48
 @export_range(0, 256, 1) var gpu_page_residency_max_pages: int = 48
+@export var use_gpu_page_normal_backend: bool = false
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export_range(1, 4, 1) var max_profile_fallback_rebuild_levels_per_update: int = 1
@@ -66,6 +68,8 @@ var last_page_material_reused: bool = false
 var last_page_descriptor_image_builds: int = 0
 var last_page_descriptor_texture_hits: int = 0
 var last_page_descriptor_preencoded_hits: int = 0
+var last_gpu_page_normal_dispatches: int = 0
+var last_gpu_page_normal_error: String = ""
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
 var _native_backend: Object
@@ -80,10 +84,12 @@ var _surface_texture_shader_fade: Shader
 var _page_height_shader: Shader
 var _page_cache: RefCounted
 var _gpu_page_residency: RefCounted
+var _gpu_page_normal_backend: RefCounted
 
 
 func _exit_tree() -> void:
 	_clear_native_workers(true)
+	_shutdown_gpu_page_normal_backend()
 	TerrainFarClipmapPayloadWorkerScript.cleanup_detached_workers(0, true, 5000)
 
 
@@ -151,6 +157,8 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	last_page_descriptor_image_builds = 0
 	last_page_descriptor_texture_hits = 0
 	last_page_descriptor_preencoded_hits = 0
+	last_gpu_page_normal_dispatches = 0
+	last_gpu_page_normal_error = ""
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
@@ -158,6 +166,7 @@ func clear_levels(wait_for_running: bool = false) -> void:
 		_page_cache.clear()
 	if _gpu_page_residency != null:
 		_gpu_page_residency.clear()
+	_shutdown_gpu_page_normal_backend()
 
 
 func clear_async_state_for_review(wait_for_running: bool = false) -> void:
@@ -262,6 +271,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_page_descriptor_image_builds = 0
 	last_page_descriptor_texture_hits = 0
 	last_page_descriptor_preencoded_hits = 0
+	last_gpu_page_normal_dispatches = 0
+	last_gpu_page_normal_error = ""
 	var shared_origin := _shared_origin(viewer_xz)
 	var profile_blocks_far_refresh := _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds
 	if profile_blocks_far_refresh and is_finite(_pending_origin.x) and is_finite(_pending_origin.y):
@@ -339,6 +350,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_page_descriptor_image_builds": last_page_descriptor_image_builds,
 		"last_page_descriptor_texture_hits": last_page_descriptor_texture_hits,
 		"last_page_descriptor_preencoded_hits": last_page_descriptor_preencoded_hits,
+		"last_gpu_page_normal_dispatches": last_gpu_page_normal_dispatches,
+		"last_gpu_page_normal_error": last_gpu_page_normal_error,
 	}
 
 
@@ -371,6 +384,8 @@ func stats() -> Dictionary:
 		"last_page_descriptor_image_builds": last_page_descriptor_image_builds,
 		"last_page_descriptor_texture_hits": last_page_descriptor_texture_hits,
 		"last_page_descriptor_preencoded_hits": last_page_descriptor_preencoded_hits,
+		"last_gpu_page_normal_dispatches": last_gpu_page_normal_dispatches,
+		"last_gpu_page_normal_error": last_gpu_page_normal_error,
 	}
 
 
@@ -500,11 +515,15 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
 	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var normals := PackedVector3Array()
-	normals.resize(side * side)
-	for z in range(side):
-		for x in range(side):
-			normals[z * side + x] = _normal_at(height, side, x, z, spacing)
+	var use_gpu_normals := use_gpu_page_normal_backend and use_persistent_page_mesh
+	if not use_gpu_normals:
+		normals = _normals_from_height(height, side, spacing)
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
+	if use_gpu_normals:
+		var gpu_normal_status: Dictionary = _attach_gpu_page_normal_data(heightfield, height, side, spacing)
+		if gpu_normal_status.get("status", "fail") != "pass":
+			normals = _normals_from_height(height, side, spacing)
+			heightfield["normals"] = normals
 	level_heightfields[level] = heightfield
 	level_surface_descriptors[level] = {}
 	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
@@ -557,16 +576,19 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
 	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var normals: PackedVector3Array = payload.get("normals", PackedVector3Array()) as PackedVector3Array
-	if normals.size() != side * side:
-		normals.resize(side * side)
-		for z in range(side):
-			for x in range(side):
-				normals[z * side + x] = _normal_at(height, side, x, z, spacing)
+	var payload_has_preencoded: bool = payload.has("height_image_data") and payload.has("normal_image_data")
+	if normals.size() != side * side and not (use_gpu_page_normal_backend and use_persistent_page_mesh and not payload_has_preencoded):
+		normals = _normals_from_height(height, side, spacing)
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
-	if payload.has("height_image_data") and payload.has("normal_image_data"):
+	if payload_has_preencoded:
 		heightfield["height_image_data"] = payload["height_image_data"] as PackedByteArray
 		heightfield["normal_image_data"] = payload["normal_image_data"] as PackedByteArray
 		heightfield["texture_payload_mode"] = str(payload.get("texture_payload_mode", ""))
+	elif use_gpu_page_normal_backend and use_persistent_page_mesh:
+		var gpu_normal_status: Dictionary = _attach_gpu_page_normal_data(heightfield, height, side, spacing)
+		if gpu_normal_status.get("status", "fail") != "pass" and normals.size() != side * side:
+			normals = _normals_from_height(height, side, spacing)
+			heightfield["normals"] = normals
 	level_heightfields[level] = heightfield
 	level_surface_descriptors[level] = {}
 	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
@@ -739,6 +761,18 @@ func _ensure_gpu_page_residency() -> void:
 	if _gpu_page_residency == null:
 		_gpu_page_residency = TerrainGpuPageResidencyScript.new()
 	_gpu_page_residency.configure(gpu_page_residency_max_pages)
+
+
+func _ensure_gpu_page_normal_backend() -> Dictionary:
+	if _gpu_page_normal_backend == null:
+		_gpu_page_normal_backend = TerrainGpuPageNormalBackendScript.new()
+	return _gpu_page_normal_backend.setup()
+
+
+func _shutdown_gpu_page_normal_backend() -> void:
+	if _gpu_page_normal_backend != null:
+		_gpu_page_normal_backend.shutdown()
+	_gpu_page_normal_backend = null
 
 
 func _protect_active_page_keys() -> void:
@@ -1623,6 +1657,42 @@ func _normal_at(height: PackedFloat32Array, side: int, x: int, z: int, spacing: 
 	var dx: float = (float(height[z * side + x1]) - float(height[z * side + x0])) / max(0.000001, float(x1 - x0) * spacing)
 	var dz: float = (float(height[z1 * side + x]) - float(height[z0 * side + x])) / max(0.000001, float(z1 - z0) * spacing)
 	return Vector3(-dx, 1.0, -dz).normalized()
+
+
+func _normals_from_height(height: PackedFloat32Array, side: int, spacing: float) -> PackedVector3Array:
+	var normals := PackedVector3Array()
+	normals.resize(side * side)
+	for z in range(side):
+		for x in range(side):
+			normals[z * side + x] = _normal_at(height, side, x, z, spacing)
+	return normals
+
+
+func _attach_gpu_page_normal_data(heightfield: Dictionary, height: PackedFloat32Array, side: int, spacing: float) -> Dictionary:
+	var setup_result: Dictionary = _ensure_gpu_page_normal_backend()
+	if setup_result.get("status", "fail") != "pass":
+		last_gpu_page_normal_error = str(setup_result.get("error", "setup_failed"))
+		return setup_result
+	var height_data: PackedByteArray = _height_image_data_from_height(height, side)
+	var result: Dictionary = _gpu_page_normal_backend.compute_normal_image_data_from_height_bytes(height_data, side, spacing) as Dictionary
+	if result.get("status", "fail") != "pass":
+		last_gpu_page_normal_error = str(result.get("error", "compute_failed"))
+		return result
+	heightfield["height_image_data"] = height_data
+	heightfield["normal_image_data"] = result["normal_image_data"] as PackedByteArray
+	heightfield["texture_payload_mode"] = "gpu_normal_backend"
+	last_gpu_page_normal_dispatches += 1
+	last_gpu_page_normal_error = ""
+	return {"status": "pass"}
+
+
+func _height_image_data_from_height(height: PackedFloat32Array, side: int) -> PackedByteArray:
+	var data := PackedByteArray()
+	data.resize(side * side * 4)
+	var limit: int = min(height.size(), side * side)
+	for index in range(limit):
+		data.encode_float(index * 4, float(height[index]))
+	return data
 
 
 func _heightfield_for_level(

@@ -1,6 +1,8 @@
 class_name TerrainGpuComputeProbe
 extends RefCounted
 
+const TerrainGpuPageNormalBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_page_normal_backend.gd")
+
 
 func run_float_buffer_probe(count: int = 64) -> Dictionary:
 	count = clampi(count, 1, 4096)
@@ -125,77 +127,10 @@ func run_height_normal_probe(side: int = 16, step_m: float = 2.0) -> Dictionary:
 
 
 func compute_normal_image_data_from_height_bytes(height_data: PackedByteArray, side: int, step_m: float) -> Dictionary:
-	side = clampi(side, 2, 4096)
-	step_m = max(0.000001, step_m)
-	var expected_height_bytes: int = side * side * 4
-	if height_data.size() != expected_height_bytes:
-		return {"status": "fail", "error": "height_bytes:%d expected:%d" % [height_data.size(), expected_height_bytes]}
-	var rd: RenderingDevice = RenderingServer.create_local_rendering_device()
-	if rd == null:
-		return {
-			"status": "unsupported",
-			"error": "rendering_device_unavailable",
-			"headless_runtime_note": "Godot headless checks can run without a RenderingDevice; use non-headless GPU probes for actual compute validation.",
-		}
-
-	var shader_source := RDShaderSource.new()
-	shader_source.source_compute = _height_normal_probe_shader(side, step_m)
-	var shader_spirv: RDShaderSPIRV = rd.shader_compile_spirv_from_source(shader_source)
-	if shader_spirv == null or not shader_spirv.compile_error_compute.is_empty():
-		rd.free()
-		return {
-			"status": "fail",
-			"error": "shader_compile:%s" % (shader_spirv.compile_error_compute if shader_spirv != null else "null"),
-		}
-	var shader_rid: RID = rd.shader_create_from_spirv(shader_spirv)
-	if not shader_rid.is_valid():
-		rd.free()
-		return {"status": "fail", "error": "shader_create_failed"}
-
-	var normal_data := PackedByteArray()
-	normal_data.resize(side * side * 12)
-	var height_buffer: RID = rd.storage_buffer_create(height_data.size(), height_data)
-	var normal_buffer: RID = rd.storage_buffer_create(normal_data.size(), normal_data)
-	if not height_buffer.is_valid() or not normal_buffer.is_valid():
-		_free_rids(rd, [normal_buffer, height_buffer, shader_rid])
-		rd.free()
-		return {"status": "fail", "error": "storage_buffer_create_failed"}
-
-	var height_uniform := RDUniform.new()
-	height_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-	height_uniform.binding = 0
-	height_uniform.add_id(height_buffer)
-	var normal_uniform := RDUniform.new()
-	normal_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-	normal_uniform.binding = 1
-	normal_uniform.add_id(normal_buffer)
-	var uniform_set: RID = rd.uniform_set_create([height_uniform, normal_uniform], shader_rid, 0)
-	var pipeline: RID = rd.compute_pipeline_create(shader_rid)
-	if not uniform_set.is_valid() or not pipeline.is_valid():
-		_free_rids(rd, [pipeline, uniform_set, normal_buffer, height_buffer, shader_rid])
-		rd.free()
-		return {"status": "fail", "error": "pipeline_create_failed"}
-
-	var compute_list: int = rd.compute_list_begin()
-	rd.compute_list_bind_compute_pipeline(compute_list, pipeline)
-	rd.compute_list_bind_uniform_set(compute_list, uniform_set, 0)
-	rd.compute_list_dispatch(compute_list, int(ceil(float(side) / 8.0)), int(ceil(float(side) / 8.0)), 1)
-	rd.compute_list_end()
-	rd.submit()
-	rd.sync()
-
-	var readback: PackedByteArray = rd.buffer_get_data(normal_buffer)
-	_free_rids(rd, [pipeline, uniform_set, normal_buffer, height_buffer, shader_rid])
-	rd.free()
-	return {
-		"status": "pass",
-		"normal_image_data": readback,
-		"normal_image_format": "rgbf",
-		"vertices_per_side": side,
-		"step_m": step_m,
-		"workgroups_x": int(ceil(float(side) / 8.0)),
-		"workgroups_y": int(ceil(float(side) / 8.0)),
-	}
+	var backend = TerrainGpuPageNormalBackendScript.new()
+	var result: Dictionary = backend.compute_normal_image_data_from_height_bytes(height_data, side, step_m)
+	backend.shutdown()
+	return result
 
 
 func _float_buffer_probe_shader() -> String:
@@ -217,49 +152,6 @@ void main() {
 	output_buffer.data[index] = input_buffer.data[index] * 2.0 + 1.0;
 }
 """
-
-
-func _height_normal_probe_shader(side: int, step_m: float) -> String:
-	return """
-#version 450
-
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-
-const uint SIDE = %du;
-const float STEP_M = %.9f;
-
-layout(set = 0, binding = 0, std430) readonly restrict buffer HeightBuffer {
-	float height[];
-} height_buffer;
-
-layout(set = 0, binding = 1, std430) writeonly restrict buffer NormalBuffer {
-	float normal[];
-} normal_buffer;
-
-float sample_height(uint x, uint z) {
-	x = clamp(x, 0u, SIDE - 1u);
-	z = clamp(z, 0u, SIDE - 1u);
-	return height_buffer.height[z * SIDE + x];
-}
-
-void main() {
-	uint x = gl_GlobalInvocationID.x;
-	uint z = gl_GlobalInvocationID.y;
-	if (x >= SIDE || z >= SIDE) {
-		return;
-	}
-	float left = sample_height(x > 0u ? x - 1u : 0u, z);
-	float right = sample_height(min(x + 1u, SIDE - 1u), z);
-	float up = sample_height(x, z > 0u ? z - 1u : 0u);
-	float down = sample_height(x, min(z + 1u, SIDE - 1u));
-	vec3 n = normalize(vec3(left - right, STEP_M * 2.0, up - down));
-	vec3 encoded = n * 0.5 + vec3(0.5);
-	uint base = (z * SIDE + x) * 3u;
-	normal_buffer.normal[base] = encoded.x;
-	normal_buffer.normal[base + 1u] = encoded.y;
-	normal_buffer.normal[base + 2u] = encoded.z;
-}
-""" % [side, step_m]
 
 
 func _encoded_normal_from_height_bytes(height_bytes: PackedByteArray, side: int, x: int, z: int, step_m: float) -> Vector3:
