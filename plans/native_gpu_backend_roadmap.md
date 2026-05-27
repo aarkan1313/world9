@@ -115,6 +115,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 61n. [x] Skip CPU `Image` wrapper creation for opt-in direct-RD far-page descriptors; raw RF/RGBF bytes go straight to `Texture2DRD`, with ImageTexture fallback descriptors built only if direct RD cannot be used.
 61o. [x] Extract `TerrainPageTextureBackend` so far clipmap orchestration no longer owns descriptor-to-texture fallback, protected-key residency, and direct-RD page texture decisions directly.
 61p. [x] Add a renderer-backed GPU page review capture and manifest to the render suite and visual review index, proving the saved direct-RD page scene is not only stats-valid but visibly renderable.
+61q. [x] Extend runtime readiness to validate the GPU page review manifest, including image readability, direct RD upload counts, compute-normal texture counts, and zero ImageTexture uploads.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.

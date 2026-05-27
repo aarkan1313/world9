@@ -62,6 +62,7 @@ def validate() -> dict[str, Any]:
         "hydrology_tile_cache_report": RUNTIME / "godot_hydrology_tiles" / "hydrology_tile_cache_report.json",
         "debug_mode_perf_report": RUNTIME / "godot_performance" / "debug_mode_perf_report.json",
         "streaming_far_overview_manifest": RUNTIME / "godot_streaming_far_overview" / "streaming_far_overview_manifest.json",
+        "gpu_page_review_manifest": RUNTIME / "godot_gpu_page_review" / "gpu_page_review_manifest.json",
         "walk_density_manifest": RUNTIME / "godot_walk_density_review" / "walk_density_manifest.json",
         "local_detail_displacement_manifest": RUNTIME / "godot_local_detail_displacement" / "local_detail_displacement_manifest.json",
         "walk_local_detail_manifest": RUNTIME / "godot_walk_local_detail_review" / "walk_local_detail_manifest.json",
@@ -99,6 +100,7 @@ def validate() -> dict[str, Any]:
     hydrology_tile_cache_report = read_json(paths["hydrology_tile_cache_report"])
     debug_mode_perf_report = read_json(paths["debug_mode_perf_report"])
     streaming_far_overview_manifest = read_json(paths["streaming_far_overview_manifest"])
+    gpu_page_review_manifest = read_json(paths["gpu_page_review_manifest"])
     walk_density_manifest = read_json(paths["walk_density_manifest"])
     local_detail_displacement_manifest = read_json(paths["local_detail_displacement_manifest"])
     walk_local_detail_manifest = read_json(paths["walk_local_detail_manifest"])
@@ -190,6 +192,7 @@ def validate() -> dict[str, Any]:
     _check_hydrology_reports(hydrology_hint_report, hydrology_consistency_report, hydrology_tile_cache_report, errors)
     _check_debug_mode_perf_report(debug_mode_perf_report, errors)
     _check_streaming_far_overview_budget(runtime_budget, streaming_far_overview_manifest, errors)
+    _check_gpu_page_review_manifest(gpu_page_review_manifest, errors)
     _check_walk_density_manifest(walk_density_manifest, errors)
     _check_local_detail_review_manifests(local_detail_displacement_manifest, walk_local_detail_manifest, errors)
 
@@ -608,6 +611,22 @@ def _check_streaming_far_overview_budget(
             errors,
             f"streaming_far_memory:{level_count}",
         )
+
+
+def _check_gpu_page_review_manifest(manifest: dict[str, Any], errors: list[str]) -> None:
+    check(manifest.get("schema") == "worldgen9.gpu_page_review_manifest.v1", errors, "gpu_page_review_schema")
+    check(manifest.get("status") == "pass", errors, "gpu_page_review_status")
+    check(manifest.get("capture_size") == [1280, 720], errors, "gpu_page_review_capture_size")
+    check(str(manifest.get("capture", "")) == "gpu_page_review.png", errors, "gpu_page_review_capture_name")
+    image_stats = manifest.get("image_stats", {})
+    check(float(image_stats.get("luma_range", 0.0)) >= 0.05, errors, "gpu_page_review_luma_range")
+    check(float(image_stats.get("dark_pixel_fraction", 1.0)) <= 0.65, errors, "gpu_page_review_background_fraction")
+    check(int(image_stats.get("unique_colors", 0)) >= 8, errors, "gpu_page_review_unique_colors")
+    gpu_state = manifest.get("gpu_page_residency", {})
+    check(int(gpu_state.get("rd_uploads", 0)) >= 4, errors, "gpu_page_review_rd_uploads")
+    check(int(gpu_state.get("rd_compute_normal_uploads", 0)) >= 4, errors, "gpu_page_review_rd_normal_uploads")
+    check(int(gpu_state.get("rd_compute_normal_failures", 0)) == 0, errors, "gpu_page_review_rd_normal_failures")
+    check(int(gpu_state.get("image_uploads", -1)) == 0, errors, "gpu_page_review_image_uploads")
 
 
 def _check_walk_density_manifest(manifest: dict[str, Any], errors: list[str]) -> None:
