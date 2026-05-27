@@ -26,6 +26,7 @@ const TerrainGpuPageNormalBackendScript := preload("res://worldgen_terrain/core/
 @export_range(0, 256, 1) var page_cache_max_pages: int = 48
 @export_range(0, 256, 1) var gpu_page_residency_max_pages: int = 48
 @export var use_gpu_page_normal_backend: bool = false
+@export var use_gpu_rd_page_textures: bool = false
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export_range(1, 4, 1) var max_profile_fallback_rebuild_levels_per_update: int = 1
@@ -760,7 +761,7 @@ func _ensure_page_cache() -> void:
 func _ensure_gpu_page_residency() -> void:
 	if _gpu_page_residency == null:
 		_gpu_page_residency = TerrainGpuPageResidencyScript.new()
-	_gpu_page_residency.configure(gpu_page_residency_max_pages)
+	_gpu_page_residency.configure(gpu_page_residency_max_pages, use_gpu_rd_page_textures)
 
 
 func _ensure_gpu_page_normal_backend() -> Dictionary:
@@ -1833,6 +1834,8 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 		"normal_values": heightfield.get("normals", PackedVector3Array()) as PackedVector3Array,
 		"cache_key": str(heightfield.get("cache_key", "")),
 		"texture_payload_mode": str(heightfield.get("texture_payload_mode", "")),
+		"height_image_data": height_data,
+		"normal_image_data": normal_data,
 	}
 
 

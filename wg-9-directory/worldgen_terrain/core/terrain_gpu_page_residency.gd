@@ -2,6 +2,7 @@ class_name TerrainGpuPageResidency
 extends RefCounted
 
 var max_pages: int = 0
+var use_rd_textures: bool = false
 
 var _pages: Dictionary = {}
 var _last_used_tick: Dictionary = {}
@@ -14,14 +15,20 @@ var _uploads: int = 0
 var _evictions: int = 0
 var _rejected: int = 0
 var _texture_reuses: int = 0
+var _rd_uploads: int = 0
+var _image_uploads: int = 0
+var _rd_unavailable: int = 0
 
 
-func configure(p_max_pages: int) -> void:
+func configure(p_max_pages: int, p_use_rd_textures: bool = false) -> void:
 	max_pages = maxi(0, p_max_pages)
+	use_rd_textures = p_use_rd_textures
 	_evict_to_budget()
 
 
 func clear() -> void:
+	for key in _pages.keys():
+		_release_page_resources(str(key), false)
 	_pages.clear()
 	_last_used_tick.clear()
 	_protected_keys.clear()
@@ -33,6 +40,9 @@ func clear() -> void:
 	_evictions = 0
 	_rejected = 0
 	_texture_reuses = 0
+	_rd_uploads = 0
+	_image_uploads = 0
+	_rd_unavailable = 0
 
 
 func get_or_create_textures(cache_key: String, descriptor: Dictionary) -> Dictionary:
@@ -51,14 +61,32 @@ func get_or_create_textures(cache_key: String, descriptor: Dictionary) -> Dictio
 	if descriptor.get("status", "fail") != "pass":
 		_rejected += 1
 		return {"status": "fail", "error": "descriptor_not_pass"}
+	var entry: Dictionary = {}
+	if use_rd_textures:
+		entry = _rd_texture_entry(cache_key, descriptor)
+	if entry.get("status", "fail") != "pass":
+		entry = _image_texture_entry(cache_key, descriptor)
+	if entry.get("status", "fail") != "pass":
+		_rejected += 1
+		return entry
+	_pages[cache_key] = entry
+	_uploads += 1
+	_touch(cache_key)
+	_evict_to_budget()
+	if not _pages.has(cache_key):
+		return {"status": "fail", "error": "evicted_on_insert"}
+	return (_pages[cache_key] as Dictionary).duplicate()
+
+
+func _image_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 	var height_image: Image = descriptor.get("height_image") as Image
 	var normal_image: Image = descriptor.get("normal_image") as Image
 	if height_image == null or normal_image == null:
-		_rejected += 1
 		return {"status": "fail", "error": "missing_images"}
 	var height_texture: ImageTexture = _texture_from_pool_or_create(height_image)
 	var normal_texture: ImageTexture = _texture_from_pool_or_create(normal_image)
-	var entry := {
+	_image_uploads += 1
+	return {
 		"status": "pass",
 		"cache_key": cache_key,
 		"height_texture": height_texture,
@@ -67,14 +95,56 @@ func get_or_create_textures(cache_key: String, descriptor: Dictionary) -> Dictio
 		"normal_bytes": _image_byte_size(normal_image),
 		"width": height_image.get_width(),
 		"height": height_image.get_height(),
+		"texture_backend": "image",
 	}
-	_pages[cache_key] = entry
-	_uploads += 1
-	_touch(cache_key)
-	_evict_to_budget()
-	if not _pages.has(cache_key):
-		return {"status": "fail", "error": "evicted_on_insert"}
-	return (_pages[cache_key] as Dictionary).duplicate()
+
+
+func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
+	if not ClassDB.class_exists("Texture2DRD") or not RenderingServer.has_method("get_rendering_device"):
+		_rd_unavailable += 1
+		return {"status": "fail", "error": "texture2drd_unavailable"}
+	var side: int = int(descriptor.get("vertices_per_side", 0))
+	if side <= 0:
+		_rd_unavailable += 1
+		return {"status": "fail", "error": "rd_side:%d" % side}
+	var height_data: PackedByteArray = descriptor.get("height_image_data", PackedByteArray()) as PackedByteArray
+	var normal_data: PackedByteArray = descriptor.get("normal_image_data", PackedByteArray()) as PackedByteArray
+	if height_data.size() != side * side * 4 or normal_data.size() != side * side * 12:
+		return {"status": "fail", "error": "rd_missing_preencoded_data"}
+	var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+	if rd == null:
+		_rd_unavailable += 1
+		return {"status": "fail", "error": "rendering_device_unavailable"}
+	var height_rid: RID = _create_rd_texture(rd, side, RenderingDevice.DATA_FORMAT_R32_SFLOAT, height_data)
+	var normal_rid: RID = _create_rd_texture(rd, side, RenderingDevice.DATA_FORMAT_R32G32B32_SFLOAT, normal_data)
+	if not height_rid.is_valid() or not normal_rid.is_valid():
+		if height_rid.is_valid():
+			rd.free_rid(height_rid)
+		if normal_rid.is_valid():
+			rd.free_rid(normal_rid)
+		return {"status": "fail", "error": "rd_texture_create_failed"}
+	var height_texture = ClassDB.instantiate("Texture2DRD")
+	var normal_texture = ClassDB.instantiate("Texture2DRD")
+	if height_texture == null or normal_texture == null:
+		rd.free_rid(height_rid)
+		rd.free_rid(normal_rid)
+		return {"status": "fail", "error": "texture2drd_instantiate_failed"}
+	height_texture.set("texture_rd_rid", height_rid)
+	normal_texture.set("texture_rd_rid", normal_rid)
+	_rd_uploads += 1
+	return {
+		"status": "pass",
+		"cache_key": cache_key,
+		"height_texture": height_texture,
+		"normal_texture": normal_texture,
+		"height_texture_rid": height_rid,
+		"normal_texture_rid": normal_rid,
+		"height_bytes": height_data.size(),
+		"normal_bytes": normal_data.size(),
+		"width": side,
+		"height": side,
+		"texture_backend": "rd",
+	}
 
 
 func has_page(cache_key: String) -> bool:
@@ -108,6 +178,10 @@ func debug_state() -> Dictionary:
 		"rejected": _rejected,
 		"texture_reuses": _texture_reuses,
 		"pooled_textures": _pooled_texture_count(),
+		"rd_uploads": _rd_uploads,
+		"image_uploads": _image_uploads,
+		"rd_unavailable": _rd_unavailable,
+		"use_rd_textures": use_rd_textures,
 		"height_mib": _mib(height_bytes),
 		"normal_mib": _mib(normal_bytes),
 		"total_mib": _mib(height_bytes + normal_bytes),
@@ -124,6 +198,8 @@ func _touch(cache_key: String) -> void:
 func _evict_to_budget() -> void:
 	if max_pages <= 0:
 		_evictions += _pages.size()
+		for key in _pages.keys():
+			_release_page_resources(str(key), false)
 		_pages.clear()
 		_last_used_tick.clear()
 		_texture_pool.clear()
@@ -134,7 +210,7 @@ func _evict_to_budget() -> void:
 			key = _oldest_evictable_key(true)
 		if key.is_empty():
 			return
-		_pool_page_textures(key)
+		_release_page_resources(key, true)
 		_pages.erase(key)
 		_last_used_tick.erase(key)
 		_evictions += 1
@@ -169,6 +245,23 @@ func _image_byte_size(image: Image) -> int:
 			return image.get_data().size()
 
 
+func _create_rd_texture(rd: RenderingDevice, side: int, data_format: int, data: PackedByteArray) -> RID:
+	var format := RDTextureFormat.new()
+	format.width = side
+	format.height = side
+	format.depth = 1
+	format.array_layers = 1
+	format.mipmaps = 1
+	format.format = data_format
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	format.usage_bits = (
+		RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	)
+	return rd.texture_create(format, RDTextureView.new(), [data])
+
+
 func _texture_from_pool_or_create(image: Image) -> ImageTexture:
 	var pool_key: String = _texture_pool_key_for_image(image)
 	var bucket: Array = _texture_pool.get(pool_key, []) as Array
@@ -181,9 +274,29 @@ func _texture_from_pool_or_create(image: Image) -> ImageTexture:
 	return ImageTexture.create_from_image(image)
 
 
-func _pool_page_textures(cache_key: String) -> void:
+func _release_page_resources(cache_key: String, allow_pool: bool) -> void:
 	var entry: Dictionary = _pages.get(cache_key, {}) as Dictionary
 	if entry.is_empty():
+		return
+	if str(entry.get("texture_backend", "")) == "rd":
+		var rd: RenderingDevice = null
+		if RenderingServer.has_method("get_rendering_device"):
+			rd = RenderingServer.call("get_rendering_device") as RenderingDevice
+		var height_texture: Object = entry.get("height_texture") as Object
+		var normal_texture: Object = entry.get("normal_texture") as Object
+		if rd != null:
+			var height_rid: RID = entry.get("height_texture_rid", RID()) as RID
+			var normal_rid: RID = entry.get("normal_texture_rid", RID()) as RID
+			if height_texture != null:
+				height_texture.set("texture_rd_rid", RID())
+			if normal_texture != null:
+				normal_texture.set("texture_rd_rid", RID())
+			if height_rid.is_valid():
+				rd.free_rid(height_rid)
+			if normal_rid.is_valid():
+				rd.free_rid(normal_rid)
+		return
+	if not allow_pool:
 		return
 	_pool_texture(entry.get("height_texture") as ImageTexture, int(entry.get("width", 0)), int(entry.get("height", 0)), Image.FORMAT_RF)
 	_pool_texture(entry.get("normal_texture") as ImageTexture, int(entry.get("width", 0)), int(entry.get("height", 0)), Image.FORMAT_RGBF)
