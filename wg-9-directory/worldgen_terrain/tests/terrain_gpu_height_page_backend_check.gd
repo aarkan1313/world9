@@ -1,9 +1,11 @@
 extends SceneTree
 
 const TerrainGpuHeightPageBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_height_page_backend.gd")
+const RuntimeKernelPackScript := preload("res://worldgen_terrain/runtime/runtime_kernel_pack.gd")
 
 const MAX_DELTA_M: float = 0.08
 const MAX_MEAN_DELTA_M: float = 0.015
+const MAX_KERNEL_DELTA: float = 0.0001
 
 
 func _init() -> void:
@@ -61,11 +63,16 @@ func _start() -> void:
 			errors
 		)
 		_check_invalid_requests(backend, errors)
+		_check_kernel_sample_case(backend, errors)
 	var state: Dictionary = backend.debug_state()
 	if int(state.get("compile_count", 0)) != 1:
 		errors.append("compile_count:%s" % str(state))
+	if int(state.get("kernel_compile_count", 0)) != 1:
+		errors.append("kernel_compile_count:%s" % str(state))
 	if int(state.get("dispatch_count", 0)) < 3:
 		errors.append("dispatch_count:%s" % str(state))
+	if int(state.get("kernel_dispatch_count", 0)) < 1:
+		errors.append("kernel_dispatch_count:%s" % str(state))
 	backend.shutdown()
 	if not errors.is_empty():
 		for error in errors:
@@ -131,3 +138,47 @@ func _check_invalid_requests(backend: RefCounted, errors: Array[String]) -> void
 	var bad_macro_scale: Dictionary = backend.compute_macro_height_page(0.0, 0.0, 16.0, 4, 4, 1337, 0.0, 1.0)
 	if bad_macro_scale.get("status", "pass") == "pass":
 		errors.append("bad_macro_scale_passed")
+	var bad_kernel_shape: Dictionary = backend.compute_kernel_sample_page(PackedFloat32Array(), 0, 0, 0.0, 0.0, 16.0, 4, 4, 1024.0, 0, 0.0, 0.0)
+	if bad_kernel_shape.get("status", "pass") == "pass":
+		errors.append("bad_kernel_shape_passed")
+
+
+func _check_kernel_sample_case(backend: RefCounted, errors: Array[String]) -> void:
+	var pack = RuntimeKernelPackScript.new()
+	if not pack.load_default():
+		errors.append("kernel_pack:%s" % str(pack.errors))
+		return
+	var loaded: Dictionary = pack.load_kernel_normalized(0)
+	if loaded.get("status", "fail") != "pass":
+		errors.append("kernel_load:%s" % str(loaded))
+		return
+	var normalized: Dictionary = loaded["normalized"] as Dictionary
+	var shape: Array = normalized["shape"] as Array
+	var rows: int = int(shape[0])
+	var cols: int = int(shape[1])
+	var values: PackedFloat32Array = normalized["values"] as PackedFloat32Array
+	var result: Dictionary = backend.compute_kernel_sample_page(
+		values,
+		rows,
+		cols,
+		-4096.0,
+		2048.0,
+		96.0,
+		31,
+		23,
+		9000.0,
+		3,
+		0.271,
+		-0.613
+	)
+	if result.get("status", "fail") != "pass":
+		errors.append("kernel_compute:%s" % str(result))
+		return
+	var comparison: Dictionary = backend.compare_kernel_to_reference(result, values)
+	if comparison.get("status", "fail") != "pass":
+		errors.append("kernel_compare:%s" % str(comparison))
+		return
+	if float(comparison.get("max_delta", 999.0)) > MAX_KERNEL_DELTA:
+		errors.append("kernel_max_delta:%s" % str(comparison))
+	if float(comparison.get("mean_delta", 999.0)) > MAX_KERNEL_DELTA:
+		errors.append("kernel_mean_delta:%s" % str(comparison))

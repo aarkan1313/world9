@@ -112,6 +112,10 @@ The current durable direction is persistent terrain pages:
   suite. It proves positive-origin pages, negative-origin pages, profile-scaled
   pages, byte layout, pipeline reuse, and fail-fast handling for malformed
   request dimensions/scales.
+- Extended `TerrainGpuHeightPageBackend` with an isolated DEM-kernel sampling
+  compute path. The gate loads a real normalized runtime kernel, samples it with
+  the same mirrored bilinear rules used by `TerrainHeightProvider`, and proves
+  GPU/CPU parity across negative coordinates, rotation, and UV offsets.
 
 ## Important Constraint
 
@@ -160,8 +164,10 @@ Acceptance for the next slice:
 - GPU-resident material masks.
 - GPU page generation from DEM/provider facts.
 - Full live walk scene height generation on GPU compute.
-- DEM-kernel relief, pass/corridor facts, hydrology facts, erosion facts, and
-  any final provider branches beyond the macro-height/page-profile proof.
+- Full DEM-kernel relief blending across region corners; the current GPU proof
+  validates the primitive kernel sampler, not the complete provider blend.
+- Pass/corridor facts, hydrology facts, erosion facts, and any final provider
+  branches beyond the macro-height/page-profile/kernel-sampler proof.
 - Re-promoting corridor tour as an acceptance gate.
 
 Those remain roadmap work, not accepted finished systems.
