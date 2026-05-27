@@ -154,6 +154,7 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 			rd.free_rid(height_rid)
 		if normal_rid.is_valid():
 			rd.free_rid(normal_rid)
+		_free_rd_owned_rids(rd, descriptor)
 		return {"status": "fail", "error": str(normal_result.get("error", "rd_texture_create_failed"))}
 	var height_texture = ClassDB.instantiate("Texture2DRD")
 	var normal_texture = ClassDB.instantiate("Texture2DRD")
@@ -173,6 +174,7 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 		"normal_texture_rid": normal_rid,
 		"normal_compute_uniform_set": normal_result.get("uniform_set", RID()),
 		"height_texture_owned_by_residency": height_texture_owned_by_residency,
+		"rd_owned_rids": descriptor.get("rd_owned_rids", []) as Array,
 		"height_bytes": int(descriptor.get("height_bytes", side * side * 4)) if has_supplied_height_rid else height_data.size(),
 		"normal_bytes": int(normal_result.get("normal_bytes", normal_data.size())),
 		"width": side,
@@ -500,6 +502,7 @@ func _release_page_resources(cache_key: String, allow_pool: bool) -> void:
 				normal_texture.set("texture_rd_rid", RID())
 			if uniform_set.is_valid():
 				rd.free_rid(uniform_set)
+			_free_rd_owned_rids(rd, entry)
 			if height_rid.is_valid() and bool(entry.get("height_texture_owned_by_residency", true)):
 				rd.free_rid(height_rid)
 			if normal_rid.is_valid():
@@ -509,6 +512,14 @@ func _release_page_resources(cache_key: String, allow_pool: bool) -> void:
 		return
 	_pool_texture(entry.get("height_texture") as ImageTexture, int(entry.get("width", 0)), int(entry.get("height", 0)), Image.FORMAT_RF)
 	_pool_texture(entry.get("normal_texture") as ImageTexture, int(entry.get("width", 0)), int(entry.get("height", 0)), Image.FORMAT_RGBF)
+
+
+func _free_rd_owned_rids(rd: RenderingDevice, source: Dictionary) -> void:
+	var rids: Array = source.get("rd_owned_rids", []) as Array
+	for value in rids:
+		var rid: RID = value as RID
+		if rid.is_valid():
+			rd.free_rid(rid)
 
 
 func _pool_texture(texture: ImageTexture, width: int, height: int, format: int) -> void:

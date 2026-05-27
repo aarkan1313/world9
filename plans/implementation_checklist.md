@@ -147,6 +147,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add first isolated GPU prepared-provider page assembly gate: prepared corner entries, real kernel arrays, macro relief, corner-blended kernel relief, detail, and valley shaping with tight CPU-provider parity, while explicitly gating out pass/corridor facts.
 - [x] Split GPU prepared-provider page inputs into a reusable descriptor contract and gate corridor-shaped descriptors to fail fast until route facts are GPU-ready.
 - [x] Extend GPU page residency so a main-renderer-device height texture RID can be supplied directly, wrapped as `Texture2DRD`, normal-computed on the renderer device, and cleaned up through the existing bounded residency lifecycle.
+- [x] Add a main-renderer-device provider-page texture backend and GPU gate proving prepared-provider descriptors can dispatch directly into `R32F` height texture RIDs, then flow through page residency and RD normal compute with zero ImageTexture uploads.
 - [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.

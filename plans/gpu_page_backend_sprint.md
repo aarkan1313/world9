@@ -133,6 +133,16 @@ The current durable direction is persistent terrain pages:
 - The RD residency gate now validates the no-readback handoff shape required by
   live GPU height generation: a GPU-produced height texture can enter the page
   cache without CPU `Image` wrappers or ImageTexture uploads.
+- Added `TerrainGpuProviderPageTextureBackend`, the first main-renderer-device
+  provider-page compute backend. It consumes
+  `worldgen9.gpu_provider_page_descriptor.v1`, writes directly into an `R32F`
+  height texture RID, keeps dispatch resources alive through residency-owned RID
+  cleanup, and hands the texture to `TerrainGpuPageResidency` for
+  `Texture2DRD` wrapping plus renderer-device normal compute.
+- Added `terrain_gpu_provider_page_texture_backend_check.gd` to the GPU suite.
+  The gate proves descriptor-to-height-texture dispatch, zero ImageTexture
+  uploads, residency handoff, RD normal compute, and explicit cleanup through the
+  existing page lifecycle.
 
 ## Important Constraint
 
@@ -157,6 +167,12 @@ height page bytes + page metadata
     -> externally supplied renderer-device height texture residency
     -> opt-in main RenderingDevice compute-to-texture normal path
   -> existing page residency/material commit contract
+
+prepared provider descriptor
+  -> TerrainGpuProviderPageTextureBackend
+    -> main RenderingDevice R32F height texture
+    -> TerrainGpuPageResidency external-height path
+    -> main RenderingDevice normal texture compute
 ```
 
 Acceptance for the next slice:
@@ -180,13 +196,11 @@ Acceptance for the next slice:
 
 ## Not Done Yet
 
-- Live GPU compute-to-texture height-page generation from full provider facts.
+- Live clipmap use of renderer-device GPU provider-page texture generation.
 - GPU-resident material masks.
-- GPU page generation from DEM/provider facts.
+- Live clipmap page generation from DEM/provider facts.
 - Full live walk scene height generation on GPU compute.
 - Live streaming integration of the prepared-provider GPU page path.
-- Main-renderer-device provider-page compute dispatch that writes directly to
-  the externally supplied/owned height texture descriptor path.
 - Pass/corridor facts, hydrology facts, erosion facts, and any final provider
   branches beyond the macro-height/page-profile/kernel/provider-page proof.
 - Re-promoting corridor tour as an acceptance gate.
