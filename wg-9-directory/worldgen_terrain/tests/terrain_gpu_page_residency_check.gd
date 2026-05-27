@@ -95,6 +95,9 @@ func _check_persistent_page_material_reuse(node: Node3D, errors: Array[String]) 
 	var stats: Dictionary = node.stats()
 	if not bool(stats.get("last_page_material_reused", false)):
 		errors.append("clipmap_page_material_reuse_stat:%s" % str(stats))
+	var active_blend_gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
+	if int(stats.get("active_page_blend_count", 0)) > 0 and int(active_blend_gpu_state.get("protected_count", 0)) < node.level_count * 2:
+		errors.append("clipmap_previous_blend_pages_not_protected:%s" % str(active_blend_gpu_state))
 	var previous_height_texture: Texture2D = second_material.get_shader_parameter("previous_height_texture") as Texture2D
 	if first_height_texture != null and previous_height_texture != first_height_texture:
 		errors.append("clipmap_previous_texture_not_preserved")

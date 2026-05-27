@@ -45,6 +45,7 @@ var level_material_descriptors: Array[Dictionary] = []
 var level_transition_nodes: Array = []
 var level_transition_start_ms: Array[int] = []
 var level_page_blend_start_ms: Array[int] = []
+var level_previous_page_cache_keys: Array[String] = []
 var last_build_ms: int = 0
 var last_surface_texture_ms: int = 0
 var total_vertex_count: int = 0
@@ -108,6 +109,7 @@ func setup(p_world: RefCounted) -> bool:
 		level_transition_nodes.append(null)
 		level_transition_start_ms.append(0)
 		level_page_blend_start_ms.append(0)
+		level_previous_page_cache_keys.append("")
 	_ensure_page_cache()
 	_ensure_gpu_page_residency()
 	return true
@@ -128,6 +130,7 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	level_transition_nodes.clear()
 	level_transition_start_ms.clear()
 	level_page_blend_start_ms.clear()
+	level_previous_page_cache_keys.clear()
 	last_build_ms = 0
 	last_surface_texture_ms = 0
 	total_vertex_count = 0
@@ -494,6 +497,8 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	last_page_error = ""
 	var height: PackedFloat32Array = result["height_samples"] as PackedFloat32Array
 	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
+	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
+	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var normals := PackedVector3Array()
 	normals.resize(side * side)
 	for z in range(side):
@@ -511,11 +516,13 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	var previous_normal_texture: Texture2D = null
 	var previous_page_origin := origin
 	var previous_page_extent := outer_extent
+	_track_previous_page_key_for_blend(level, "", false)
 	if use_transition and previous_material != null:
 		previous_height_texture = previous_material.get_shader_parameter("height_texture") as Texture2D
 		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
 		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
+	_track_previous_page_key_for_blend(level, previous_cache_key, previous_height_texture != null)
 	mesh_instance.material_override = _page_height_material_for_descriptor(
 		descriptor,
 		level,
@@ -547,6 +554,8 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var height: PackedFloat32Array = payload["height"] as PackedFloat32Array
 	_cache_page_payload(level, origin, outer_extent, spacing, side, height)
 	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
+	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
+	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var normals: PackedVector3Array = payload.get("normals", PackedVector3Array()) as PackedVector3Array
 	if normals.size() != side * side:
 		normals.resize(side * side)
@@ -568,11 +577,13 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var previous_normal_texture: Texture2D = null
 	var previous_page_origin := origin
 	var previous_page_extent := outer_extent
+	_track_previous_page_key_for_blend(level, "", false)
 	if use_transition and previous_material != null:
 		previous_height_texture = previous_material.get_shader_parameter("height_texture") as Texture2D
 		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
 		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
+	_track_previous_page_key_for_blend(level, previous_cache_key, previous_height_texture != null)
 	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, float(payload["inner_extent_m"]))
 	mesh_instance.material_override = _page_height_material_for_descriptor(
 		descriptor,
@@ -745,9 +756,21 @@ func _protect_active_page_keys() -> void:
 		var origin := Vector2(float(heightfield.get("origin_x", 0.0)), float(heightfield.get("origin_z", 0.0)))
 		var request = _make_far_clipmap_page_request(level, origin, outer_extent, spacing, side)
 		protected.append(request.cache_key())
+	for key in level_previous_page_cache_keys:
+		if not key.is_empty():
+			protected.append(key)
 	_page_cache.set_protected_keys(protected)
 	if _gpu_page_residency != null:
 		_gpu_page_residency.set_protected_keys(protected)
+
+
+func _track_previous_page_key_for_blend(level: int, cache_key: String, has_previous_page: bool) -> void:
+	if level < 0 or level >= level_previous_page_cache_keys.size():
+		return
+	if has_previous_page and not cache_key.is_empty() and transition_fade_seconds > 0.0:
+		level_previous_page_cache_keys[level] = cache_key
+	else:
+		level_previous_page_cache_keys[level] = ""
 
 
 func _make_far_clipmap_page_request(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int):
@@ -974,6 +997,7 @@ func _start_page_blend(level: int, has_previous_page: bool) -> void:
 
 func _update_page_blends() -> void:
 	if not use_persistent_page_mesh:
+		_clear_previous_page_blend_keys()
 		active_page_blend_count = 0
 		return
 	var fade_ms: float = max(0.0, transition_fade_seconds) * 1000.0
@@ -981,9 +1005,11 @@ func _update_page_blends() -> void:
 		for level in range(level_page_blend_start_ms.size()):
 			level_page_blend_start_ms[level] = 0
 			_set_page_material_blend_alpha(level, 1.0)
+		_clear_previous_page_blend_keys()
 		active_page_blend_count = 0
 		return
 	var now_ms: int = Time.get_ticks_msec()
+	var released_previous_key := false
 	for level in range(level_page_blend_start_ms.size()):
 		var start_ms: int = int(level_page_blend_start_ms[level])
 		if start_ms <= 0:
@@ -992,7 +1018,22 @@ func _update_page_blends() -> void:
 		_set_page_material_blend_alpha(level, t)
 		if t >= 1.0:
 			level_page_blend_start_ms[level] = 0
+			if level < level_previous_page_cache_keys.size() and not level_previous_page_cache_keys[level].is_empty():
+				level_previous_page_cache_keys[level] = ""
+				released_previous_key = true
 	active_page_blend_count = _count_active_page_blends()
+	if released_previous_key:
+		_protect_active_page_keys()
+
+
+func _clear_previous_page_blend_keys() -> void:
+	var changed := false
+	for level in range(level_previous_page_cache_keys.size()):
+		if not level_previous_page_cache_keys[level].is_empty():
+			level_previous_page_cache_keys[level] = ""
+			changed = true
+	if changed:
+		_protect_active_page_keys()
 
 
 func _set_page_material_blend_alpha(level: int, alpha: float) -> void:

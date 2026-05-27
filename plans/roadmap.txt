@@ -76,6 +76,7 @@ persistent page bounds: shader-displaced far pages now set custom visibility AAB
 persistent page morph: persistent far pages now keep raw provider height samples and leave coarse/fine LOD morph to the shader, matching the World 4 direction and avoiding double-morphed transition bands
 persistent page material reuse: far page commits update existing page ShaderMaterials in place, preserving old height/normal textures for blend while avoiding material churn during recenter
 persistent page descriptor reuse: far page commits skip height/normal image rebuilds when the target page already has GPU-resident textures, so cached revisits avoid both CPU image churn and GPU uploads
+persistent page blend residency: current and previous far page texture keys stay protected for the full shader blend window, so budgeted residency eviction cannot reuse or drop textures that are still visible during recenter transitions
 walk motion GPU page budget: the motion profile now hard-fails if far page GPU uploads exceed the level-set budget or if residency evictions occur during standard motion
 rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
 visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
