@@ -50,6 +50,20 @@ func _check_residency_cache_contract(errors: Array[String]) -> void:
 		errors.append("cache_uploads:%s" % str(state))
 	if float(state.get("total_mib", 0.0)) <= 0.0:
 		errors.append("cache_total_mib:%s" % str(state))
+	_check_evicted_texture_reuse(errors)
+
+
+func _check_evicted_texture_reuse(errors: Array[String]) -> void:
+	var residency = TerrainGpuPageResidencyScript.new()
+	residency.configure(1)
+	residency.get_or_create_textures("a", _descriptor(32, 1.0))
+	residency.get_or_create_textures("b", _descriptor(32, 2.0))
+	residency.get_or_create_textures("c", _descriptor(32, 3.0))
+	var state: Dictionary = residency.debug_state()
+	if int(state.get("texture_reuses", 0)) < 2:
+		errors.append("cache_texture_reuses:%s" % str(state))
+	if int(state.get("pooled_textures", 0)) > 2:
+		errors.append("cache_texture_pool_unbounded:%s" % str(state))
 
 
 func _check_far_clipmap_residency_integration(errors: Array[String]) -> void:

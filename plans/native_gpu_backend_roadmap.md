@@ -102,6 +102,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 61a. [x] Stop building throwaway far mesh payloads in persistent page-worker mode; native workers now emit height-page payloads plus native-computed normals for texture-displaced rings and reserve full mesh payloads for fallback geometry mode.
 61b. [x] Move persistent far page RF/RGBF image byte encoding into the native worker payload so page commits wrap preencoded bytes instead of rebuilding height/normal image buffers on the main thread.
 61c. [x] Protect previous far page residency keys for the full shader blend window so tighter GPU page budgets cannot evict or reuse textures still needed by current/previous height-page transitions.
+61d. [x] Reuse evicted same-shape far page texture objects inside the bounded GPU page residency cache, reducing allocation churn while preserving protected current/previous transition textures.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.
@@ -116,7 +117,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 73. [x] Add an experimental live pass/corridor tour scene, then table it as an acceptance gate until route/corridor facts are native/GPU-page compatible.
 74. [x] Feed deterministic pass/corridor shaping into the native prepared-grid path so opt-in corridor profiles no longer force CPU fallback for chunks/far pages.
 75. [ ] Re-promote live corridor review only after the native/page path is visually stable enough to run it at landform-tour scale without shrinking the review area or lagging.
-76. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted; current lower-churn steps are height-page-only native worker payloads, native preencoded RF/RGBF image data, and blend-window page-residency protection for persistent texture-displaced rings.
+76. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted; current lower-churn steps are height-page-only native worker payloads, native preencoded RF/RGBF image data, blend-window page-residency protection, and same-shape texture reuse for persistent texture-displaced rings.
 77. [ ] Replace remaining subtle far/LOD quality shifts through the GPU-resident page/ring path, not more interim mesh/fog/alpha patches. Immediate fixes are still required for black holes, hard seams, crashes, or review-blocking regressions.
 
 ## First Backend Shape

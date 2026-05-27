@@ -6,12 +6,14 @@ var max_pages: int = 0
 var _pages: Dictionary = {}
 var _last_used_tick: Dictionary = {}
 var _protected_keys: Dictionary = {}
+var _texture_pool: Dictionary = {}
 var _tick: int = 0
 var _hits: int = 0
 var _misses: int = 0
 var _uploads: int = 0
 var _evictions: int = 0
 var _rejected: int = 0
+var _texture_reuses: int = 0
 
 
 func configure(p_max_pages: int) -> void:
@@ -23,12 +25,14 @@ func clear() -> void:
 	_pages.clear()
 	_last_used_tick.clear()
 	_protected_keys.clear()
+	_texture_pool.clear()
 	_tick = 0
 	_hits = 0
 	_misses = 0
 	_uploads = 0
 	_evictions = 0
 	_rejected = 0
+	_texture_reuses = 0
 
 
 func get_or_create_textures(cache_key: String, descriptor: Dictionary) -> Dictionary:
@@ -52,8 +56,8 @@ func get_or_create_textures(cache_key: String, descriptor: Dictionary) -> Dictio
 	if height_image == null or normal_image == null:
 		_rejected += 1
 		return {"status": "fail", "error": "missing_images"}
-	var height_texture: ImageTexture = ImageTexture.create_from_image(height_image)
-	var normal_texture: ImageTexture = ImageTexture.create_from_image(normal_image)
+	var height_texture: ImageTexture = _texture_from_pool_or_create(height_image)
+	var normal_texture: ImageTexture = _texture_from_pool_or_create(normal_image)
 	var entry := {
 		"status": "pass",
 		"cache_key": cache_key,
@@ -102,6 +106,8 @@ func debug_state() -> Dictionary:
 		"uploads": _uploads,
 		"evictions": _evictions,
 		"rejected": _rejected,
+		"texture_reuses": _texture_reuses,
+		"pooled_textures": _pooled_texture_count(),
 		"height_mib": _mib(height_bytes),
 		"normal_mib": _mib(normal_bytes),
 		"total_mib": _mib(height_bytes + normal_bytes),
@@ -120,6 +126,7 @@ func _evict_to_budget() -> void:
 		_evictions += _pages.size()
 		_pages.clear()
 		_last_used_tick.clear()
+		_texture_pool.clear()
 		return
 	while _pages.size() > max_pages:
 		var key: String = _oldest_evictable_key(false)
@@ -127,9 +134,11 @@ func _evict_to_budget() -> void:
 			key = _oldest_evictable_key(true)
 		if key.is_empty():
 			return
+		_pool_page_textures(key)
 		_pages.erase(key)
 		_last_used_tick.erase(key)
 		_evictions += 1
+	_trim_texture_pool()
 
 
 func _oldest_evictable_key(allow_protected: bool) -> String:
@@ -158,6 +167,68 @@ func _image_byte_size(image: Image) -> int:
 			return image.get_width() * image.get_height() * 16
 		_:
 			return image.get_data().size()
+
+
+func _texture_from_pool_or_create(image: Image) -> ImageTexture:
+	var pool_key: String = _texture_pool_key_for_image(image)
+	var bucket: Array = _texture_pool.get(pool_key, []) as Array
+	if not bucket.is_empty():
+		var texture: ImageTexture = bucket.pop_back() as ImageTexture
+		_texture_pool[pool_key] = bucket
+		texture.update(image)
+		_texture_reuses += 1
+		return texture
+	return ImageTexture.create_from_image(image)
+
+
+func _pool_page_textures(cache_key: String) -> void:
+	var entry: Dictionary = _pages.get(cache_key, {}) as Dictionary
+	if entry.is_empty():
+		return
+	_pool_texture(entry.get("height_texture") as ImageTexture, int(entry.get("width", 0)), int(entry.get("height", 0)), Image.FORMAT_RF)
+	_pool_texture(entry.get("normal_texture") as ImageTexture, int(entry.get("width", 0)), int(entry.get("height", 0)), Image.FORMAT_RGBF)
+
+
+func _pool_texture(texture: ImageTexture, width: int, height: int, format: int) -> void:
+	if texture == null or width <= 0 or height <= 0:
+		return
+	var pool_key: String = _texture_pool_key(width, height, format)
+	var bucket: Array = _texture_pool.get(pool_key, []) as Array
+	bucket.append(texture)
+	_texture_pool[pool_key] = bucket
+
+
+func _trim_texture_pool() -> void:
+	var max_pooled_textures: int = max(0, max_pages * 2)
+	while _pooled_texture_count() > max_pooled_textures:
+		var keys := _sorted_keys(_texture_pool)
+		if keys.is_empty():
+			return
+		var key: String = keys[0]
+		var bucket: Array = _texture_pool.get(key, []) as Array
+		if bucket.is_empty():
+			_texture_pool.erase(key)
+			continue
+		bucket.pop_front()
+		if bucket.is_empty():
+			_texture_pool.erase(key)
+		else:
+			_texture_pool[key] = bucket
+
+
+func _pooled_texture_count() -> int:
+	var count := 0
+	for value in _texture_pool.values():
+		count += (value as Array).size()
+	return count
+
+
+func _texture_pool_key_for_image(image: Image) -> String:
+	return _texture_pool_key(image.get_width(), image.get_height(), image.get_format())
+
+
+func _texture_pool_key(width: int, height: int, format: int) -> String:
+	return "%d:%d:%d" % [width, height, int(format)]
 
 
 func _sorted_keys(dict: Dictionary) -> Array[String]:
