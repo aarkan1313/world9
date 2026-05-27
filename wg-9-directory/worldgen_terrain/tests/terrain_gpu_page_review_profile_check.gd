@@ -54,8 +54,14 @@ func _check_gpu_page_review_profile(errors: Array[String]) -> void:
 		var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
 		if not bool(gpu_state.get("use_rd_textures", false)):
 			errors.append("rd_textures_not_enabled:%s" % str(gpu_state))
+		if not bool(gpu_state.get("use_rd_compute_normals", false)):
+			errors.append("rd_compute_normals_not_enabled:%s" % str(gpu_state))
 		if int(gpu_state.get("rd_uploads", 0)) < int(budgets.get("gpu_page_review_min_rd_uploads", 0)):
 			errors.append("rd_uploads:%s" % str(gpu_state))
+		if int(gpu_state.get("rd_compute_normal_uploads", 0)) < int(budgets.get("gpu_page_review_min_rd_compute_normal_uploads", 0)):
+			errors.append("rd_compute_normal_uploads:%s" % str(gpu_state))
+		if int(gpu_state.get("rd_compute_normal_failures", 0)) != 0:
+			errors.append("rd_compute_normal_failures:%s" % str(gpu_state))
 		if int(gpu_state.get("image_uploads", 0)) > int(budgets.get("gpu_page_review_max_image_uploads", 0)):
 			errors.append("image_uploads:%s" % str(gpu_state))
 		if int(stats.get("last_gpu_page_normal_dispatches", 0)) < int(budgets.get("gpu_page_review_min_normal_dispatches", 0)):

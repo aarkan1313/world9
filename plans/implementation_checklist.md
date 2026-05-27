@@ -133,6 +133,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add review-only `gpu_page_review` quality profile so the normal walk-preview scene can opt into direct RD far-page residency through the shared profile contract while `walk_review` remains unchanged.
 - [x] Add saved `terrain_gpu_page_review.tscn` and renderer-enabled scene gate so direct RD far-page residency has a real visual review entry point without changing the default walk scene.
 - [x] Add renderer-enabled main RenderingDevice compute-to-texture probe proving storage-image writes into `R32F` texture RIDs without invalid main-device `submit/sync` calls.
+- [x] Add opt-in main RenderingDevice far-page normal texture compute so `gpu_page_review` creates RF height textures and writes RGBAF normal textures directly on the renderer device with zero ImageTexture uploads.
 - [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.

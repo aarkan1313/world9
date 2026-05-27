@@ -16,6 +16,7 @@ func _start() -> void:
 		quit(0)
 		return
 	_check_direct_rd_residency(errors)
+	_check_direct_rd_compute_normal_residency(errors)
 	_check_far_clipmap_rd_opt_in(errors)
 	if not errors.is_empty():
 		for error in errors:
@@ -48,6 +49,27 @@ func _check_direct_rd_residency(errors: Array[String]) -> void:
 	residency.clear()
 
 
+func _check_direct_rd_compute_normal_residency(errors: Array[String]) -> void:
+	var residency = TerrainGpuPageResidencyScript.new()
+	residency.configure(2, true, true)
+	var entry: Dictionary = residency.get_or_create_textures("rd_compute_a", _descriptor(16, 3.0))
+	if entry.get("status", "fail") != "pass":
+		errors.append("rd_compute_entry_failed:%s" % str(entry))
+		return
+	if str(entry.get("texture_backend", "")) != "rd":
+		errors.append("rd_compute_entry_backend:%s" % str(entry))
+	if str(entry.get("normal_texture_mode", "")) != "rd_compute":
+		errors.append("rd_compute_normal_mode:%s" % str(entry))
+	var state: Dictionary = residency.debug_state()
+	if int(state.get("rd_compute_normal_uploads", 0)) != 1:
+		errors.append("rd_compute_normal_uploads:%s" % str(state))
+	if int(state.get("rd_compute_normal_failures", 0)) != 0:
+		errors.append("rd_compute_normal_failures:%s" % str(state))
+	if int(state.get("image_uploads", 0)) != 0:
+		errors.append("rd_compute_image_uploads:%s" % str(state))
+	residency.clear()
+
+
 func _check_far_clipmap_rd_opt_in(errors: Array[String]) -> void:
 	var world = TerrainWorldScript.new()
 	if not world.setup_procedural(2551):
@@ -59,6 +81,7 @@ func _check_far_clipmap_rd_opt_in(errors: Array[String]) -> void:
 	node.use_native_workers = false
 	node.use_gpu_page_normal_backend = true
 	node.use_gpu_rd_page_textures = true
+	node.use_gpu_rd_compute_normals = true
 	node.gpu_page_residency_max_pages = 8
 	get_root().add_child(node)
 	if not node.setup(world):
@@ -73,6 +96,10 @@ func _check_far_clipmap_rd_opt_in(errors: Array[String]) -> void:
 		errors.append("clipmap_rd_uploads:%s" % str(gpu_state))
 	if int(gpu_state.get("image_uploads", 0)) != 0:
 		errors.append("clipmap_image_uploads:%s" % str(gpu_state))
+	if int(gpu_state.get("rd_compute_normal_uploads", 0)) < node.level_count:
+		errors.append("clipmap_rd_compute_normal_uploads:%s" % str(gpu_state))
+	if int(gpu_state.get("rd_compute_normal_failures", 0)) != 0:
+		errors.append("clipmap_rd_compute_normal_failures:%s" % str(gpu_state))
 	if int(stats.get("last_gpu_page_normal_dispatches", 0)) < node.level_count:
 		errors.append("clipmap_gpu_normal_dispatches:%s" % str(stats))
 	node.clear_levels(true)
@@ -93,6 +120,7 @@ func _descriptor(count: int, base_height: float) -> Dictionary:
 	return {
 		"status": "pass",
 		"vertices_per_side": count,
+		"spacing_m": 4.0,
 		"height_image_data": height_data,
 		"normal_image_data": normal_data,
 		"height_image": Image.create_from_data(count, count, false, Image.FORMAT_RF, height_data),

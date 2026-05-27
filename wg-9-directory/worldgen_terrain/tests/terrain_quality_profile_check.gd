@@ -81,6 +81,7 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		"far_clipmap_gpu_page_residency_max_pages",
 		"use_far_clipmap_gpu_page_normal_backend",
 		"use_far_clipmap_gpu_rd_page_textures",
+		"use_far_clipmap_gpu_rd_compute_normals",
 		"distance_fog_depth_begin_m",
 		"distance_fog_depth_end_m",
 		"camera_far_m",
@@ -187,6 +188,8 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 		errors.append("gpu_page_profile_normal_backend_disabled")
 	if not bool(settings.get("use_far_clipmap_gpu_rd_page_textures", false)):
 		errors.append("gpu_page_profile_rd_textures_disabled")
+	if not bool(settings.get("use_far_clipmap_gpu_rd_compute_normals", false)):
+		errors.append("gpu_page_profile_rd_compute_normals_disabled")
 	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
 	if int(budgets.get("gpu_page_review_max_image_uploads", -1)) != 0:
 		errors.append("gpu_page_profile_image_budget:%s" % str(budgets))
@@ -194,6 +197,8 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 		errors.append("gpu_page_profile_rd_budget:%s" % str(budgets))
 	if int(budgets.get("gpu_page_review_min_normal_dispatches", -1)) < 0:
 		errors.append("gpu_page_profile_normal_budget:%s" % str(budgets))
+	if int(budgets.get("gpu_page_review_min_rd_compute_normal_uploads", 0)) <= 0:
+		errors.append("gpu_page_profile_rd_compute_normal_budget:%s" % str(budgets))
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
@@ -217,6 +222,8 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 			var gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
 			if not bool(gpu_state.get("use_rd_textures", false)):
 				errors.append("gpu_page_profile_rd_not_configured:%s" % str(gpu_state))
+			if not bool(gpu_state.get("use_rd_compute_normals", false)):
+				errors.append("gpu_page_profile_rd_compute_not_configured:%s" % str(gpu_state))
 	scene.queue_free()
 
 

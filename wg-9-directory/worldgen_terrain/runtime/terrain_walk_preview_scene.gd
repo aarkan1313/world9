@@ -196,7 +196,8 @@ func diagnostics_text() -> String:
 	var detail_stats: Dictionary = local_detail.build_stats() if local_detail != null else {}
 	var spacing_m: float = chunk_size_m / float(max(1, vertices_per_side - 1))
 	var ground_y: float = terrain.world.sample_height(viewer_position_xz.x, viewer_position_xz.y) if terrain != null and terrain.world != null else 0.0
-	var clearance_m: float = camera.global_position.y - ground_y if camera != null else 0.0
+	var camera_y: float = camera.global_position.y if camera != null and camera.is_inside_tree() else camera_world_y
+	var clearance_m: float = camera_y - ground_y if camera != null else 0.0
 	var region_summary: Dictionary = _current_region_summary()
 	return "fps %.0f | fly %s | speed %.0fm/s x%.1f | chunks %d/%d | queue %d+%d | workers %d | fill %d preload %d | build %.0fms avg %.0fms native %.0fms | far %dL %.0fms t%.0fms %s p%d w%d | detail %d b%.0f/a%.0f/t%.0fms mat %s disp %s %.2f/%.1fm | vtx %d step %.1fm | site %d/%d region %s %s kernels %s/%s | pos %.0f,%.0f | alt %.0fm | chunk %d,%d | mode %s" % [
 		fps,

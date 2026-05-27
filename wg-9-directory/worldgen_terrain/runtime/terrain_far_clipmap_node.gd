@@ -27,6 +27,7 @@ const TerrainGpuPageNormalBackendScript := preload("res://worldgen_terrain/core/
 @export_range(0, 256, 1) var gpu_page_residency_max_pages: int = 48
 @export var use_gpu_page_normal_backend: bool = false
 @export var use_gpu_rd_page_textures: bool = false
+@export var use_gpu_rd_compute_normals: bool = false
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export_range(1, 4, 1) var max_profile_fallback_rebuild_levels_per_update: int = 1
@@ -761,7 +762,11 @@ func _ensure_page_cache() -> void:
 func _ensure_gpu_page_residency() -> void:
 	if _gpu_page_residency == null:
 		_gpu_page_residency = TerrainGpuPageResidencyScript.new()
-	_gpu_page_residency.configure(gpu_page_residency_max_pages, use_gpu_rd_page_textures)
+	_gpu_page_residency.configure(
+		gpu_page_residency_max_pages,
+		use_gpu_rd_page_textures,
+		use_gpu_rd_compute_normals
+	)
 
 
 func _ensure_gpu_page_normal_backend() -> Dictionary:

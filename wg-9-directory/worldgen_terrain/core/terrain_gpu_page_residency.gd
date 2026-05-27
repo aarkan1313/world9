@@ -3,11 +3,14 @@ extends RefCounted
 
 var max_pages: int = 0
 var use_rd_textures: bool = false
+var use_rd_compute_normals: bool = false
 
 var _pages: Dictionary = {}
 var _last_used_tick: Dictionary = {}
 var _protected_keys: Dictionary = {}
 var _texture_pool: Dictionary = {}
+var _normal_compute_shaders: Dictionary = {}
+var _normal_compute_pipelines: Dictionary = {}
 var _tick: int = 0
 var _hits: int = 0
 var _misses: int = 0
@@ -18,11 +21,19 @@ var _texture_reuses: int = 0
 var _rd_uploads: int = 0
 var _image_uploads: int = 0
 var _rd_unavailable: int = 0
+var _rd_compute_normal_uploads: int = 0
+var _rd_compute_normal_failures: int = 0
+var _last_rd_compute_normal_error: String = ""
 
 
-func configure(p_max_pages: int, p_use_rd_textures: bool = false) -> void:
+func configure(
+	p_max_pages: int,
+	p_use_rd_textures: bool = false,
+	p_use_rd_compute_normals: bool = false
+) -> void:
 	max_pages = maxi(0, p_max_pages)
 	use_rd_textures = p_use_rd_textures
+	use_rd_compute_normals = p_use_rd_compute_normals
 	_evict_to_budget()
 
 
@@ -33,6 +44,7 @@ func clear() -> void:
 	_last_used_tick.clear()
 	_protected_keys.clear()
 	_texture_pool.clear()
+	_release_compute_resources()
 	_tick = 0
 	_hits = 0
 	_misses = 0
@@ -43,6 +55,9 @@ func clear() -> void:
 	_rd_uploads = 0
 	_image_uploads = 0
 	_rd_unavailable = 0
+	_rd_compute_normal_uploads = 0
+	_rd_compute_normal_failures = 0
+	_last_rd_compute_normal_error = ""
 
 
 func get_or_create_textures(cache_key: String, descriptor: Dictionary) -> Dictionary:
@@ -109,20 +124,30 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 		return {"status": "fail", "error": "rd_side:%d" % side}
 	var height_data: PackedByteArray = descriptor.get("height_image_data", PackedByteArray()) as PackedByteArray
 	var normal_data: PackedByteArray = descriptor.get("normal_image_data", PackedByteArray()) as PackedByteArray
-	if height_data.size() != side * side * 4 or normal_data.size() != side * side * 12:
+	if height_data.size() != side * side * 4:
+		return {"status": "fail", "error": "rd_missing_preencoded_data"}
+	if not use_rd_compute_normals and normal_data.size() != side * side * 12:
 		return {"status": "fail", "error": "rd_missing_preencoded_data"}
 	var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
 	if rd == null:
 		_rd_unavailable += 1
 		return {"status": "fail", "error": "rendering_device_unavailable"}
-	var height_rid: RID = _create_rd_texture(rd, side, RenderingDevice.DATA_FORMAT_R32_SFLOAT, height_data)
-	var normal_rid: RID = _create_rd_texture(rd, side, RenderingDevice.DATA_FORMAT_R32G32B32_SFLOAT, normal_data)
+	var texture_usage: int = (
+		RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	)
+	if use_rd_compute_normals:
+		texture_usage |= RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
+	var height_rid: RID = _create_rd_texture(rd, side, RenderingDevice.DATA_FORMAT_R32_SFLOAT, height_data, texture_usage)
+	var normal_result: Dictionary = _create_rd_normal_texture(rd, side, descriptor, height_rid, normal_data)
+	var normal_rid: RID = normal_result.get("normal_rid", RID()) as RID
 	if not height_rid.is_valid() or not normal_rid.is_valid():
 		if height_rid.is_valid():
 			rd.free_rid(height_rid)
 		if normal_rid.is_valid():
 			rd.free_rid(normal_rid)
-		return {"status": "fail", "error": "rd_texture_create_failed"}
+		return {"status": "fail", "error": str(normal_result.get("error", "rd_texture_create_failed"))}
 	var height_texture = ClassDB.instantiate("Texture2DRD")
 	var normal_texture = ClassDB.instantiate("Texture2DRD")
 	if height_texture == null or normal_texture == null:
@@ -139,11 +164,13 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 		"normal_texture": normal_texture,
 		"height_texture_rid": height_rid,
 		"normal_texture_rid": normal_rid,
+		"normal_compute_uniform_set": normal_result.get("uniform_set", RID()),
 		"height_bytes": height_data.size(),
-		"normal_bytes": normal_data.size(),
+		"normal_bytes": int(normal_result.get("normal_bytes", normal_data.size())),
 		"width": side,
 		"height": side,
 		"texture_backend": "rd",
+		"normal_texture_mode": str(normal_result.get("mode", "preencoded")),
 	}
 
 
@@ -181,7 +208,11 @@ func debug_state() -> Dictionary:
 		"rd_uploads": _rd_uploads,
 		"image_uploads": _image_uploads,
 		"rd_unavailable": _rd_unavailable,
+		"rd_compute_normal_uploads": _rd_compute_normal_uploads,
+		"rd_compute_normal_failures": _rd_compute_normal_failures,
+		"last_rd_compute_normal_error": _last_rd_compute_normal_error,
 		"use_rd_textures": use_rd_textures,
+		"use_rd_compute_normals": use_rd_compute_normals,
 		"height_mib": _mib(height_bytes),
 		"normal_mib": _mib(normal_bytes),
 		"total_mib": _mib(height_bytes + normal_bytes),
@@ -245,7 +276,13 @@ func _image_byte_size(image: Image) -> int:
 			return image.get_data().size()
 
 
-func _create_rd_texture(rd: RenderingDevice, side: int, data_format: int, data: PackedByteArray) -> RID:
+func _create_rd_texture(
+	rd: RenderingDevice,
+	side: int,
+	data_format: int,
+	data: PackedByteArray,
+	usage_bits: int
+) -> RID:
 	var format := RDTextureFormat.new()
 	format.width = side
 	format.height = side
@@ -254,12 +291,172 @@ func _create_rd_texture(rd: RenderingDevice, side: int, data_format: int, data: 
 	format.mipmaps = 1
 	format.format = data_format
 	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	format.usage_bits = (
+	format.usage_bits = usage_bits
+	return rd.texture_create(format, RDTextureView.new(), [data])
+
+
+func _create_rd_normal_texture(
+	rd: RenderingDevice,
+	side: int,
+	descriptor: Dictionary,
+	height_rid: RID,
+	normal_data: PackedByteArray
+) -> Dictionary:
+	if use_rd_compute_normals:
+		var compute: Dictionary = _create_compute_normal_texture(rd, side, descriptor, height_rid)
+		if compute.get("status", "fail") == "pass":
+			return compute
+		_rd_compute_normal_failures += 1
+		_last_rd_compute_normal_error = str(compute.get("error", "compute_normal_failed"))
+	if normal_data.size() != side * side * 12:
+		return {"status": "fail", "error": "rd_missing_preencoded_normal_data"}
+	var normal_usage: int = (
 		RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
 		| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	)
-	return rd.texture_create(format, RDTextureView.new(), [data])
+	var normal_rid: RID = _create_rd_texture(
+		rd,
+		side,
+		RenderingDevice.DATA_FORMAT_R32G32B32_SFLOAT,
+		normal_data,
+		normal_usage
+	)
+	if not normal_rid.is_valid():
+		return {"status": "fail", "error": "rd_normal_texture_create_failed"}
+	return {
+		"status": "pass",
+		"normal_rid": normal_rid,
+		"normal_bytes": normal_data.size(),
+		"mode": "preencoded",
+	}
+
+
+func _create_compute_normal_texture(
+	rd: RenderingDevice,
+	side: int,
+	descriptor: Dictionary,
+	height_rid: RID
+) -> Dictionary:
+	var step_m: float = float(descriptor.get("spacing_m", 0.0))
+	if side < 2 or not is_finite(step_m) or step_m <= 0.0:
+		return {"status": "fail", "error": "compute_normal_shape:%d %.6f" % [side, step_m]}
+	var normal_data := PackedByteArray()
+	normal_data.resize(side * side * 16)
+	var normal_usage: int = (
+		RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+		| RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	)
+	var normal_rid: RID = _create_rd_texture(
+		rd,
+		side,
+		RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT,
+		normal_data,
+		normal_usage
+	)
+	if not normal_rid.is_valid():
+		return {"status": "fail", "error": "compute_normal_texture_create_failed"}
+	var pipeline_result: Dictionary = _normal_compute_pipeline(rd, side, step_m)
+	if pipeline_result.get("status", "fail") != "pass":
+		rd.free_rid(normal_rid)
+		return pipeline_result
+	var shader_rid: RID = pipeline_result["shader_rid"] as RID
+	var pipeline_rid: RID = pipeline_result["pipeline_rid"] as RID
+	var height_uniform := RDUniform.new()
+	height_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	height_uniform.binding = 0
+	height_uniform.add_id(height_rid)
+	var normal_uniform := RDUniform.new()
+	normal_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	normal_uniform.binding = 1
+	normal_uniform.add_id(normal_rid)
+	var uniform_set: RID = rd.uniform_set_create([height_uniform, normal_uniform], shader_rid, 0)
+	if not uniform_set.is_valid():
+		rd.free_rid(normal_rid)
+		return {"status": "fail", "error": "compute_normal_uniform_set_failed"}
+	var compute_list: int = rd.compute_list_begin()
+	if compute_list < 0:
+		rd.free_rid(uniform_set)
+		rd.free_rid(normal_rid)
+		return {"status": "fail", "error": "compute_normal_list_begin_failed"}
+	rd.compute_list_bind_compute_pipeline(compute_list, pipeline_rid)
+	rd.compute_list_bind_uniform_set(compute_list, uniform_set, 0)
+	rd.compute_list_dispatch(compute_list, int(ceil(float(side) / 8.0)), int(ceil(float(side) / 8.0)), 1)
+	rd.compute_list_end()
+	_rd_compute_normal_uploads += 1
+	return {
+		"status": "pass",
+		"normal_rid": normal_rid,
+		"normal_bytes": normal_data.size(),
+		"uniform_set": uniform_set,
+		"mode": "rd_compute",
+	}
+
+
+func _normal_compute_pipeline(rd: RenderingDevice, side: int, step_m: float) -> Dictionary:
+	var pipeline_key: String = "%d:%.9f" % [side, step_m]
+	if _normal_compute_shaders.has(pipeline_key) and _normal_compute_pipelines.has(pipeline_key):
+		return {
+			"status": "pass",
+			"shader_rid": _normal_compute_shaders[pipeline_key],
+			"pipeline_rid": _normal_compute_pipelines[pipeline_key],
+		}
+	var shader_source := RDShaderSource.new()
+	shader_source.source_compute = _normal_compute_shader_source(side, step_m)
+	var shader_spirv: RDShaderSPIRV = rd.shader_compile_spirv_from_source(shader_source)
+	if shader_spirv == null or not shader_spirv.compile_error_compute.is_empty():
+		return {
+			"status": "fail",
+			"error": "compute_normal_shader_compile:%s" % (shader_spirv.compile_error_compute if shader_spirv != null else "null"),
+		}
+	var shader_rid: RID = rd.shader_create_from_spirv(shader_spirv)
+	var pipeline_rid: RID = rd.compute_pipeline_create(shader_rid)
+	if not shader_rid.is_valid() or not pipeline_rid.is_valid():
+		if pipeline_rid.is_valid():
+			rd.free_rid(pipeline_rid)
+		if shader_rid.is_valid():
+			rd.free_rid(shader_rid)
+		return {"status": "fail", "error": "compute_normal_pipeline_create_failed"}
+	_normal_compute_shaders[pipeline_key] = shader_rid
+	_normal_compute_pipelines[pipeline_key] = pipeline_rid
+	return {
+		"status": "pass",
+		"shader_rid": shader_rid,
+		"pipeline_rid": pipeline_rid,
+	}
+
+
+func _normal_compute_shader_source(side: int, step_m: float) -> String:
+	return """
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(r32f, set = 0, binding = 0) uniform readonly image2D height_tex;
+layout(rgba32f, set = 0, binding = 1) uniform writeonly image2D normal_tex;
+
+const int SIDE = %d;
+const float STEP_M = %.9f;
+
+float height_at(ivec2 pixel) {
+	ivec2 clamped_pixel = clamp(pixel, ivec2(0, 0), ivec2(SIDE - 1, SIDE - 1));
+	return imageLoad(height_tex, clamped_pixel).r;
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (pixel.x >= SIDE || pixel.y >= SIDE) {
+		return;
+	}
+	float left_h = height_at(pixel + ivec2(-1, 0));
+	float right_h = height_at(pixel + ivec2(1, 0));
+	float down_h = height_at(pixel + ivec2(0, -1));
+	float up_h = height_at(pixel + ivec2(0, 1));
+	vec3 normal = normalize(vec3(left_h - right_h, STEP_M * 2.0, down_h - up_h));
+	vec3 encoded = normal * 0.5 + vec3(0.5);
+	imageStore(normal_tex, pixel, vec4(encoded, 1.0));
+}
+""" % [side, step_m]
 
 
 func _texture_from_pool_or_create(image: Image) -> ImageTexture:
@@ -287,10 +484,13 @@ func _release_page_resources(cache_key: String, allow_pool: bool) -> void:
 		if rd != null:
 			var height_rid: RID = entry.get("height_texture_rid", RID()) as RID
 			var normal_rid: RID = entry.get("normal_texture_rid", RID()) as RID
+			var uniform_set: RID = entry.get("normal_compute_uniform_set", RID()) as RID
 			if height_texture != null:
 				height_texture.set("texture_rd_rid", RID())
 			if normal_texture != null:
 				normal_texture.set("texture_rd_rid", RID())
+			if uniform_set.is_valid():
+				rd.free_rid(uniform_set)
 			if height_rid.is_valid():
 				rd.free_rid(height_rid)
 			if normal_rid.is_valid():
@@ -327,6 +527,23 @@ func _trim_texture_pool() -> void:
 			_texture_pool.erase(key)
 		else:
 			_texture_pool[key] = bucket
+
+
+func _release_compute_resources() -> void:
+	var rd: RenderingDevice = null
+	if RenderingServer.has_method("get_rendering_device"):
+		rd = RenderingServer.call("get_rendering_device") as RenderingDevice
+	if rd != null:
+		for pipeline_value in _normal_compute_pipelines.values():
+			var pipeline_rid: RID = pipeline_value as RID
+			if pipeline_rid.is_valid():
+				rd.free_rid(pipeline_rid)
+		for shader_value in _normal_compute_shaders.values():
+			var shader_rid: RID = shader_value as RID
+			if shader_rid.is_valid():
+				rd.free_rid(shader_rid)
+	_normal_compute_pipelines.clear()
+	_normal_compute_shaders.clear()
 
 
 func _pooled_texture_count() -> int:

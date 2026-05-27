@@ -39,6 +39,7 @@ far_clipmap_page_cache_max_pages = 64
 far_clipmap_gpu_page_residency_max_pages = 64
 use_far_clipmap_gpu_page_normal_backend = true
 use_far_clipmap_gpu_rd_page_textures = true
+use_far_clipmap_gpu_rd_compute_normals = true
 distance_fog_depth_begin_m = 30000.0
 distance_fog_depth_end_m = 33000.0
 distance_fog_color = Color(0.18, 0.18, 0.18, 1)

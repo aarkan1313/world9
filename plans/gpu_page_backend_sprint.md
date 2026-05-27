@@ -27,6 +27,8 @@ The current durable direction is persistent terrain pages:
 - Added a review-only `TerrainQualityProfile.GPU_PAGE_REVIEW` contract that routes the normal walk-preview scene through direct RD page residency without changing the saved default walk profile.
 - Added saved review scene `res://worldgen_terrain/scenes/terrain_gpu_page_review.tscn`.
 - Added a main-renderer-device compute-to-texture probe proving a compute shader can write an `R32F` texture RID that can be sampled/wrapped later.
+- Added opt-in main-renderer-device far-page normal texture compute (`use_gpu_rd_compute_normals`) inside `TerrainGpuPageResidency`.
+- Updated `gpu_page_review` and `terrain_gpu_page_review.tscn` so the review path now uploads RF height pages as `Texture2DRD` and computes RGBAF normal page textures directly on the main RenderingDevice.
 - Renderer-enabled proof currently passes on D3D12 / RTX 5090 Laptop GPU.
 - The probe validates:
   - storage-buffer dispatch
@@ -56,6 +58,12 @@ The current durable direction is persistent terrain pages:
   - main RenderingDevice storage-image writes
   - `R32F` texture readback for proof only
   - no invalid main-device `submit()` / `sync()` calls
+- The direct RD compute-normal residency gate validates:
+  - height page texture creation with storage-image usage
+  - main RenderingDevice compute dispatch from height texture to normal texture
+  - `Texture2DRD` wrapping of both height and computed normal texture RIDs
+  - zero ImageTexture uploads on the opt-in review path
+  - explicit cleanup of page texture and compute uniform-set RIDs
 
 ## Important Constraint
 
@@ -78,7 +86,7 @@ height page bytes + page metadata
     -> native preencoded RF/RGBF bytes
     -> GPU compute proof path
     -> direct Texture2DRD residency path
-    -> future GPU compute-to-texture path
+    -> opt-in main RenderingDevice compute-to-texture normal path
   -> existing page residency/material commit contract
 ```
 
@@ -88,6 +96,7 @@ Acceptance for the next slice:
 - no per-frame renderer device creation in live terrain
 - no forced GPU readback in the default walk scene
 - direct RD texture residency remains opt-in until visual/perf acceptance
+- direct RD compute normals remain opt-in until visual/perf acceptance
 - `gpu_page_review` and `terrain_gpu_page_review.tscn` are the review entry points for this path; `walk_review` and `terrain_walk_preview.tscn` remain the production-safe/default review path
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
@@ -95,8 +104,7 @@ Acceptance for the next slice:
 ## Not Done Yet
 
 - Default live use of direct RD page textures.
-- GPU compute-to-texture page writes.
-- Terrain integration of compute-to-texture page writes.
+- GPU compute-to-texture height-page generation from provider facts.
 - GPU-resident material masks.
 - GPU page generation from DEM/provider facts.
 - Live walk scene defaulting to GPU compute.

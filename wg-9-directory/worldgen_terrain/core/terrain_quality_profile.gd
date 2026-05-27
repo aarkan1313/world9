@@ -116,6 +116,7 @@ static func _walk_review_profile() -> Dictionary:
 			"far_clipmap_gpu_page_residency_max_pages": 64,
 			"use_far_clipmap_gpu_page_normal_backend": false,
 			"use_far_clipmap_gpu_rd_page_textures": false,
+			"use_far_clipmap_gpu_rd_compute_normals": false,
 			"distance_fog_depth_begin_m": 30000.0,
 			"distance_fog_depth_end_m": 33000.0,
 			"camera_far_m": 120000.0,
@@ -166,12 +167,14 @@ static func _gpu_page_review_profile() -> Dictionary:
 	settings.merge({
 		"use_far_clipmap_gpu_page_normal_backend": true,
 		"use_far_clipmap_gpu_rd_page_textures": true,
+		"use_far_clipmap_gpu_rd_compute_normals": true,
 	}, true)
 	profile_data["settings"] = settings
 	profile_data["budgets"] = {
 		"gpu_page_review_max_image_uploads": 0,
 		"gpu_page_review_min_rd_uploads": 4,
 		"gpu_page_review_min_normal_dispatches": 0,
+		"gpu_page_review_min_rd_compute_normal_uploads": 4,
 	}
 	profile_data["review_only"] = true
 	return profile_data

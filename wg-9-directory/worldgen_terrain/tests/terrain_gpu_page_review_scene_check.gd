@@ -51,6 +51,8 @@ func _check_scene(packed: PackedScene, errors: Array[String]) -> void:
 		errors.append("normal_backend_disabled")
 	if not bool(scene.get("use_far_clipmap_gpu_rd_page_textures")):
 		errors.append("rd_textures_disabled")
+	if not bool(scene.get("use_far_clipmap_gpu_rd_compute_normals")):
+		errors.append("rd_compute_normals_disabled")
 	if not bool(scene.call("setup")):
 		errors.append("setup_failed:%s" % str(scene.get("errors")))
 	else:
@@ -62,6 +64,10 @@ func _check_scene(packed: PackedScene, errors: Array[String]) -> void:
 			var gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
 			if int(gpu_state.get("rd_uploads", 0)) < int(scene.get("far_clipmap_level_count")):
 				errors.append("rd_uploads:%s" % str(gpu_state))
+			if int(gpu_state.get("rd_compute_normal_uploads", 0)) < int(scene.get("far_clipmap_level_count")):
+				errors.append("rd_compute_normal_uploads:%s" % str(gpu_state))
+			if int(gpu_state.get("rd_compute_normal_failures", 0)) != 0:
+				errors.append("rd_compute_normal_failures:%s" % str(gpu_state))
 			if int(gpu_state.get("image_uploads", 0)) != 0:
 				errors.append("image_uploads:%s" % str(gpu_state))
 			if far_clipmap.has_method("clear_levels"):
