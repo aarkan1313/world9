@@ -75,6 +75,7 @@ var last_page_descriptor_preencoded_hits: int = 0
 var last_gpu_page_normal_dispatches: int = 0
 var last_gpu_page_normal_error: String = ""
 var last_gpu_provider_page_dispatches: int = 0
+var total_gpu_provider_page_dispatches: int = 0
 var last_gpu_provider_page_error: String = ""
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
@@ -168,6 +169,7 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	last_gpu_page_normal_dispatches = 0
 	last_gpu_page_normal_error = ""
 	last_gpu_provider_page_dispatches = 0
+	total_gpu_provider_page_dispatches = 0
 	last_gpu_provider_page_error = ""
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
@@ -348,6 +350,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"active_page_blend_count": active_page_blend_count,
 		"staged_native_payload_count": _staged_native_payloads.size(),
 		"use_persistent_page_mesh": use_persistent_page_mesh,
+		"use_gpu_provider_page_textures": use_gpu_provider_page_textures,
+		"can_use_gpu_provider_page_textures": _can_use_gpu_provider_page_textures(),
 		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
 		"gpu_page_residency": _gpu_page_residency_state(),
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
@@ -366,6 +370,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_gpu_page_normal_dispatches": last_gpu_page_normal_dispatches,
 		"last_gpu_page_normal_error": last_gpu_page_normal_error,
 		"last_gpu_provider_page_dispatches": last_gpu_provider_page_dispatches,
+		"total_gpu_provider_page_dispatches": total_gpu_provider_page_dispatches,
 		"last_gpu_provider_page_error": last_gpu_provider_page_error,
 	}
 
@@ -384,6 +389,8 @@ func stats() -> Dictionary:
 		"active_page_blend_count": active_page_blend_count,
 		"staged_native_payload_count": _staged_native_payloads.size(),
 		"use_persistent_page_mesh": use_persistent_page_mesh,
+		"use_gpu_provider_page_textures": use_gpu_provider_page_textures,
+		"can_use_gpu_provider_page_textures": _can_use_gpu_provider_page_textures(),
 		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
 		"gpu_page_residency": _gpu_page_residency_state(),
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
@@ -402,6 +409,7 @@ func stats() -> Dictionary:
 		"last_gpu_page_normal_dispatches": last_gpu_page_normal_dispatches,
 		"last_gpu_page_normal_error": last_gpu_page_normal_error,
 		"last_gpu_provider_page_dispatches": last_gpu_provider_page_dispatches,
+		"total_gpu_provider_page_dispatches": total_gpu_provider_page_dispatches,
 		"last_gpu_provider_page_error": last_gpu_provider_page_error,
 	}
 
@@ -1267,6 +1275,8 @@ func _can_use_native_workers() -> bool:
 		return false
 	if not world.provider.has_method("native_prepared_height_grid_request"):
 		return false
+	if use_gpu_provider_page_textures and _can_use_height_only_gpu_page_payload():
+		return false
 	if _provider_profile_disables_native_grid():
 		return false
 	return true
@@ -1832,6 +1842,7 @@ func _attach_gpu_provider_page_texture(
 	heightfield["rd_owned_rids"] = result.get("rd_owned_rids", []) as Array
 	heightfield["gpu_provider_page_block_count"] = int(result.get("block_count", blocks.size()))
 	last_gpu_provider_page_dispatches += int(result.get("block_count", blocks.size()))
+	total_gpu_provider_page_dispatches += int(result.get("block_count", blocks.size()))
 	last_gpu_provider_page_error = ""
 	return {"status": "pass", "level": level}
 

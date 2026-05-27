@@ -179,6 +179,9 @@ func _descriptor_summary(scene: Node3D) -> Dictionary:
 		"pass_count": 0,
 		"height_image_data_count": 0,
 		"height_image_only_count": 0,
+		"height_texture_rid_count": 0,
+		"provider_texture_payload_count": 0,
+		"rd_owned_rid_descriptor_count": 0,
 		"height_image_wrapper_count": 0,
 		"normal_image_wrapper_count": 0,
 	}
@@ -197,11 +200,24 @@ func _descriptor_summary(scene: Node3D) -> Dictionary:
 			summary["height_image_data_count"] = int(summary["height_image_data_count"]) + 1
 		if bool(descriptor.get("height_image_only", false)):
 			summary["height_image_only_count"] = int(summary["height_image_only_count"]) + 1
+		if _descriptor_has_valid_height_texture(descriptor):
+			summary["height_texture_rid_count"] = int(summary["height_texture_rid_count"]) + 1
+		if str(descriptor.get("texture_payload_mode", "")) == "gpu_provider_rd_height_texture":
+			summary["provider_texture_payload_count"] = int(summary["provider_texture_payload_count"]) + 1
+		if (descriptor.get("rd_owned_rids", []) as Array).size() > 0:
+			summary["rd_owned_rid_descriptor_count"] = int(summary["rd_owned_rid_descriptor_count"]) + 1
 		if descriptor.has("height_image"):
 			summary["height_image_wrapper_count"] = int(summary["height_image_wrapper_count"]) + 1
 		if descriptor.has("normal_image"):
 			summary["normal_image_wrapper_count"] = int(summary["normal_image_wrapper_count"]) + 1
 	return summary
+
+
+func _descriptor_has_valid_height_texture(descriptor: Dictionary) -> bool:
+	if not descriptor.has("height_texture_rid"):
+		return false
+	var rid_value: Variant = descriptor.get("height_texture_rid", RID())
+	return rid_value is RID and (rid_value as RID).is_valid()
 
 
 func _check_motion_samples(samples: Array[Dictionary], scene: Node3D, errors: Array[String]) -> void:
@@ -220,10 +236,16 @@ func _check_motion_samples(samples: Array[Dictionary], scene: Node3D, errors: Ar
 			errors.append("motion_descriptor_count:%s" % str(sample))
 		if int(descriptor_state.get("pass_count", 0)) < expected_levels:
 			errors.append("motion_descriptor_pass:%s" % str(sample))
-		if int(descriptor_state.get("height_image_data_count", 0)) < expected_levels:
-			errors.append("motion_descriptor_height_data:%s" % str(sample))
+		if int(descriptor_state.get("height_image_data_count", 0)) != 0:
+			errors.append("motion_descriptor_unexpected_height_data:%s" % str(sample))
 		if int(descriptor_state.get("height_image_only_count", 0)) < expected_levels:
 			errors.append("motion_descriptor_height_only:%s" % str(sample))
+		if int(descriptor_state.get("height_texture_rid_count", 0)) < expected_levels:
+			errors.append("motion_descriptor_height_texture_rid:%s" % str(sample))
+		if int(descriptor_state.get("provider_texture_payload_count", 0)) < expected_levels:
+			errors.append("motion_descriptor_provider_texture:%s" % str(sample))
+		if int(descriptor_state.get("rd_owned_rid_descriptor_count", 0)) < expected_levels:
+			errors.append("motion_descriptor_rd_owned_rids:%s" % str(sample))
 		if int(descriptor_state.get("height_image_wrapper_count", 0)) != 0 or int(descriptor_state.get("normal_image_wrapper_count", 0)) != 0:
 			errors.append("motion_descriptor_wrappers:%s" % str(sample))
 	if page_key_signatures.size() < 3:
@@ -245,6 +267,10 @@ func _check_final_stats(stats: Dictionary, scene: Node3D, errors: Array[String])
 		errors.append("motion_rd_normal_failures:%s" % str(gpu_state))
 	if int(gpu_state.get("image_uploads", 0)) != 0:
 		errors.append("motion_image_uploads:%s" % str(gpu_state))
+	if int(stats.get("total_gpu_provider_page_dispatches", 0)) < expected_levels * 2:
+		errors.append("motion_gpu_provider_page_dispatches:%s" % str(stats))
+	if str(stats.get("last_gpu_provider_page_error", "")) != "":
+		errors.append("motion_gpu_provider_page_error:%s" % str(stats.get("last_gpu_provider_page_error", "")))
 	if int(page_cache.get("protected_evictions", 0)) != 0:
 		errors.append("motion_protected_page_evictions:%s" % str(page_cache))
 

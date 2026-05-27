@@ -238,6 +238,9 @@ func _descriptor_summary(scene: Node3D) -> Dictionary:
 		"height_image_data_count": 0,
 		"normal_image_data_count": 0,
 		"height_image_only_count": 0,
+		"height_texture_rid_count": 0,
+		"provider_texture_payload_count": 0,
+		"rd_owned_rid_descriptor_count": 0,
 		"height_image_wrapper_count": 0,
 		"normal_image_wrapper_count": 0,
 		"payload_modes": [],
@@ -260,6 +263,12 @@ func _descriptor_summary(scene: Node3D) -> Dictionary:
 			summary["normal_image_data_count"] = int(summary["normal_image_data_count"]) + 1
 		if bool(descriptor.get("height_image_only", false)):
 			summary["height_image_only_count"] = int(summary["height_image_only_count"]) + 1
+		if _descriptor_has_valid_height_texture(descriptor):
+			summary["height_texture_rid_count"] = int(summary["height_texture_rid_count"]) + 1
+		if str(descriptor.get("texture_payload_mode", "")) == "gpu_provider_rd_height_texture":
+			summary["provider_texture_payload_count"] = int(summary["provider_texture_payload_count"]) + 1
+		if (descriptor.get("rd_owned_rids", []) as Array).size() > 0:
+			summary["rd_owned_rid_descriptor_count"] = int(summary["rd_owned_rid_descriptor_count"]) + 1
 		if descriptor.has("height_image"):
 			summary["height_image_wrapper_count"] = int(summary["height_image_wrapper_count"]) + 1
 		if descriptor.has("normal_image"):
@@ -271,16 +280,29 @@ func _descriptor_summary(scene: Node3D) -> Dictionary:
 	return summary
 
 
+func _descriptor_has_valid_height_texture(descriptor: Dictionary) -> bool:
+	if not descriptor.has("height_texture_rid"):
+		return false
+	var rid_value: Variant = descriptor.get("height_texture_rid", RID())
+	return rid_value is RID and (rid_value as RID).is_valid()
+
+
 func _check_descriptor_summary(summary: Dictionary, scene: Node3D, errors: Array[String]) -> void:
 	var expected_levels: int = int(scene.get("far_clipmap_level_count"))
 	if int(summary.get("count", 0)) < expected_levels:
 		errors.append("descriptor_count:%s" % str(summary))
 	if int(summary.get("pass_count", 0)) < expected_levels:
 		errors.append("descriptor_pass_count:%s" % str(summary))
-	if int(summary.get("height_image_data_count", 0)) < expected_levels:
-		errors.append("descriptor_height_data:%s" % str(summary))
+	if int(summary.get("height_image_data_count", 0)) != 0:
+		errors.append("descriptor_unexpected_height_data:%s" % str(summary))
 	if int(summary.get("height_image_only_count", 0)) < expected_levels:
 		errors.append("descriptor_height_only:%s" % str(summary))
+	if int(summary.get("height_texture_rid_count", 0)) < expected_levels:
+		errors.append("descriptor_height_texture_rid:%s" % str(summary))
+	if int(summary.get("provider_texture_payload_count", 0)) < expected_levels:
+		errors.append("descriptor_provider_texture:%s" % str(summary))
+	if int(summary.get("rd_owned_rid_descriptor_count", 0)) < expected_levels:
+		errors.append("descriptor_rd_owned_rids:%s" % str(summary))
 	if int(summary.get("height_image_wrapper_count", 0)) != 0 or int(summary.get("normal_image_wrapper_count", 0)) != 0:
 		errors.append("descriptor_image_wrappers:%s" % str(summary))
 

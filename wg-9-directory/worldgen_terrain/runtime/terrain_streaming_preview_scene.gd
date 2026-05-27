@@ -75,6 +75,7 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export var use_far_clipmap_gpu_page_normal_backend: bool = false
 @export var use_far_clipmap_gpu_rd_page_textures: bool = false
 @export var use_far_clipmap_gpu_rd_compute_normals: bool = false
+@export var use_far_clipmap_gpu_provider_page_textures: bool = false
 @export_range(0.0, 4.0, 0.05) var far_clipmap_surface_normal_strength: float = 1.0
 @export var allow_profile_fallback_sync_rebuilds: bool = false
 @export_range(1, 4, 1) var max_profile_fallback_far_levels_per_update: int = 1
@@ -770,6 +771,7 @@ func _configure_far_clipmap_node() -> void:
 	far_clipmap.use_gpu_page_normal_backend = use_far_clipmap_gpu_page_normal_backend
 	far_clipmap.use_gpu_rd_page_textures = use_far_clipmap_gpu_rd_page_textures
 	far_clipmap.use_gpu_rd_compute_normals = use_far_clipmap_gpu_rd_compute_normals
+	far_clipmap.use_gpu_provider_page_textures = use_far_clipmap_gpu_provider_page_textures
 	far_clipmap.allow_profile_fallback_sync_rebuilds = allow_profile_fallback_sync_rebuilds
 	far_clipmap.max_profile_fallback_rebuild_levels_per_update = max_profile_fallback_far_levels_per_update
 	far_clipmap.set_elevation_color_material(debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR)
@@ -780,7 +782,7 @@ func _configure_far_clipmap_node() -> void:
 
 
 func _far_clipmap_config_key_for_current_settings() -> String:
-	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d:%d" % [
+	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%d:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d:%d" % [
 		far_clipmap_level_count,
 		far_clipmap_base_spacing_m,
 		far_clipmap_base_outer_extent_m,
@@ -795,6 +797,7 @@ func _far_clipmap_config_key_for_current_settings() -> String:
 		1 if use_far_clipmap_gpu_page_normal_backend else 0,
 		1 if use_far_clipmap_gpu_rd_page_textures else 0,
 		1 if use_far_clipmap_gpu_rd_compute_normals else 0,
+		1 if use_far_clipmap_gpu_provider_page_textures else 0,
 		far_clipmap_surface_normal_strength,
 		far_clipmap_visual_y_bias_per_level_m,
 		1 if far_clipmap_full_underlay_level0 else 0,

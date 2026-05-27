@@ -149,6 +149,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Extend GPU page residency so a main-renderer-device height texture RID can be supplied directly, wrapped as `Texture2DRD`, normal-computed on the renderer device, and cleaned up through the existing bounded residency lifecycle.
 - [x] Add a main-renderer-device provider-page texture backend and GPU gate proving prepared-provider descriptors can dispatch directly into `R32F` height texture RIDs, then flow through page residency and RD normal compute with zero ImageTexture uploads.
 - [x] Wire the provider-page texture backend into far clipmap commits behind an opt-in flag for region-local and cross-region pages, with a renderer-enabled gate proving zero sync bytes/images and zero ImageTexture uploads on that live path.
+- [x] Promote provider-page texture dispatch into the normal walk/GPU review profiles and saved review scenes when a renderer device exists, with gates proving cumulative provider dispatches, direct RD residency, RD normal compute, and zero ImageTexture uploads.
 - [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.
@@ -171,7 +172,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Keep scale/relief profiles review-only until biome/material context exists, rather than promoting `medium_scale` or `compressed_scale` prematurely.
 - [x] Add lightweight chunk-build instrumentation for CPU/native payload counts and normal-generation timing, and skip CPU normal generation for unlit/debug chunk materials that do not consume normals.
 - [ ] Keep erosion after accepted base relief/scale, kernel influence tuning, useful hydrology hints, pass/corridor review, and first river/channel routing facts.
-- [ ] Move default live far page generation/upload toward GPU compute or lower-churn native/direct-RD texture upload after texture-displaced page rendering remains visually accepted.
+- [x] Move default live far page generation/upload toward renderer-device provider texture compute for the current prepared-provider path, while keeping unsupported renderer contexts on the native/CPU fallback.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.
 - [x] Add `TerrainChunkRenderer` as the first renderer boundary for chunk MeshInstance lifecycle, active-node ownership, and bounded pooling.

@@ -82,6 +82,7 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		"use_far_clipmap_gpu_page_normal_backend",
 		"use_far_clipmap_gpu_rd_page_textures",
 		"use_far_clipmap_gpu_rd_compute_normals",
+		"use_far_clipmap_gpu_provider_page_textures",
 		"distance_fog_depth_begin_m",
 		"distance_fog_depth_end_m",
 		"camera_far_m",
@@ -99,6 +100,8 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		errors.append("walk_profile_rd_textures_disabled")
 	if not bool(settings.get("use_far_clipmap_gpu_rd_compute_normals", false)):
 		errors.append("walk_profile_rd_compute_normals_disabled")
+	if not bool(settings.get("use_far_clipmap_gpu_provider_page_textures", false)):
+		errors.append("walk_profile_gpu_provider_page_textures_disabled")
 	var visibility: Dictionary = TerrainQualityProfileScript.visibility_contract(profile)
 	if float(visibility.get("hidden_buffer_m", 0.0)) <= 0.0:
 		errors.append("visibility_hidden_buffer:%.3f" % float(visibility.get("hidden_buffer_m", 0.0)))
@@ -196,6 +199,8 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 		errors.append("gpu_page_profile_rd_textures_disabled")
 	if not bool(settings.get("use_far_clipmap_gpu_rd_compute_normals", false)):
 		errors.append("gpu_page_profile_rd_compute_normals_disabled")
+	if not bool(settings.get("use_far_clipmap_gpu_provider_page_textures", false)):
+		errors.append("gpu_page_profile_provider_page_textures_disabled")
 	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
 	if int(budgets.get("gpu_page_review_max_image_uploads", -1)) != 0:
 		errors.append("gpu_page_profile_image_budget:%s" % str(budgets))
@@ -205,6 +210,8 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 		errors.append("gpu_page_profile_normal_budget:%s" % str(budgets))
 	if int(budgets.get("gpu_page_review_min_rd_compute_normal_uploads", 0)) <= 0:
 		errors.append("gpu_page_profile_rd_compute_normal_budget:%s" % str(budgets))
+	if int(budgets.get("gpu_page_review_min_provider_page_dispatches", 0)) <= 0:
+		errors.append("gpu_page_profile_provider_dispatch_budget:%s" % str(budgets))
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
@@ -230,6 +237,11 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 				errors.append("gpu_page_profile_rd_not_configured:%s" % str(gpu_state))
 			if not bool(gpu_state.get("use_rd_compute_normals", false)):
 				errors.append("gpu_page_profile_rd_compute_not_configured:%s" % str(gpu_state))
+			if _rendering_device_available():
+				if int(stats.get("total_gpu_provider_page_dispatches", 0)) < int(scene.get("far_clipmap_level_count")):
+					errors.append("gpu_page_profile_provider_dispatches:%s" % str(stats))
+				if str(stats.get("last_gpu_provider_page_error", "")) != "":
+					errors.append("gpu_page_profile_provider_error:%s" % str(stats))
 	scene.queue_free()
 
 
@@ -284,3 +296,11 @@ func _check_high_density_profile_contract(errors: Array[String]) -> void:
 		if absf(spacing_m - 2.0) > 0.0001:
 			errors.append("high_density_spacing:%.6f" % spacing_m)
 	scene.queue_free()
+
+
+func _rendering_device_available() -> bool:
+	return (
+		ClassDB.class_exists("Texture2DRD")
+		and RenderingServer.has_method("get_rendering_device")
+		and RenderingServer.call("get_rendering_device") != null
+	)

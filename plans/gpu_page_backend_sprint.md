@@ -153,6 +153,12 @@ The current durable direction is persistent terrain pages:
   The test covers both a region-local clipmap page and a cross-region page at
   the origin, verifying provider dispatch/block counts, descriptor modes, zero
   sync bytes/images, zero ImageTexture uploads, and clean RD normal compute.
+- Promoted the provider-page texture path into `walk_review`,
+  `gpu_page_review`, `terrain_walk_preview.tscn`, and
+  `terrain_gpu_page_review.tscn` when a renderer device is available. The
+  review gates now assert cumulative provider-page dispatches, zero
+  ImageTexture uploads, RD normal compute, and a non-error provider path while
+  headless runs keep the CPU/native fallback behavior.
 
 ## Important Constraint
 
@@ -196,11 +202,15 @@ Acceptance for the next slice:
 - no visual semantic change
 - no per-frame renderer device creation in live terrain
 - no forced GPU readback in the default walk scene
-- direct RD texture residency remains opt-in until visual/perf acceptance
-- direct RD compute normals remain opt-in until visual/perf acceptance
+- direct RD texture residency remains explicit in the review profiles and keeps
+  ImageTexture fallback for unsupported renderer contexts
+- direct RD compute normals remain explicit in the review profiles and keep
+  fallback paths for unsupported renderer contexts
 - height-image-only worker payloads remain tied to the direct-RD compute-normal
   path and must not be used by fallback ImageTexture materials
-- `gpu_page_review` and `terrain_gpu_page_review.tscn` are the review entry points for this path; `walk_review` and `terrain_walk_preview.tscn` remain the production-safe/default review path
+- `gpu_page_review`, `terrain_gpu_page_review.tscn`, `walk_review`, and
+  `terrain_walk_preview.tscn` now all exercise the provider-page texture path
+  when a renderer device exists
 - the GPU page review capture must stay present in the Godot review index before
   the direct-RD path can be considered visually accepted
 - the GPU page motion manifest must stay present in runtime readiness now that
@@ -216,8 +226,8 @@ Acceptance for the next slice:
 ## Not Done Yet
 
 - GPU-resident material masks.
-- Full live walk scene height generation on GPU compute.
-- Default live streaming integration of the prepared-provider GPU page path.
+- Full live walk scene height generation on GPU compute for near chunks/local
+  detail.
 - Pass/corridor facts, hydrology facts, erosion facts, and any final provider
   branches beyond the macro-height/page-profile/kernel/provider-page proof.
 - Re-promoting corridor tour as an acceptance gate.

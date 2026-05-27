@@ -117,6 +117,7 @@ static func _walk_review_profile() -> Dictionary:
 			"use_far_clipmap_gpu_page_normal_backend": true,
 			"use_far_clipmap_gpu_rd_page_textures": true,
 			"use_far_clipmap_gpu_rd_compute_normals": true,
+			"use_far_clipmap_gpu_provider_page_textures": true,
 			"distance_fog_depth_begin_m": 30000.0,
 			"distance_fog_depth_end_m": 33000.0,
 			"camera_far_m": 120000.0,
@@ -168,6 +169,7 @@ static func _gpu_page_review_profile() -> Dictionary:
 		"use_far_clipmap_gpu_page_normal_backend": true,
 		"use_far_clipmap_gpu_rd_page_textures": true,
 		"use_far_clipmap_gpu_rd_compute_normals": true,
+		"use_far_clipmap_gpu_provider_page_textures": true,
 	}, true)
 	profile_data["settings"] = settings
 	profile_data["budgets"] = {
@@ -175,6 +177,7 @@ static func _gpu_page_review_profile() -> Dictionary:
 		"gpu_page_review_min_rd_uploads": 4,
 		"gpu_page_review_min_normal_dispatches": 0,
 		"gpu_page_review_min_rd_compute_normal_uploads": 4,
+		"gpu_page_review_min_provider_page_dispatches": 4,
 	}
 	profile_data["review_only"] = true
 	return profile_data
