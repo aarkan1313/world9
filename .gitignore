@@ -3,6 +3,7 @@
 /factory/
 /review_exports/
 /prototypes/
+/backups/
 
 # Python cache/output
 __pycache__/

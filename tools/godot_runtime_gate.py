@@ -107,6 +107,10 @@ QUALITY_HEADLESS_CHECKS = [
     "terrain_walk_preview_257_perf_probe_check.gd",
 ]
 
+GPU_CHECKS = [
+    "terrain_gpu_compute_probe_check.gd",
+]
+
 RENDER_CHECKS = [
     "terrain_preview_render_capture_check.gd",
     "terrain_streaming_render_capture_check.gd",
@@ -127,6 +131,7 @@ SUITES = {
     "fast": FAST_HEADLESS_CHECKS,
     "extended": EXTENDED_HEADLESS_CHECKS,
     "quality": QUALITY_HEADLESS_CHECKS,
+    "gpu": GPU_CHECKS,
     "render": RENDER_CHECKS,
     "review": REVIEW_CHECKS,
 }
@@ -135,6 +140,7 @@ DEFAULT_TIMEOUT_BY_SUITE = {
     "fast": 30,
     "extended": 30,
     "quality": 90,
+    "gpu": 60,
     "render": 120,
     "review": 180,
 }
@@ -143,6 +149,7 @@ HEADLESS_BY_SUITE = {
     "fast": True,
     "extended": True,
     "quality": True,
+    "gpu": False,
     "render": False,
     "review": False,
 }
