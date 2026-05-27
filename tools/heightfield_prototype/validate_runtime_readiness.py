@@ -674,6 +674,7 @@ def _check_gpu_page_motion_manifest(manifest: dict[str, Any], errors: list[str])
     check(int(gpu_state.get("rd_compute_normal_failures", -1)) == 0, errors, "gpu_page_motion_rd_normal_failures")
     check(int(gpu_state.get("image_uploads", -1)) == 0, errors, "gpu_page_motion_image_uploads")
     check(int(final_stats.get("total_gpu_provider_page_dispatches", 0)) >= 4, errors, "gpu_page_motion_provider_dispatches")
+    check(int(final_stats.get("total_gpu_provider_metadata_only_commits", 0)) >= 4, errors, "gpu_page_motion_provider_metadata_only_commits")
     check(str(final_stats.get("last_gpu_provider_page_error", "")) == "", errors, "gpu_page_motion_provider_error")
     check(int(page_cache.get("protected_evictions", -1)) == 0, errors, "gpu_page_motion_protected_page_evictions")
 

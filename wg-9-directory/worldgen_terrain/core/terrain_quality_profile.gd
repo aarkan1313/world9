@@ -166,6 +166,7 @@ static func _gpu_page_review_profile() -> Dictionary:
 	profile_data["description"] = "Explicit GPU far-page review profile using the same direct Texture2DRD page residency path as walk_review, kept as a stable renderer-enabled acceptance target."
 	var settings: Dictionary = (profile_data["settings"] as Dictionary).duplicate(true)
 	settings.merge({
+		"far_clipmap_rebuild_levels_per_update": 1,
 		"use_far_clipmap_gpu_page_normal_backend": true,
 		"use_far_clipmap_gpu_rd_page_textures": true,
 		"use_far_clipmap_gpu_rd_compute_normals": true,

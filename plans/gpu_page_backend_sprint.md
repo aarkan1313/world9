@@ -159,6 +159,16 @@ The current durable direction is persistent terrain pages:
   review gates now assert cumulative provider-page dispatches, zero
   ImageTexture uploads, RD normal compute, and a non-error provider path while
   headless runs keep the CPU/native fallback behavior.
+- Removed the hidden CPU height-page sampling cost from the provider-texture
+  far-page commit path. When `use_gpu_provider_page_textures` is available,
+  `TerrainFarClipmapNode` now builds only stable page metadata, dispatches
+  provider blocks directly into the renderer-device height texture, and uses
+  conservative page bounds for culling instead of sampling a CPU height array
+  before the GPU dispatch. The CPU sampler remains as the fallback when the GPU
+  provider path fails or is unavailable.
+- Paced `gpu_page_review` / `terrain_gpu_page_review.tscn` far-page commits to
+  one clipmap level per update so the explicit review scene proves the same
+  no-readback renderer path without committing all levels in one visible hitch.
 
 ## Important Constraint
 
@@ -222,6 +232,9 @@ Acceptance for the next slice:
 - provider-page GPU texture dispatch handles pages that cross base region
   boundaries by splitting them into per-region GPU blocks that write into one
   final renderer-device height texture
+- the provider-texture path must not build a CPU `height_samples` array before
+  dispatching the GPU texture except when falling back from an unavailable or
+  failed GPU path
 
 ## Not Done Yet
 

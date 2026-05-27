@@ -70,6 +70,8 @@ func _check_gpu_page_review_profile(errors: Array[String]) -> void:
 			errors.append("normal_error:%s" % str(stats))
 		if int(stats.get("total_gpu_provider_page_dispatches", 0)) < int(budgets.get("gpu_page_review_min_provider_page_dispatches", 0)):
 			errors.append("provider_page_dispatches:%s" % str(stats))
+		if int(stats.get("total_gpu_provider_metadata_only_commits", 0)) < int(budgets.get("gpu_page_review_min_provider_page_dispatches", 0)):
+			errors.append("provider_metadata_only_commits:%s" % str(stats))
 		if not str(stats.get("last_gpu_provider_page_error", "")).is_empty():
 			errors.append("provider_page_error:%s" % str(stats))
 	_clear_scene_now(scene)

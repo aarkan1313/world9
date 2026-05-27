@@ -269,6 +269,8 @@ func _check_final_stats(stats: Dictionary, scene: Node3D, errors: Array[String])
 		errors.append("motion_image_uploads:%s" % str(gpu_state))
 	if int(stats.get("total_gpu_provider_page_dispatches", 0)) < expected_levels * 2:
 		errors.append("motion_gpu_provider_page_dispatches:%s" % str(stats))
+	if int(stats.get("total_gpu_provider_metadata_only_commits", 0)) < expected_levels * 2:
+		errors.append("motion_gpu_provider_metadata_only_commits:%s" % str(stats))
 	if str(stats.get("last_gpu_provider_page_error", "")) != "":
 		errors.append("motion_gpu_provider_page_error:%s" % str(stats.get("last_gpu_provider_page_error", "")))
 	if int(page_cache.get("protected_evictions", 0)) != 0:

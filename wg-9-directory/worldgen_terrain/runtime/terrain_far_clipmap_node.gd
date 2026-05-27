@@ -76,6 +76,8 @@ var last_gpu_page_normal_dispatches: int = 0
 var last_gpu_page_normal_error: String = ""
 var last_gpu_provider_page_dispatches: int = 0
 var total_gpu_provider_page_dispatches: int = 0
+var last_gpu_provider_metadata_only_commits: int = 0
+var total_gpu_provider_metadata_only_commits: int = 0
 var last_gpu_provider_page_error: String = ""
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
@@ -170,6 +172,8 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	last_gpu_page_normal_error = ""
 	last_gpu_provider_page_dispatches = 0
 	total_gpu_provider_page_dispatches = 0
+	last_gpu_provider_metadata_only_commits = 0
+	total_gpu_provider_metadata_only_commits = 0
 	last_gpu_provider_page_error = ""
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
@@ -287,6 +291,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_gpu_page_normal_dispatches = 0
 	last_gpu_page_normal_error = ""
 	last_gpu_provider_page_dispatches = 0
+	last_gpu_provider_metadata_only_commits = 0
 	last_gpu_provider_page_error = ""
 	var shared_origin := _shared_origin(viewer_xz)
 	var profile_blocks_far_refresh := _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds
@@ -371,6 +376,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_gpu_page_normal_error": last_gpu_page_normal_error,
 		"last_gpu_provider_page_dispatches": last_gpu_provider_page_dispatches,
 		"total_gpu_provider_page_dispatches": total_gpu_provider_page_dispatches,
+		"last_gpu_provider_metadata_only_commits": last_gpu_provider_metadata_only_commits,
+		"total_gpu_provider_metadata_only_commits": total_gpu_provider_metadata_only_commits,
 		"last_gpu_provider_page_error": last_gpu_provider_page_error,
 	}
 
@@ -410,6 +417,8 @@ func stats() -> Dictionary:
 		"last_gpu_page_normal_error": last_gpu_page_normal_error,
 		"last_gpu_provider_page_dispatches": last_gpu_provider_page_dispatches,
 		"total_gpu_provider_page_dispatches": total_gpu_provider_page_dispatches,
+		"last_gpu_provider_metadata_only_commits": last_gpu_provider_metadata_only_commits,
+		"total_gpu_provider_metadata_only_commits": total_gpu_provider_metadata_only_commits,
 		"last_gpu_provider_page_error": last_gpu_provider_page_error,
 	}
 
@@ -525,6 +534,11 @@ func active_surface_texture_descriptors() -> Array[Dictionary]:
 
 
 func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = true) -> void:
+	if _can_use_gpu_provider_page_textures():
+		var gpu_page_status: Dictionary = _rebuild_level_gpu_provider_page(level, origin, use_transition)
+		if gpu_page_status.get("status", "fail") == "pass":
+			return
+		last_page_error = "level_%d:gpu_provider_page_failed:%s" % [level, str(gpu_page_status.get("error", "unknown"))]
 	var spacing: float = _level_spacing(level)
 	var outer_extent: float = _level_outer_extent(level)
 	var inner_extent: float = _inner_extent_for_level(level)
@@ -606,6 +620,61 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	_start_page_blend(level, previous_height_texture != null and use_transition)
 	_refresh_page_morph_sources()
 	_protect_active_page_keys()
+
+
+func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transition: bool = true) -> Dictionary:
+	var spacing: float = _level_spacing(level)
+	var outer_extent: float = _level_outer_extent(level)
+	var inner_extent: float = _inner_extent_for_level(level)
+	var side: int = _side_for_extent(outer_extent, spacing)
+	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
+	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
+	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
+	var heightfield: Dictionary = _heightfield_metadata_for_level(level, origin, outer_extent, spacing, side)
+	var gpu_provider_status: Dictionary = _attach_gpu_provider_page_texture(heightfield, level, origin, outer_extent, spacing, side)
+	if gpu_provider_status.get("status", "fail") != "pass":
+		return gpu_provider_status
+	level_heightfields[level] = heightfield
+	level_surface_descriptors[level] = {}
+	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
+	if descriptor.get("status", "fail") != "pass":
+		return descriptor
+	level_material_descriptors[level] = descriptor
+	var mesh_instance: MeshInstance3D = level_nodes[level]
+	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
+	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
+	var previous_height_texture: Texture2D = null
+	var previous_normal_texture: Texture2D = null
+	var previous_page_origin := origin
+	var previous_page_extent := outer_extent
+	_track_previous_page_key_for_blend(level, "", false)
+	if use_transition and previous_material != null:
+		previous_height_texture = previous_material.get_shader_parameter("height_texture") as Texture2D
+		previous_normal_texture = previous_material.get_shader_parameter("normal_texture") as Texture2D
+		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
+		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
+	_track_previous_page_key_for_blend(level, previous_cache_key, previous_height_texture != null)
+	mesh_instance.material_override = _page_height_material_for_descriptor(
+		descriptor,
+		level,
+		previous_height_texture,
+		previous_normal_texture,
+		0.0 if previous_height_texture != null and transition_fade_seconds > 0.0 else 1.0,
+		previous_page_origin,
+		previous_page_extent,
+		previous_material
+	)
+	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
+	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
+	level_origins[level] = origin
+	level_build_counts[level] = int(level_build_counts[level]) + 1
+	_set_level_geometry_counts(level, side * side, _clipmap_index_count(side, spacing, outer_extent, inner_extent))
+	last_gpu_provider_metadata_only_commits += 1
+	total_gpu_provider_metadata_only_commits += 1
+	_start_page_blend(level, previous_height_texture != null and use_transition)
+	_refresh_page_morph_sources()
+	_protect_active_page_keys()
+	return {"status": "pass", "level": level}
 
 
 func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true) -> void:
@@ -1921,6 +1990,43 @@ func _heightfield_for_level(
 		"height_min_m": float(range["min"]),
 		"height_max_m": float(range["max"]),
 	}
+
+
+func _heightfield_metadata_for_level(
+	level: int,
+	origin: Vector2,
+	outer_extent: float,
+	spacing: float,
+	side: int
+) -> Dictionary:
+	var bounds: Dictionary = _conservative_far_page_height_bounds()
+	return {
+		"level": level,
+		"origin_x": origin.x,
+		"origin_z": origin.y,
+		"outer_extent_m": outer_extent,
+		"inner_extent_m": _inner_extent_for_level(level),
+		"spacing_m": spacing,
+		"vertices_per_side": side,
+		"height": PackedFloat32Array(),
+		"normals": PackedVector3Array(),
+		"cache_key": _page_cache_key_for_level(level, origin, outer_extent, spacing, side),
+		"height_min_m": float(bounds["min"]),
+		"height_max_m": float(bounds["max"]),
+		"height_bounds_mode": "conservative_gpu_provider",
+	}
+
+
+func _conservative_far_page_height_bounds() -> Dictionary:
+	var scale := 1.0
+	var profile: Dictionary = _landform_profile_report()
+	var settings: Dictionary = profile.get("settings", {}) as Dictionary
+	if not settings.is_empty():
+		scale = maxf(scale, float(settings.get("macro_relief_scale", 1.0)))
+		scale = maxf(scale, float(settings.get("kernel_relief_strength", 1.0)))
+		scale = maxf(scale, float(settings.get("mountain_boost", 1.0)))
+	var extent: float = 8192.0 * clampf(scale, 1.0, 3.0)
+	return {"min": -extent, "max": extent}
 
 
 func _page_cache_key_for_level(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int) -> String:

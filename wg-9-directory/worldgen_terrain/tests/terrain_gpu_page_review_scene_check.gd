@@ -74,6 +74,8 @@ func _check_scene(packed: PackedScene, errors: Array[String]) -> void:
 				errors.append("image_uploads:%s" % str(gpu_state))
 			if int(stats.get("total_gpu_provider_page_dispatches", 0)) < int(scene.get("far_clipmap_level_count")):
 				errors.append("gpu_provider_page_dispatches:%s" % str(stats))
+			if int(stats.get("total_gpu_provider_metadata_only_commits", 0)) < int(scene.get("far_clipmap_level_count")):
+				errors.append("gpu_provider_metadata_only_commits:%s" % str(stats))
 			if str(stats.get("last_gpu_provider_page_error", "")) != "":
 				errors.append("gpu_provider_page_error:%s" % str(stats))
 			if far_clipmap.has_method("clear_levels"):
