@@ -29,6 +29,7 @@ Implemented profile targets:
 ```text
 balanced_current
 strong_mountains
+medium_scale
 compressed_scale
 ```
 
@@ -47,6 +48,9 @@ pass_corridor_strength, disabled by default
 terrain. `strong_mountains` is now intentionally high-contrast for review: it
 raises macro/kernel relief with extra boost for mountain, glacial, and volcanic
 families so profile switching is visually obvious before final art/textures.
+`medium_scale` is a candidate between the current default and the compressed
+close-read profile: it slightly strengthens local kernel relief while sampling
+macro/kernel terrain at a moderately shorter effective world scale.
 `compressed_scale` samples macro and kernel terrain at a shorter effective
 world scale while leaving region IDs and family selection anchored to the normal
 world grid.
@@ -59,6 +63,11 @@ generation. Pass/corridor shaping is the exception for now: route facts are
 GDScript/provider-owned world facts, so profiles with `pass_corridor_strength`
 above zero intentionally disable the native prepared grid until the native
 backend also receives the same world-fact contract.
+
+Do not promote a default scale/relief profile until terrain has enough material
+context to judge it honestly. `medium_scale` and `compressed_scale` remain
+review candidates because scale reads differently once biome masks, ground
+materials, and later erosion/rivers exist.
 
 ## Acceptance Checks
 
@@ -82,7 +91,8 @@ Visual review:
 ```text
 mountain silhouettes read taller and less flat
 large landforms are visible at walk/tour scale
-compressed-scale profile shows more variation per travel distance
+medium-scale profile shows more variation per travel distance without jumping as far as compressed-scale
+compressed-scale profile remains available as the stronger close-read review case
 terrain does not become noisy, stamped, or obviously tiled
 no new chunk/clipmap seams appear
 no center blank/black square appears while switching profile/site or flying fast
@@ -96,6 +106,9 @@ res://worldgen_terrain/tests/terrain_landform_profile_tour_scene_check.gd
 res://worldgen_terrain/scenes/terrain_landform_profile_tour.tscn
 factory/runtime/godot_landform_profiles/landform_profile_report.json
 factory/runtime/godot_landform_profiles/landform_profile_contact_sheet.png
+res://worldgen_terrain/tests/terrain_pass_corridor_visual_probe_check.gd
+factory/runtime/godot_pass_corridor/pass_corridor_visual_probe_report.json
+factory/runtime/godot_pass_corridor/pass_corridor_visual_probe_contact_sheet.png
 ```
 
 The gate currently checks:
@@ -103,6 +116,7 @@ The gate currently checks:
 ```text
 neutral profile does not change default sampled heights
 strong_mountains increases relief on at least one selected mountain-family site
+medium_scale changes local-relief/frequency on the same selected sites
 compressed_scale changes local-relief/frequency on the same selected sites
 same-coordinate adjacent grid seams stay under 1cm
 non-neutral profiles keep native prepared-grid support
@@ -118,11 +132,14 @@ N/B: next/previous representative site
 WASD + mouse: normal walk/fly controls
 ```
 
-The live scene keeps automatic profile cycling disabled by default and throttles
-profile-tour far refresh to one level per frame. Far clipmap page requests
-include the active profile in their cache identity, and the native backend
-consumes the profile scalars so `V` profile changes do not create stale neutral
-pages or black/missing zones.
+The live scene keeps automatic profile cycling disabled by default. It is a
+proof/review gate, not a motion-stress path: `V` profile changes and `N`/`B`
+site jumps synchronously settle the active near chunks and all far clipmap
+levels before returning control, so the reviewer should not see a blank center
+hole, stale neutral pages, or an off-in-the-distance black landing zone. Far
+clipmap page requests include the active profile in their cache identity, and
+the native backend consumes the profile scalars so `V` profile changes do not
+create stale neutral pages or black/missing zones.
 
 ## Passes And Traversable Corridors
 
@@ -145,7 +162,17 @@ facts expose sample hints for route strength, priority, ruggedness, and width
 default balanced terrain still has `pass_corridor_strength=0`, so it is unchanged
 opt-in profiles can lower/smooth terrain along the deterministic corridor field
 terrain_world_facts_pass_corridor_check.gd proves determinism, default no-op behavior, native fallback policy, and nonzero corridor height shaping
+terrain_pass_corridor_visual_probe_check.gd writes a neutral/shaped/cut/mask contact sheet for one high-terrain corridor candidate
 ```
+
+The live corridor tour is tabled as an acceptance gate. Corridor shaping
+currently disables native prepared grids because route facts are not yet in the
+Rust/native page path, so it cannot honestly behave like the landform tour
+without either lagging or shrinking the review area too far. Keep
+`terrain_pass_corridor_tour.tscn` as an experimental CPU-only scene for
+spot-checking, but do not use it to accept corridor quality. The acceptance
+gate should return after corridor/route facts are available to native/GPU page
+generation.
 
 A pass/corridor field can guide later systems:
 
@@ -169,6 +196,8 @@ pass/corridor shaping is conservative and downward-only
 it is not yet a real river/channel route solver
 native prepared grids are disabled for pass-shaping profiles until Rust consumes route facts
 visual acceptance is still required before promoting any pass-shaping profile to default
+the live corridor tour is experimental CPU-only infrastructure, not a current acceptance gate
+native-disabled profile changes degrade through bounded CPU fallback work instead of blocking/crashing scene startup
 ```
 
 ## Where Erosion Fits
@@ -242,8 +271,8 @@ Current recommended order:
 
 ```text
 1. visually review landform profile contact sheet and live profile behavior
-2. choose whether to keep balanced_current or revise default scale/relief
-3. add pass/corridor world-fact placeholder
+2. keep scale/relief profiles review-only until biome/material context exists
+3. review pass/corridor visual probe as the first route-shaping gate
 4. continue hydrology/rivers
 5. add erosion residuals only after the above reads correctly
 ```

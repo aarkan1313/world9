@@ -153,6 +153,11 @@ func clear_levels(wait_for_running: bool = false) -> void:
 		_gpu_page_residency.clear()
 
 
+func clear_async_state_for_review(wait_for_running: bool = false) -> void:
+	_clear_native_workers(wait_for_running)
+	pending_rebuild_count = _count_pending_rebuilds()
+
+
 func configure_geometry(p_level_count: int, p_base_spacing_m: float, p_base_outer_extent_m: float) -> bool:
 	var next_level_count: int = max(1, p_level_count)
 	var next_base_spacing_m: float = max(0.000001, p_base_spacing_m)

@@ -85,7 +85,7 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export_range(0.0, 1.0, 0.01) var local_detail_visual_displacement_strength: float = 0.0
 @export_range(0.0, 16.0, 0.25) var local_detail_visual_displacement_limit_m: float = 2.0
 @export var enable_local_collision_bodies: bool = false
-@export_enum("balanced_current", "strong_mountains", "compressed_scale") var landform_profile_id: String = TerrainLandformProfileScript.BALANCED_CURRENT
+@export_enum("balanced_current", "strong_mountains", "medium_scale", "compressed_scale") var landform_profile_id: String = TerrainLandformProfileScript.BALANCED_CURRENT
 
 var terrain: Node3D
 var far_clipmap: Node3D
@@ -555,6 +555,8 @@ func _preload_far_clipmap_before_start() -> void:
 		return
 	var previous_workers: bool = far_clipmap.use_native_workers
 	var previous_budget: int = far_clipmap.max_rebuild_levels_per_update
+	if far_clipmap.has_method("clear_async_state_for_review"):
+		far_clipmap.call("clear_async_state_for_review", false)
 	far_clipmap.use_native_workers = false
 	far_clipmap.max_rebuild_levels_per_update = max(previous_budget, far_clipmap_level_count)
 	far_clipmap.update_viewer(_far_clipmap_center_xz())

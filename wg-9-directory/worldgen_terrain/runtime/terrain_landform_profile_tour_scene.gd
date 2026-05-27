@@ -20,14 +20,15 @@ func _init() -> void:
 	fly_start_height_m = 980.0
 	fly_min_ground_clearance_m = 100.0
 	look_pitch_deg = -36.0
-	far_clipmap_rebuild_levels_per_update = 1
+	far_clipmap_full_underlay_level0 = true
+	far_clipmap_rebuild_levels_per_update = 4
 
 
 func setup() -> bool:
 	landform_profile_index = max(0, TerrainLandformProfileScript.profile_ids().find(landform_profile_id))
 	var ok: bool = super.setup()
 	if ok:
-		_apply_landform_profile_index(0, false)
+		_apply_landform_profile_index(0, true)
 	return ok
 
 
@@ -57,7 +58,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func cycle_landform_profile(direction: int) -> void:
 	var previous_index: int = landform_profile_index
-	_apply_landform_profile_index(direction, false)
+	_apply_landform_profile_index(direction, true)
 	if advance_site_after_profile_cycle and direction > 0 and landform_profile_index == 0 and previous_index != 0:
 		jump_review_site(1)
 
@@ -96,3 +97,5 @@ func _apply_landform_profile_index(direction: int, rebuild_existing: bool) -> vo
 	var profile_id: String = profile_ids[landform_profile_index]
 	if not apply_landform_profile(profile_id, rebuild_existing):
 		errors.append("landform_profile_apply_failed:%s" % profile_id)
+	elif rebuild_existing:
+		_stabilize_review_residency()

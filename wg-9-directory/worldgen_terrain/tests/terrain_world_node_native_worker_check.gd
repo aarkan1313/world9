@@ -36,6 +36,7 @@ func _start() -> void:
 	_check_debug_mode_clears_native_work(node, errors)
 	_check_fast_gray_material_refresh(node, errors)
 	_check_flat_provider_native_fallback(errors)
+	_check_pass_corridor_profile_rebuilds_with_cpu_fallback(errors)
 	node.world.configure_streamer({
 		"chunk_size_m": 512.0,
 		"visible_radius_chunks": 1,
@@ -258,3 +259,84 @@ func _check_flat_provider_native_fallback(errors: Array[String]) -> void:
 	if int(flat_node.build_stats().get("queued_native_worker_builds", 0)) != 0:
 		errors.append("flat_native_queue_started:%s" % str(flat_node.build_stats()))
 	flat_node.queue_free()
+
+
+func _check_pass_corridor_profile_rebuilds_with_cpu_fallback(errors: Array[String]) -> void:
+	var corridor_node: Node3D = TerrainWorldNodeScript.new()
+	corridor_node.auto_setup_on_ready = false
+	corridor_node.vertices_per_side = 65
+	corridor_node.debug_mode = TerrainWorldScript.DEBUG_HEIGHT_BANDS
+	corridor_node.use_fast_gray_material = false
+	corridor_node.use_native_chunk_payloads = true
+	corridor_node.use_native_chunk_workers = true
+	corridor_node.max_native_chunk_workers = 2
+	corridor_node.allow_profile_fallback_sync_rebuilds = true
+	get_root().add_child(corridor_node)
+	if not corridor_node.setup_world(TerrainWorldScript.PROVIDER_PROCEDURAL, 1337):
+		errors.append("corridor_node_setup_failed:%s" % str(corridor_node.errors))
+		corridor_node.queue_free()
+		return
+	var best_mid: Vector2 = _best_pass_corridor_mid(corridor_node.world)
+	corridor_node.world.configure_streamer({
+		"chunk_size_m": 512.0,
+		"visible_radius_chunks": 0,
+		"max_lod": 0,
+		"build_budget_per_frame": 1,
+		"queue_policy": TerrainStreamerScript.QUEUE_POLICY_PRIORITY_CANCEL,
+	})
+	for _index in range(4):
+		corridor_node.update_viewer(best_mid)
+	corridor_node.rebuild_all_active_for_preview(0)
+	if corridor_node.built_chunk_count() != 1:
+		errors.append("corridor_initial_chunk_count:%d" % corridor_node.built_chunk_count())
+		corridor_node.queue_free()
+		return
+	var before_cpu_count: int = int(corridor_node.build_stats().get("cpu_chunk_payload_count", 0))
+	var profile := {
+		"id": "pass_shaping_node_probe",
+		"settings": {
+			"macro_relief_scale": 1.0,
+			"kernel_relief_strength": 1.0,
+			"mountain_boost": 1.0,
+			"regional_scale_multiplier": 1.0,
+			"valley_bias_strength": 1.0,
+			"pass_corridor_strength": 1.0,
+		},
+	}
+	if not corridor_node.apply_landform_profile(profile, true):
+		errors.append("corridor_profile_apply_failed")
+	var report: Dictionary = corridor_node.world.landform_profile_report()
+	if bool(report.get("native_prepared_grid_enabled", true)):
+		errors.append("corridor_profile_native_still_enabled:%s" % str(report))
+	var after_stats: Dictionary = corridor_node.build_stats()
+	if int(after_stats.get("active_native_workers", 0)) != 0 or int(after_stats.get("queued_native_worker_builds", 0)) != 0:
+		errors.append("corridor_profile_left_native_work:%s" % str(after_stats))
+	if int(after_stats.get("cpu_chunk_payload_count", 0)) <= before_cpu_count:
+		errors.append("corridor_profile_no_cpu_rebuild:%s before:%d" % [str(after_stats), before_cpu_count])
+	corridor_node.queue_free()
+
+
+func _best_pass_corridor_mid(world: RefCounted) -> Vector2:
+	var best_mid := Vector2.ZERO
+	var best_strength := -1.0
+	for rz in range(-8, 9):
+		for rx in range(-8, 9):
+			var facts: Dictionary = world.pass_corridor_facts_for_region(rx, rz)
+			if facts.get("status", "fail") != "pass":
+				continue
+			for fact_value in facts.get("facts", []) as Array:
+				var fact: Dictionary = fact_value as Dictionary
+				var start_values: Array = fact.get("start_m", []) as Array
+				var end_values: Array = fact.get("end_m", []) as Array
+				if start_values.size() < 2 or end_values.size() < 2:
+					continue
+				var mid := Vector2(
+					(float(start_values[0]) + float(end_values[0])) * 0.5,
+					(float(start_values[1]) + float(end_values[1])) * 0.5
+				)
+				var hint: Dictionary = world.sample_pass_corridor_hint(mid.x, mid.y)
+				var strength: float = float(hint.get("corridor_strength", 0.0))
+				if strength > best_strength:
+					best_strength = strength
+					best_mid = mid
+	return best_mid

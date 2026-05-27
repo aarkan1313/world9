@@ -123,17 +123,27 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Reuse persistent far page shader materials across page commits, updating textures/params in place while preserving previous/current height-page blend sources.
 - [x] Skip persistent far page descriptor image rebuilds when the target page already has GPU-resident height/normal textures.
 - [x] Add motion-profile hard budgets for far page GPU uploads and evictions so page residency regressions fail before they become visible stutter.
+- [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.
 - [x] Add high-camera kernel-tour review scene that advances through diverse selected kernel sites using the normal walk-preview streaming stack.
 - [x] Add landform tuning and erosion-order plan at `plans/landform_tuning_and_erosion_order.md`.
 - [x] Add review-only landform tuning profiles for current balance, stronger mountains, and compressed scale before changing defaults.
 - [x] Increase review-only profile contrast so `strong_mountains` and `compressed_scale` are visually distinguishable in the live profile tour.
+- [x] Add `medium_scale` as an in-between landform profile after live review found `compressed_scale` useful but probably too strong for a default candidate.
 - [x] Add same-site profile comparison probe/contact sheet/tour with height-range, p05/p95 relief, slope, local-relief, kernel-contribution, and seam checks.
-- [x] Add live `terrain_landform_profile_tour.tscn` review scene that exposes `balanced_current`, `strong_mountains`, and `compressed_scale` on representative sites. It defaults to manual profile switching so tuned profiles do not rebuild unexpectedly while flying, while far coverage remains enabled for useful scale review.
+- [x] Add live `terrain_landform_profile_tour.tscn` review scene that exposes `balanced_current`, `strong_mountains`, `medium_scale`, and `compressed_scale` on representative sites. It defaults to manual profile switching, keeps far coverage enabled for useful scale review, uses a full level-0 far underlay for the high overview camera, and treats `V` profile changes plus `N`/`B` site jumps as settled proof-gate transitions with no pending far pages/workers before review resumes.
 - [x] Add deterministic pass/corridor world-fact placeholder after base scale/relief profiles are measurable.
 - [x] Add opt-in bounded pass/corridor height shaping through the height provider while keeping default terrain unchanged and documenting the native-prepared fallback policy.
-- [ ] Keep erosion after accepted base relief/scale, kernel influence tuning, useful hydrology hints, and first river/pass routing facts.
+- [x] Fix native-disabled profile refresh in `TerrainWorldNode` so pass/corridor profiles rebuild or requeue active chunks through the CPU fallback path instead of leaving stale native-era meshes.
+- [x] Add pass/corridor visual probe artifact that compares neutral height, shaped height, cut amount, and corridor-strength mask for one high-terrain corridor candidate.
+- [x] Add experimental live `terrain_pass_corridor_tour.tscn` scene for multiple high-terrain corridor candidates, with `N`/`B` site stepping and `V` neutral/shaped toggling.
+- [x] Harden native-disabled landform profile changes so pass/corridor review scenes queue invalidated chunks and fill only a bounded near-neighborhood on startup instead of forcing unbounded synchronous CPU rebuilds.
+- [x] Convert the saved pass/corridor tour into an explicit wider low-density CPU review preset: 33 vertices, radius-2 near window, manual site stepping, `build_when_idle=false`, height-band coloring, explicit native-path disable while shaping is active, and stronger review-only shaping for readability.
+- [x] Table live pass/corridor streaming acceptance until corridor/route facts are native/GPU-page compatible; keep static visual probe as the current corridor shaping proof.
+- [x] Keep scale/relief profiles review-only until biome/material context exists, rather than promoting `medium_scale` or `compressed_scale` prematurely.
+- [x] Add lightweight chunk-build instrumentation for CPU/native payload counts and normal-generation timing, and skip CPU normal generation for unlit/debug chunk materials that do not consume normals.
+- [ ] Keep erosion after accepted base relief/scale, kernel influence tuning, useful hydrology hints, pass/corridor review, and first river/channel routing facts.
 - [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
 - [x] Split cross-region height-grid sampling into per-region fast blocks so padded hydrology/debug windows do not fall back to per-point scalar sampling.
 - [x] Add direct hydrology scalar-field sampling for tile-cache grids so debug overlays can request one field without computing all fields per cell.

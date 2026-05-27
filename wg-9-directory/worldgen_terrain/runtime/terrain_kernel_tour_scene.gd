@@ -4,6 +4,7 @@ extends TerrainWalkPreviewScene
 @export var auto_tour_enabled: bool = true
 @export_range(2.0, 30.0, 0.5) var seconds_per_site: float = 6.0
 @export var restart_at_first_site_on_setup: bool = true
+@export var stabilize_review_jumps: bool = true
 
 var _tour_elapsed_s: float = 0.0
 
@@ -49,3 +50,24 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 	_tour_elapsed_s = 0.0
 	super._unhandled_input(event)
+
+
+func jump_review_site(direction: int) -> void:
+	super.jump_review_site(direction)
+	_tour_elapsed_s = 0.0
+	if stabilize_review_jumps:
+		_stabilize_review_residency()
+
+
+func _stabilize_review_residency() -> void:
+	if terrain == null:
+		return
+	if terrain.has_method("clear_native_worker_backlog_for_preview"):
+		terrain.call("clear_native_worker_backlog_for_preview")
+	if last_stream_report.is_empty():
+		last_stream_report = terrain.update_viewer(viewer_position_xz)
+	if terrain.has_method("rebuild_all_active_for_preview"):
+		last_preload_chunk_count = int(terrain.call("rebuild_all_active_for_preview", preload_active_chunk_limit))
+	_preload_far_clipmap_before_start()
+	_update_camera()
+	_update_diagnostics()

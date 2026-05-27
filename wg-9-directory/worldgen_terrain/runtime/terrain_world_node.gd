@@ -53,6 +53,11 @@ var _last_height_grid_ms: int = 0
 var _last_native_chunk_payload_ms: int = 0
 var _last_native_mesh_payload_ms: int = 0
 var _last_native_worker_elapsed_ms: int = 0
+var _last_cpu_chunk_payload_ms: int = 0
+var _last_mesh_normals_ms: int = 0
+var _native_chunk_payload_count: int = 0
+var _native_worker_payload_count: int = 0
+var _cpu_chunk_payload_count: int = 0
 var _max_recent_build_samples: int = 64
 var _native_chunk_workers: Dictionary = {}
 var _native_worker_requests: Dictionary = {}
@@ -99,11 +104,6 @@ func update_viewer(position_xz: Vector2) -> Dictionary:
 	last_report = world.update_viewer(position_xz)
 	if last_report.get("status", "pass") != "pass":
 		return last_report
-	if _profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds:
-		_refresh_active_info_index()
-		_prune_native_worker_queue()
-		_poll_native_chunk_workers()
-		return last_report
 	_refresh_active_info_index()
 	_retag_full_density_chunk_nodes()
 	_retire_inactive_chunk_nodes()
@@ -139,9 +139,11 @@ func apply_landform_profile(profile: Variant, rebuild_existing: bool = true) -> 
 	if ok:
 		_clear_native_chunk_workers(true)
 		if rebuild_existing:
-			if not _profile_disables_native_grid() or allow_profile_fallback_sync_rebuilds:
+			if _profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds:
+				_queue_active_chunks_for_rebuild()
+			else:
 				_rebuild_existing_chunk_meshes()
-		elif not _profile_disables_native_grid() or allow_profile_fallback_sync_rebuilds:
+		else:
 			_queue_active_chunks_for_rebuild()
 	return ok
 
@@ -281,6 +283,11 @@ func clear_chunks() -> void:
 	_last_native_chunk_payload_ms = 0
 	_last_native_mesh_payload_ms = 0
 	_last_native_worker_elapsed_ms = 0
+	_last_cpu_chunk_payload_ms = 0
+	_last_mesh_normals_ms = 0
+	_native_chunk_payload_count = 0
+	_native_worker_payload_count = 0
+	_cpu_chunk_payload_count = 0
 
 
 func built_chunk_count() -> int:
@@ -311,6 +318,11 @@ func build_stats() -> Dictionary:
 		"last_native_chunk_payload_ms": _last_native_chunk_payload_ms,
 		"last_native_mesh_payload_ms": _last_native_mesh_payload_ms,
 		"last_native_worker_elapsed_ms": _last_native_worker_elapsed_ms,
+		"last_cpu_chunk_payload_ms": _last_cpu_chunk_payload_ms,
+		"last_mesh_normals_ms": _last_mesh_normals_ms,
+		"native_chunk_payload_count": _native_chunk_payload_count,
+		"native_worker_payload_count": _native_worker_payload_count,
+		"cpu_chunk_payload_count": _cpu_chunk_payload_count,
 		"active_native_workers": _native_chunk_workers.size(),
 		"queued_native_worker_builds": _native_worker_queue.size(),
 		"avg_recent_chunk_build_ms": float(total_recent) / float(max(1, recent_count)),
@@ -422,12 +434,24 @@ func _build_chunk_payload(chunk_x: int, chunk_z: int, ring: int = 0, lod: int = 
 	if use_native_chunk_payloads and colors.is_empty() and _native_backend_available() and _provider_supports_native_prepared_grid():
 		var native_payload: Dictionary = _build_native_chunk_payload(request)
 		if native_payload.get("status", "fail") == "pass":
+			_native_chunk_payload_count += 1
 			return _finalize_chunk_payload(native_payload, count)
 	if use_native_mesh_payloads and colors.is_empty() and _native_backend_available():
 		var native_mesh_payload: Dictionary = _build_native_mesh_payload(request)
 		if native_mesh_payload.get("status", "fail") == "pass":
+			_native_chunk_payload_count += 1
 			return _finalize_chunk_payload(native_mesh_payload, count)
-	return _finalize_chunk_payload(TerrainChunkBuildJobScript.build_payload(world, request, colors), count)
+	var cpu_start_ms: int = Time.get_ticks_msec()
+	var payload: Dictionary = TerrainChunkBuildJobScript.build_payload(
+		world,
+		request,
+		colors,
+		_chunk_payload_needs_normals()
+	)
+	_last_cpu_chunk_payload_ms = Time.get_ticks_msec() - cpu_start_ms
+	_last_mesh_normals_ms = TerrainMeshBuilderScript.last_normals_build_ms
+	_cpu_chunk_payload_count += 1
+	return _finalize_chunk_payload(payload, count)
 
 
 func _can_use_native_chunk_workers() -> bool:
@@ -537,6 +561,7 @@ func _poll_native_chunk_workers() -> void:
 		var build_ms: int = _last_native_worker_elapsed_ms
 		if payload.get("status", "fail") == "pass":
 			payload = _finalize_chunk_payload(payload, int(request["vertices_per_side"]))
+			_native_worker_payload_count += 1
 		else:
 			var fallback_start_ms: int = Time.get_ticks_msec()
 			payload = _build_cpu_chunk_payload_from_request(request)
@@ -760,7 +785,10 @@ func _maybe_apply_lod_transition_morph(payload: Dictionary, vertices_per_side_fo
 	var arrays: Array = payload["arrays"] as Array
 	var morphed_arrays: Array = arrays.duplicate()
 	morphed_arrays[Mesh.ARRAY_VERTEX] = TerrainMeshBuilderScript.build_vertices(morphed_height, count, step_m)
-	morphed_arrays[Mesh.ARRAY_NORMAL] = TerrainMeshBuilderScript.build_normals(morphed_height, count, step_m)
+	if arrays[Mesh.ARRAY_NORMAL] is PackedVector3Array:
+		var normals_start_ms: int = Time.get_ticks_msec()
+		morphed_arrays[Mesh.ARRAY_NORMAL] = TerrainMeshBuilderScript.build_normals(morphed_height, count, step_m)
+		_last_mesh_normals_ms = Time.get_ticks_msec() - normals_start_ms
 	var morphed_payload: Dictionary = payload.duplicate()
 	morphed_payload["height"] = morphed_height
 	morphed_payload["arrays"] = morphed_arrays
@@ -1076,7 +1104,16 @@ func _native_chunk_payload_to_job_payload(request: Dictionary, native: Dictionar
 
 
 func _build_cpu_chunk_payload_from_request(request: Dictionary) -> Dictionary:
-	var payload: Dictionary = TerrainChunkBuildJobScript.build_payload(world, request, PackedColorArray())
+	var cpu_start_ms: int = Time.get_ticks_msec()
+	var payload: Dictionary = TerrainChunkBuildJobScript.build_payload(
+		world,
+		request,
+		PackedColorArray(),
+		_chunk_payload_needs_normals()
+	)
+	_last_cpu_chunk_payload_ms = Time.get_ticks_msec() - cpu_start_ms
+	_last_mesh_normals_ms = TerrainMeshBuilderScript.last_normals_build_ms
+	_cpu_chunk_payload_count += 1
 	return _finalize_chunk_payload(payload, int(request["vertices_per_side"]))
 
 
@@ -1255,6 +1292,17 @@ func _mode_requires_vertex_rebuild(mode: String) -> bool:
 	if mode == TerrainWorldScript.DEBUG_GRAY and not use_fast_gray_material:
 		return true
 	return false
+
+
+func _chunk_payload_needs_normals() -> bool:
+	if use_mesh_skirts:
+		return true
+	if use_lod_mesh_density and use_lod_transition_morph:
+		return true
+	return (
+		(debug_mode == TerrainWorldScript.DEBUG_GRAY and use_fast_gray_material)
+		or debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR
+	)
 
 
 func _rebuild_existing_chunk_meshes() -> void:

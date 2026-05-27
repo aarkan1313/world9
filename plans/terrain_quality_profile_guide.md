@@ -156,6 +156,12 @@ mode and leaves coarse/fine LOD morph to the shader. CPU-side morphing remains
 for the older non-persistent mesh path, but persistent page rendering should not
 double-morph height data before the shader sees it.
 
+Residual far/LOD quality shifts are tracked as renderer debt, not as accepted
+final quality. The current rule is to fix holes, hard seams, crashes, and
+review-blocking regressions immediately, but to route subtle quality changes
+through the planned GPU-resident page/ring renderer instead of adding more
+fog, alpha fades, or CPU mesh bandaids to the interim path.
+
 ## Local Detail Review Profile
 
 `local_detail_review` is review-only and does not change the default walk scene.
@@ -216,6 +222,7 @@ Next profile work:
 2. Add human-review acceptance notes for `local_detail_review` and `high_density_257_review` before either influences defaults.
 3. Move far page generation/upload toward GPU compute or lower-churn native texture upload after visual review remains stable.
 4. Add optional profile tiers for review-only far radius and hidden-edge buffer tuning.
+5. Keep remaining subtle LOD/clipmap quality-shift work attached to GPU-resident page/ring promotion unless it becomes a correctness or review-blocking regression.
 ```
 
 ## Landform Profiles
@@ -232,6 +239,7 @@ Current landform profiles:
 ```text
 balanced_current
 strong_mountains
+medium_scale
 compressed_scale
 ```
 
@@ -268,5 +276,6 @@ same profile settings consumed by the GDScript provider, and the live profile
 tour throttles far refresh to one level per frame so `V` profile switches do not
 fall back to slow synchronous GDScript rebuilds. The review profiles are
 deliberately high-contrast now: `strong_mountains` should visibly raise
-mountain/glacial/volcanic relief, while `compressed_scale` should show more
-variation per travel distance without changing region IDs.
+mountain/glacial/volcanic relief, `medium_scale` should show a usable in-between
+amount of local variation, and `compressed_scale` should remain the stronger
+close-read review case without changing region IDs.

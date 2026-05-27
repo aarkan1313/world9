@@ -60,6 +60,10 @@ func _init() -> void:
 	if not bool(strong_provider.get("native_prepared_grid_enabled", false)):
 		errors.append("strong_native_should_be_enabled")
 	scene.cycle_landform_profile(1)
+	var medium_report: Dictionary = scene.profile_tour_report()
+	if str(medium_report.get("active_profile", "")) != TerrainLandformProfileScript.MEDIUM_SCALE:
+		errors.append("medium_profile:%s" % str(medium_report.get("active_profile", "")))
+	scene.cycle_landform_profile(1)
 	var compressed_report: Dictionary = scene.profile_tour_report()
 	if str(compressed_report.get("active_profile", "")) != TerrainLandformProfileScript.COMPRESSED_SCALE:
 		errors.append("compressed_profile:%s" % str(compressed_report.get("active_profile", "")))

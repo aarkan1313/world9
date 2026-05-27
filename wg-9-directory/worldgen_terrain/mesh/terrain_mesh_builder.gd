@@ -4,6 +4,7 @@ extends RefCounted
 static var _indices_cache: Dictionary = {}
 static var _uvs_cache: Dictionary = {}
 static var _layout_xz_cache: Dictionary = {}
+static var last_normals_build_ms: int = 0
 
 
 static func build_indices(vertices_per_side: int) -> PackedInt32Array:
@@ -87,12 +88,17 @@ static func build_surface_arrays(
 	vertices_per_side: int,
 	step_m: float,
 	colors: PackedColorArray = PackedColorArray(),
-	skirt_depth_m: float = 0.0
+	skirt_depth_m: float = 0.0,
+	include_normals: bool = true
 ) -> Array:
+	last_normals_build_ms = 0
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = build_vertices(height, vertices_per_side, step_m)
-	arrays[Mesh.ARRAY_NORMAL] = build_normals(height, vertices_per_side, step_m)
+	if include_normals or skirt_depth_m > 0.0:
+		var normals_start_ms: int = Time.get_ticks_msec()
+		arrays[Mesh.ARRAY_NORMAL] = build_normals(height, vertices_per_side, step_m)
+		last_normals_build_ms = Time.get_ticks_msec() - normals_start_ms
 	if not colors.is_empty():
 		arrays[Mesh.ARRAY_COLOR] = colors
 	arrays[Mesh.ARRAY_TEX_UV] = build_uvs(vertices_per_side)

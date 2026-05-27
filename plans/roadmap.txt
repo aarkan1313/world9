@@ -55,9 +55,11 @@ center residency: walk/profile review fills missing or stale chunks in the immed
 worldgen capability proof: `terrain_worldgen_capability_check.gd` samples 12 diverse region sites and currently reports 6 palettes, 9 families, 20 unique kernels, and DEM-kernel relief active at all 12 sites
 kernel gallery review: `terrain_kernel_gallery.tscn` lays 36 real provider-sampled kernel sites into a compact review grid without changing production region/biome scale; the headless contact-sheet gate currently finds all 36 runtime kernel IDs; `terrain_mountain_kernel_gallery.tscn` filters to mountain kernels and shows multiple region variants per kernel for focused variation review
 kernel tour review: `terrain_kernel_tour.tscn` uses the normal walk-preview streaming stack from a higher overview camera and advances through diverse selected kernel sites for live visual review
-landform tuning proof: review-only `balanced_current`, `strong_mountains`, and `compressed_scale` profiles now exist behind the height-provider contract; `strong_mountains` and `compressed_scale` are intentionally high-contrast review modes so differences are visible before real biome textures; `terrain_landform_profile_compare_check.gd` writes same-site metrics/contact-sheet artifacts and verifies the neutral profile leaves default terrain unchanged; `terrain_landform_profile_tour.tscn` exposes the same profiles for manual live review with far coverage enabled and automatic profile cycling disabled by default; prepared native requests now carry profile scalars, so non-neutral profile switches stay on the native worker path instead of blocking refresh or falling back to slow GDScript rebuilds; `terrain_landform_profile_tour_live_key_check.gd` gates the saved scene's `V` profile-switch path, one-level-per-frame far refresh, and follow-up frames; far page request identity includes the active landform profile so cached pages cannot cross profile boundaries
+landform tuning proof: review-only `balanced_current`, `strong_mountains`, `medium_scale`, and `compressed_scale` profiles now exist behind the height-provider contract; `strong_mountains` and `compressed_scale` are intentionally high-contrast review modes so differences are visible before real biome textures, while `medium_scale` gives an in-between candidate after live review found compressed scale useful but likely too strong for default; `terrain_landform_profile_compare_check.gd` writes same-site metrics/contact-sheet artifacts and verifies the neutral profile leaves default terrain unchanged; `terrain_landform_profile_tour.tscn` exposes the same profiles for manual live review with far coverage enabled and automatic profile cycling disabled by default; because this is a proof/review scene, `V` profile changes and `N`/`B` site jumps synchronously settle active near chunks and all far clipmap levels before control returns; prepared native requests carry profile scalars, so non-neutral profile switches stay on the native path; `terrain_landform_profile_tour_live_key_check.gd` gates the saved scene's `V` and `B` paths for full chunk residency and zero pending far clipmap work; far page request identity includes the active landform profile so cached pages cannot cross profile boundaries
+landform default policy: do not promote a default scale/relief profile until biome masks/materials give enough visual context; keep `medium_scale` and `compressed_scale` as review candidates for now
 erosion position: erosion comes after accepted base relief/scale, kernel influence tuning, useful hydrology hints, and first river/pass routing facts; it should be cached/world-fact shaping, not per-frame chunk simulation
-pass/corridor world facts: `TerrainWorldFacts` now emits deterministic per-region pass/corridor facts with route endpoints, width, priority, ruggedness, and sample hints; `terrain_world_facts_pass_corridor_check.gd` gates determinism, provider exposure, hint/sample agreement, default no-op behavior, and opt-in bounded pass shaping through the height provider
+pass/corridor world facts: `TerrainWorldFacts` now emits deterministic per-region pass/corridor facts with route endpoints, width, priority, ruggedness, and sample hints; `terrain_world_facts_pass_corridor_check.gd` gates determinism, provider exposure, hint/sample agreement, default no-op behavior, and opt-in bounded pass shaping through the height provider; `terrain_pass_corridor_visual_probe_check.gd` writes a neutral/shaped/cut/mask contact sheet and currently proves a high-terrain mountain-pass cut while keeping an off-corridor anchor unchanged; `terrain_pass_corridor_tour.tscn` remains an experimental CPU-only review scene, not an acceptance gate, until route/corridor facts are available to the native/GPU page path and can run like the landform tour
+native-disabled profile safety: profiles that cannot use the native prepared-grid path must queue invalidated chunks and use bounded near-fill during scene startup; unbounded synchronous CPU rebuilds are reserved for explicit debug/tests only
 LOD transition continuity: mixed-density shared edge samples are machine-checked at zero height/XZ delta; fine chunk edge bands now morph toward coarser neighbor sampling while inner samples stay raw
 far terrain: visual clipmap rings with a level-0 overlap band below authoritative chunk edges
 far clipmap continuity: levels share one base-snapped origin, with zero tested fine/coarse transition height deltas
@@ -76,6 +78,7 @@ walk motion GPU page budget: the motion profile now hard-fails if far page GPU u
 rapid recenter safety: in-flight far workers defer newer same-level requests instead of falling back to synchronous rebuilds
 visible transition standard: visible LOD/ring shifts are not acceptable; current gates stop seams, boundary ping-pong, and the first chunk/clipmap geometric transition cases, while human gray-terrain acceptance remains open
 far clipmap transition policy: page-backed clipmap geometry stays opaque; do not alpha-crossfade whole square pages/rings, and smooth recenter/LOD only through world-space previous/current height-page blend, coarse/fine morph bands, and outer-edge-only visibility masking
+clipmap debt policy: remaining subtle quality shifts in the current interim far/LOD renderer are known debt, not accepted final quality; do not keep adding fog, alpha fades, or CPU mesh bandaids unless a regression creates holes, hard seams, crashes, or blocks landform review. The planned fix path is GPU-resident far pages/rings with stable world-space sampling, previous/current height-page blend, shader coarse/fine morph, and lower-churn native/GPU page generation.
 local detail: 257 x 257 native payloads are viable as a near-player tier, not a global default
 ```
 
@@ -142,7 +145,7 @@ Rapid recenter gate: boundary ping-pong keeps counts unchanged; rapid larger rec
 Native clipmap payload gate: direct backend check verifies centered vertices, UVs, and hole-filtered indices
 Fast Godot runtime gate: `python tools/godot_runtime_gate.py --suite fast` runs 19 headless native/clipmap/walk checks, including the quality-profile, visibility-contract, elevation-color material, GPU page residency, walk motion/recenter profile, and forward-prefetch residency gates
 Extended Godot runtime gate: `python tools/godot_runtime_gate.py --suite extended` runs 34 headless native parity, renderer-boundary, runtime-modularity, far surface/review, LOD, local-detail, quality-profile, visibility-contract, elevation-color material, GPU page residency, motion-profile, and forward-prefetch residency checks
-Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 16 worldgen-capability, kernel-gallery/tour, mountain-kernel gallery, landform, pass/corridor world-fact shaping, live profile-key, hydrology, debug performance, streaming performance, and 257-walk-density checks
+Quality Godot runtime gate: `python tools/godot_runtime_gate.py --suite quality` runs 17 worldgen-capability, kernel-gallery/tour, mountain-kernel gallery, landform, pass/corridor world-fact/visual shaping, live profile-key, hydrology, debug performance, streaming performance, and 257-walk-density checks
 Hydrology/debug performance: cross-region height grids now split into per-region fast blocks, so padded hydrology windows avoid the slow scalar fallback; quality gate time is back in single-digit seconds on the current machine
 Renderer boundary: `TerrainChunkRenderer` now owns chunk MeshInstance lifecycle and bounded pooling, while `TerrainWorldNode` remains orchestration/build-policy glue
 Quality release guard: runtime readiness checks landform/hydrology report schemas, six-window coverage, relief/source-confidence thresholds, stable/window-limited hydrology field policy, and zero hydrology tile seam deltas
@@ -191,6 +194,8 @@ LOD transition smoothing: shader coarse/fine morph only in the transition band
 sampling: page origins/extents are world-space and stable
 fog/visibility: edge-only, used only to hide the outer loaded boundary
 near/far handoff: tested height continuity stays mandatory
+known residual: subtle far/LOD quality shifts can still appear in the interim renderer
+policy: fix black holes, hard seams, crashes, and review blockers immediately; route remaining subtle shifts into the GPU-resident page/ring renderer instead of patching the interim path
 ```
 
 Immediate roadmap order from here:
@@ -207,12 +212,15 @@ Immediate roadmap order from here:
 4. Use the profiler to decide whether remaining hitching is frame-time work,
    visual recenter snap, or LOD/material change.
 5. If it is frame-time work, keep fixing scheduling/prefetch/cache pressure first.
-6. If it is visual snap, keep aligning with the World 4 pattern:
-   stable page geometry, previous/current height pages, coarse/fine morph.
+6. If it is visual snap or subtle quality drift, keep aligning with the World 4
+   pattern: stable GPU-resident page geometry, previous/current height pages,
+   coarse/fine shader morph, and no broad fog/alpha cover-up.
 7. Move far clipmap pages toward GPU residency behind the same provider/page
    contract after the CPU/native facts remain stable.
-8. Visually review landform profile metrics/contact sheet, then decide whether the default scale/relief should remain `balanced_current` or move toward one of the review profiles.
-9. Add biome/material masks only after height clipmap motion and base landform scale are accepted.
+8. Keep landform scale profiles review-only until biome/material context exists; use the live tour for relative comparison, not default promotion.
+9. Keep pass/corridor live streaming review tabled until route facts are native/GPU-page compatible; use the static visual artifact only as a CPU shaping proof.
+10. Continue hydrology/rivers before erosion.
+11. Add biome/material masks only after height clipmap motion and base world facts are accepted.
 ```
 
 Explicitly out of scope until those pass:

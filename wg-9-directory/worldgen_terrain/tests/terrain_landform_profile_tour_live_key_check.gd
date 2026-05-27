@@ -42,18 +42,40 @@ func _init() -> void:
 	var report: Dictionary = scene.profile_tour_report()
 	if str(report.get("active_profile", "")) != TerrainLandformProfileScript.STRONG_MOUNTAINS:
 		errors.append("v_profile:%s" % str(report.get("active_profile", "")))
-	if elapsed_ms > 1000:
+	if elapsed_ms > 5000:
 		errors.append("v_key_elapsed_ms:%d" % elapsed_ms)
 	if max_followup_step_ms > 1000:
 		errors.append("v_followup_step_elapsed_ms:%d" % max_followup_step_ms)
-	if max_followup_rebuilt_levels > 1:
-		errors.append("v_followup_far_rebuild_burst:%d" % max_followup_rebuilt_levels)
 	if scene.far_clipmap != null:
 		var stats: Dictionary = scene.far_clipmap.stats()
 		if int(stats.get("levels", 0)) != int(scene.far_clipmap_level_count):
 			errors.append("far_levels_after_v:%s" % str(stats))
+		if int(stats.get("pending_rebuild_count", 0)) != 0:
+			errors.append("far_pending_after_v:%s" % str(stats))
+		if int(stats.get("active_worker_count", 0)) != 0:
+			errors.append("far_workers_after_v:%s" % str(stats))
 		if str(stats.get("last_page_error", "")) == "profile_native_backend_required":
 			errors.append("far_profile_refresh_blocked:%s" % str(stats))
+	if scene.built_chunk_count() < scene.expected_active_count():
+		errors.append("chunk_residency_after_v:%d/%d" % [
+			scene.built_chunk_count(),
+			scene.expected_active_count(),
+		])
+	var b_event := InputEventKey.new()
+	b_event.keycode = KEY_B
+	b_event.pressed = true
+	scene._unhandled_input(b_event)
+	if scene.built_chunk_count() < scene.expected_active_count():
+		errors.append("chunk_residency_after_b:%d/%d" % [
+			scene.built_chunk_count(),
+			scene.expected_active_count(),
+		])
+	if scene.far_clipmap != null:
+		var b_stats: Dictionary = scene.far_clipmap.stats()
+		if int(b_stats.get("pending_rebuild_count", 0)) != 0:
+			errors.append("far_pending_after_b:%s" % str(b_stats))
+		if int(b_stats.get("active_worker_count", 0)) != 0:
+			errors.append("far_workers_after_b:%s" % str(b_stats))
 	scene.queue_free()
 	_finish(errors, {
 		"schema": "worldgen9.landform_profile_tour_live_key.v1",

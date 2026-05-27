@@ -25,7 +25,12 @@ static func make_request(
 	}
 
 
-static func build_payload(world: RefCounted, request: Dictionary, colors: PackedColorArray = PackedColorArray()) -> Dictionary:
+static func build_payload(
+	world: RefCounted,
+	request: Dictionary,
+	colors: PackedColorArray = PackedColorArray(),
+	include_normals: bool = true
+) -> Dictionary:
 	var count: int = int(request["vertices_per_side"])
 	var chunk_x: int = int(request["chunk_x"])
 	var chunk_z: int = int(request["chunk_z"])
@@ -43,7 +48,14 @@ static func build_payload(world: RefCounted, request: Dictionary, colors: Packed
 			"error": "color_size:%d expected:%d" % [colors.size(), height.size()],
 			"request": request,
 		}
-	var arrays: Array = TerrainMeshBuilderScript.build_surface_arrays(height, count, step_m, colors)
+	var arrays: Array = TerrainMeshBuilderScript.build_surface_arrays(
+		height,
+		count,
+		step_m,
+		colors,
+		0.0,
+		include_normals
+	)
 	return {
 		"status": "pass",
 		"request": request,
@@ -57,6 +69,7 @@ static func build_payload(world: RefCounted, request: Dictionary, colors: Packed
 		"height": height,
 		"arrays": arrays,
 		"has_colors": not colors.is_empty(),
+		"has_normals": include_normals,
 	}
 
 
@@ -73,12 +86,17 @@ static func payload_summary(payload: Dictionary) -> Dictionary:
 			"error": str(payload.get("error", "unknown")),
 		}
 	var arrays: Array = payload["arrays"] as Array
+	var normals: PackedVector3Array = (
+		arrays[Mesh.ARRAY_NORMAL] as PackedVector3Array
+		if arrays[Mesh.ARRAY_NORMAL] is PackedVector3Array
+		else PackedVector3Array()
+	)
 	return {
 		"status": "pass",
 		"chunk": [int(payload["chunk_x"]), int(payload["chunk_z"])],
 		"vertices_per_side": int(payload["vertices_per_side"]),
 		"vertex_count": (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(),
-		"normal_count": (arrays[Mesh.ARRAY_NORMAL] as PackedVector3Array).size(),
+		"normal_count": normals.size(),
 		"index_count": (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size(),
 		"has_colors": bool(payload.get("has_colors", false)),
 	}

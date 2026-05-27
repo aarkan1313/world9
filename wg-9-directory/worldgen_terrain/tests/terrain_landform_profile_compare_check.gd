@@ -7,7 +7,7 @@ const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_worl
 const OUT_DIR := "factory/runtime/godot_landform_profiles"
 const GRID_SIZE := 81
 const SPAN_REGION_FRACTION := 0.42
-const SHEET_COLUMNS := 3
+const SHEET_COLUMNS := 4
 
 
 func _init() -> void:
@@ -151,6 +151,7 @@ func _validate_profile_effects(reports: Array[Dictionary], errors: Array[String]
 		errors.append("profile_report_empty")
 		return
 	var strong_improved := false
+	var medium_changed := false
 	var compressed_changed := false
 	for report in reports:
 		var by_profile: Dictionary = {}
@@ -159,22 +160,34 @@ func _validate_profile_effects(reports: Array[Dictionary], errors: Array[String]
 			by_profile[str(item["profile"])] = item
 			if float(item.get("seam_max_delta_m", 1.0)) > 0.01:
 				errors.append("%s_%s_seam:%.6f" % [str(report["label"]), str(item["profile"]), float(item["seam_max_delta_m"])])
-		if not (by_profile.has(TerrainLandformProfileScript.BALANCED_CURRENT) and by_profile.has(TerrainLandformProfileScript.STRONG_MOUNTAINS) and by_profile.has(TerrainLandformProfileScript.COMPRESSED_SCALE)):
+		if not (
+			by_profile.has(TerrainLandformProfileScript.BALANCED_CURRENT)
+			and by_profile.has(TerrainLandformProfileScript.STRONG_MOUNTAINS)
+			and by_profile.has(TerrainLandformProfileScript.MEDIUM_SCALE)
+			and by_profile.has(TerrainLandformProfileScript.COMPRESSED_SCALE)
+		):
 			errors.append("%s_missing_profiles" % str(report["label"]))
 			continue
 		var balanced: Dictionary = by_profile[TerrainLandformProfileScript.BALANCED_CURRENT] as Dictionary
 		var strong: Dictionary = by_profile[TerrainLandformProfileScript.STRONG_MOUNTAINS] as Dictionary
+		var medium: Dictionary = by_profile[TerrainLandformProfileScript.MEDIUM_SCALE] as Dictionary
 		var compressed: Dictionary = by_profile[TerrainLandformProfileScript.COMPRESSED_SCALE] as Dictionary
 		if float(strong["relief_p05_p95_m"]) >= float(balanced["relief_p05_p95_m"]) * 1.03:
 			strong_improved = true
+		if absf(float(medium["mean_local_relief_m"]) - float(balanced["mean_local_relief_m"])) >= 0.5:
+			medium_changed = true
 		if absf(float(compressed["mean_local_relief_m"]) - float(balanced["mean_local_relief_m"])) >= 1.0:
 			compressed_changed = true
 		if not bool(strong.get("native_prepared_grid_enabled", false)):
 			errors.append("strong_profile_native_disabled")
+		if not bool(medium.get("native_prepared_grid_enabled", false)):
+			errors.append("medium_profile_native_disabled")
 		if not bool(compressed.get("native_prepared_grid_enabled", false)):
 			errors.append("compressed_profile_native_disabled")
 	if not strong_improved:
 		errors.append("strong_mountains_no_relief_increase")
+	if not medium_changed:
+		errors.append("medium_scale_no_local_change")
 	if not compressed_changed:
 		errors.append("compressed_scale_no_local_change")
 
