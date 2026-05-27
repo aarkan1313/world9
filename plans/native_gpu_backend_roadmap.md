@@ -104,6 +104,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 61c. [x] Protect previous far page residency keys for the full shader blend window so tighter GPU page budgets cannot evict or reuse textures still needed by current/previous height-page transitions.
 61d. [x] Reuse evicted same-shape far page texture objects inside the bounded GPU page residency cache, reducing allocation churn while preserving protected current/previous transition textures.
 61e. [x] Add the first renderer-enabled GPU compute gate (`--suite gpu`) proving local RenderingDevice availability and deterministic terrain-style height-page normal computation against CPU reference math; headless runs report unsupported instead of failing.
+61f. [x] Capture the GPU page backend sprint boundary in `plans/gpu_page_backend_sprint.md`, including the rule that local-device sync/readback remains a proof path and should not be wired into live streaming as the production GPU solution.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.
