@@ -22,7 +22,7 @@ func _start() -> void:
 		return
 	_check_provider_texture_handoff(errors)
 	_check_far_clipmap_provider_texture_opt_in(errors)
-	_check_far_clipmap_provider_texture_region_fallback(errors)
+	_check_far_clipmap_provider_texture_cross_region(errors)
 	if not errors.is_empty():
 		for error in errors:
 			push_error(error)
@@ -144,10 +144,10 @@ func _check_far_clipmap_provider_texture_opt_in(errors: Array[String]) -> void:
 	node.queue_free()
 
 
-func _check_far_clipmap_provider_texture_region_fallback(errors: Array[String]) -> void:
+func _check_far_clipmap_provider_texture_cross_region(errors: Array[String]) -> void:
 	var world = TerrainWorldScript.new()
 	if not world.setup_procedural(2551):
-		errors.append("clipmap_fallback_world_setup_failed:%s" % str(world.errors))
+		errors.append("clipmap_cross_region_world_setup_failed:%s" % str(world.errors))
 		return
 	var node = TerrainFarClipmapNodeScript.new()
 	node.level_count = 1
@@ -164,26 +164,28 @@ func _check_far_clipmap_provider_texture_region_fallback(errors: Array[String]) 
 	node.gpu_page_residency_max_pages = 4
 	get_root().add_child(node)
 	if not node.setup(world):
-		errors.append("clipmap_fallback_setup_failed")
+		errors.append("clipmap_cross_region_setup_failed")
 		node.clear_levels(true)
 		node.queue_free()
 		return
 	node.update_viewer(Vector2.ZERO)
 	var stats: Dictionary = node.stats()
 	var gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
-	if int(stats.get("last_gpu_provider_page_dispatches", 0)) != 0:
-		errors.append("clipmap_fallback_unexpected_dispatch:%s" % str(stats))
+	if int(stats.get("last_gpu_provider_page_dispatches", 0)) <= 1:
+		errors.append("clipmap_cross_region_dispatches:%s" % str(stats))
 	if str(stats.get("last_gpu_provider_page_error", "")) != "":
-		errors.append("clipmap_fallback_provider_error:%s" % str(stats))
+		errors.append("clipmap_cross_region_provider_error:%s" % str(stats))
 	if int(gpu_state.get("rd_uploads", 0)) < 1:
-		errors.append("clipmap_fallback_rd_uploads:%s" % str(gpu_state))
+		errors.append("clipmap_cross_region_rd_uploads:%s" % str(gpu_state))
 	if int(gpu_state.get("image_uploads", 0)) != 0:
-		errors.append("clipmap_fallback_image_uploads:%s" % str(gpu_state))
+		errors.append("clipmap_cross_region_image_uploads:%s" % str(gpu_state))
 	var heightfield: Dictionary = node.level_heightfields[0] as Dictionary
-	if str(heightfield.get("texture_payload_mode", "")) != "sync_height_image_data":
-		errors.append("clipmap_fallback_mode:%s" % str(heightfield.keys()))
+	if str(heightfield.get("texture_payload_mode", "")) != "gpu_provider_rd_height_texture":
+		errors.append("clipmap_cross_region_mode:%s" % str(heightfield.keys()))
 	if not bool(heightfield.get("height_image_only", false)):
-		errors.append("clipmap_fallback_height_only_missing:%s" % str(heightfield.keys()))
+		errors.append("clipmap_cross_region_height_only_missing:%s" % str(heightfield.keys()))
+	if int(heightfield.get("gpu_provider_page_block_count", 0)) <= 1:
+		errors.append("clipmap_cross_region_block_count:%s" % str(heightfield))
 	node.clear_levels(true)
 	node.queue_free()
 

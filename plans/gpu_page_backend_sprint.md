@@ -144,15 +144,15 @@ The current durable direction is persistent terrain pages:
   uploads, residency handoff, RD normal compute, and explicit cleanup through the
   existing page lifecycle.
 - Wired the provider-page texture backend into `TerrainFarClipmapNode` behind
-  the opt-in `use_gpu_provider_page_textures` flag. Region-local far pages can
-  now dispatch prepared-provider GPU compute directly into renderer-device
-  `R32F` height textures, hand those textures to bounded page residency, and
-  compute normal textures on the renderer device with zero CPU image wrappers or
-  ImageTexture uploads.
+  the opt-in `use_gpu_provider_page_textures` flag. Far pages can now split by
+  base region, dispatch prepared-provider GPU compute blocks directly into one
+  renderer-device `R32F` height texture, hand that texture to bounded page
+  residency, and compute normal textures on the renderer device with zero CPU
+  image wrappers or ImageTexture uploads.
 - Extended the same provider texture gate with a live far-clipmap opt-in path.
-  The test uses a region-local clipmap page, verifies provider dispatch counts,
-  descriptor modes, zero sync bytes/images, zero ImageTexture uploads, and clean
-  RD normal compute.
+  The test covers both a region-local clipmap page and a cross-region page at
+  the origin, verifying provider dispatch/block counts, descriptor modes, zero
+  sync bytes/images, zero ImageTexture uploads, and clean RD normal compute.
 
 ## Important Constraint
 
@@ -184,9 +184,9 @@ prepared provider descriptor
     -> TerrainGpuPageResidency external-height path
     -> main RenderingDevice normal texture compute
 
-region-local far clipmap page
+far clipmap page
   -> opt-in TerrainFarClipmapNode.use_gpu_provider_page_textures
-    -> provider descriptor
+    -> base-region GPU provider descriptor block(s)
     -> renderer-device height texture
     -> bounded far-page residency/material commit
 ```
@@ -209,16 +209,13 @@ Acceptance for the next slice:
 - `--suite gpu` proves any GPU path that claims to be enabled
 - renderer-device height texture ownership is explicit; externally supplied page
   RIDs must declare whether residency owns cleanup
-- provider-page GPU texture dispatch is region-local today; far pages crossing a
-  base region boundary must preflight and fall back to the existing CPU/native
-  height-byte path until a multi-region descriptor/dispatch exists
+- provider-page GPU texture dispatch handles pages that cross base region
+  boundaries by splitting them into per-region GPU blocks that write into one
+  final renderer-device height texture
 
 ## Not Done Yet
 
 - GPU-resident material masks.
-- Multi-region live clipmap page generation from DEM/provider facts. The
-  current opt-in provider texture path is intentionally limited to pages that
-  stay inside one base region.
 - Full live walk scene height generation on GPU compute.
 - Default live streaming integration of the prepared-provider GPU page path.
 - Pass/corridor facts, hydrology facts, erosion facts, and any final provider

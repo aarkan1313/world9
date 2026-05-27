@@ -1802,31 +1802,22 @@ func _attach_gpu_provider_page_texture(
 		return {"status": "fail", "error": last_gpu_provider_page_error}
 	var origin_x: float = origin.x - outer_extent
 	var origin_z: float = origin.y - outer_extent
-	if not _provider_page_stays_in_one_region(origin_x, origin_z, spacing, side, side):
-		return {"status": "fail", "error": "grid_crosses_region"}
-	var prepared: Dictionary = world.provider.call(
-		"native_prepared_height_grid_request",
-		origin_x,
-		origin_z,
-		spacing,
-		side,
-		side,
-		int(world.seed),
-		float(world.region_size_m)
-	) as Dictionary
-	if prepared.get("status", "fail") != "pass":
-		last_gpu_provider_page_error = "prepared:%s" % str(prepared.get("error", prepared.get("status", "fail")))
+	var blocks: Array = _gpu_provider_page_blocks(origin, outer_extent, spacing, side)
+	if blocks.is_empty():
+		last_gpu_provider_page_error = "prepared:blocks_empty"
+		return {"status": "fail", "error": last_gpu_provider_page_error}
+	var first_block: Dictionary = blocks[0] as Dictionary
+	if first_block.get("status", "pass") != "pass":
+		last_gpu_provider_page_error = "prepared:%s" % str(first_block.get("error", first_block.get("status", "fail")))
 		return {"status": "fail", "error": last_gpu_provider_page_error}
 	var backend: RefCounted = _ensure_gpu_provider_page_texture_backend()
 	var result: Dictionary = backend.call(
-		"create_height_texture_from_prepared_request",
+		"create_height_texture_from_prepared_blocks",
 		rd,
-		prepared,
-		origin_x,
-		origin_z,
+		blocks,
+		side,
+		side,
 		spacing,
-		side,
-		side,
 		int(world.seed),
 		float(world.region_size_m)
 	) as Dictionary
@@ -1839,35 +1830,51 @@ func _attach_gpu_provider_page_texture(
 	heightfield["height_image_only"] = true
 	heightfield["texture_payload_mode"] = str(result.get("texture_payload_mode", "gpu_provider_rd_height_texture"))
 	heightfield["rd_owned_rids"] = result.get("rd_owned_rids", []) as Array
-	last_gpu_provider_page_dispatches += 1
+	heightfield["gpu_provider_page_block_count"] = int(result.get("block_count", blocks.size()))
+	last_gpu_provider_page_dispatches += int(result.get("block_count", blocks.size()))
 	last_gpu_provider_page_error = ""
 	return {"status": "pass", "level": level}
 
 
-func _provider_page_stays_in_one_region(origin_x: float, origin_z: float, step_m: float, count_x: int, count_z: int) -> bool:
-	if world == null:
-		return false
-	var region_size_m: float = float(world.region_size_m)
-	if not is_finite(origin_x) or not is_finite(origin_z) or not is_finite(step_m) or not is_finite(region_size_m):
-		return false
-	if step_m <= 0.0 or count_x < 1 or count_z < 1 or region_size_m <= 0.0:
-		return false
-	var max_x: float = origin_x + step_m * float(count_x - 1)
-	var max_z: float = origin_z + step_m * float(count_z - 1)
-	return (
-		int(floor(origin_x / region_size_m)) == _provider_page_end_region(max_x, count_x, region_size_m)
-		and int(floor(origin_z / region_size_m)) == _provider_page_end_region(max_z, count_z, region_size_m)
-	)
-
-
-func _provider_page_end_region(end_value: float, count: int, region_size_m: float) -> int:
-	if count <= 1:
-		return int(floor(end_value / region_size_m))
-	var scaled: float = end_value / region_size_m
-	var rounded: float = round(scaled)
-	if absf(scaled - rounded) <= 0.0000001:
-		return int(rounded) - 1
-	return int(floor(scaled))
+func _gpu_provider_page_blocks(origin: Vector2, outer_extent: float, spacing: float, side: int) -> Array:
+	var blocks: Array = []
+	var x_ranges: Array[Dictionary] = _axis_ranges_by_region(origin.x, outer_extent, spacing, side)
+	var z_ranges: Array[Dictionary] = _axis_ranges_by_region(origin.y, outer_extent, spacing, side)
+	for z_range_value in z_ranges:
+		var z_range: Dictionary = z_range_value as Dictionary
+		for x_range_value in x_ranges:
+			var x_range: Dictionary = x_range_value as Dictionary
+			var x0: int = int(x_range["start"])
+			var x1: int = int(x_range["end"])
+			var z0: int = int(z_range["start"])
+			var z1: int = int(z_range["end"])
+			var count_x: int = x1 - x0 + 1
+			var count_z: int = z1 - z0 + 1
+			var world_x0: float = origin.x - outer_extent + float(x0) * spacing
+			var world_z0: float = origin.y - outer_extent + float(z0) * spacing
+			var prepared: Dictionary = world.provider.call(
+				"native_prepared_height_grid_request",
+				world_x0,
+				world_z0,
+				spacing,
+				count_x,
+				count_z,
+				int(world.seed),
+				float(world.region_size_m)
+			) as Dictionary
+			if prepared.get("status", "fail") != "pass":
+				return [{"status": "fail", "error": prepared.get("error", prepared.get("status", "fail"))}]
+			blocks.append({
+				"status": "pass",
+				"prepared_request": prepared,
+				"origin_x": world_x0,
+				"origin_z": world_z0,
+				"count_x": count_x,
+				"count_z": count_z,
+				"offset_x": x0,
+				"offset_z": z0,
+			})
+	return blocks
 
 
 func _height_image_data_from_height(height: PackedFloat32Array, side: int) -> PackedByteArray:
