@@ -8,6 +8,7 @@ const TerrainPageRequestScript := preload("res://worldgen_terrain/core/terrain_p
 const TerrainPageCacheScript := preload("res://worldgen_terrain/core/terrain_page_cache.gd")
 const TerrainPageTextureBackendScript := preload("res://worldgen_terrain/core/terrain_page_texture_backend.gd")
 const TerrainGpuPageNormalBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_page_normal_backend.gd")
+const TerrainGpuProviderPageTextureBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_provider_page_texture_backend.gd")
 
 @export var level_count: int = 3
 @export var vertices_per_side: int = 129
@@ -28,6 +29,7 @@ const TerrainGpuPageNormalBackendScript := preload("res://worldgen_terrain/core/
 @export var use_gpu_page_normal_backend: bool = false
 @export var use_gpu_rd_page_textures: bool = false
 @export var use_gpu_rd_compute_normals: bool = false
+@export var use_gpu_provider_page_textures: bool = false
 @export_range(0.0, 4.0, 0.05) var surface_texture_normal_strength: float = 1.0
 @export_range(0, 16, 1) var geometric_transition_band_cells: int = 4
 @export_range(1, 4, 1) var max_profile_fallback_rebuild_levels_per_update: int = 1
@@ -72,6 +74,8 @@ var last_page_descriptor_texture_hits: int = 0
 var last_page_descriptor_preencoded_hits: int = 0
 var last_gpu_page_normal_dispatches: int = 0
 var last_gpu_page_normal_error: String = ""
+var last_gpu_provider_page_dispatches: int = 0
+var last_gpu_provider_page_error: String = ""
 var edge_fog_center_xz := Vector2.ZERO
 var _pending_origin := Vector2(INF, INF)
 var _native_backend: Object
@@ -87,11 +91,13 @@ var _page_height_shader: Shader
 var _page_cache: RefCounted
 var _page_texture_backend: RefCounted
 var _gpu_page_normal_backend: RefCounted
+var _gpu_provider_page_texture_backend: RefCounted
 
 
 func _exit_tree() -> void:
 	_clear_native_workers(true)
 	_shutdown_gpu_page_normal_backend()
+	_shutdown_gpu_provider_page_texture_backend()
 	TerrainFarClipmapPayloadWorkerScript.cleanup_detached_workers(0, true, 5000)
 
 
@@ -161,6 +167,8 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	last_page_descriptor_preencoded_hits = 0
 	last_gpu_page_normal_dispatches = 0
 	last_gpu_page_normal_error = ""
+	last_gpu_provider_page_dispatches = 0
+	last_gpu_provider_page_error = ""
 	_pending_origin = Vector2(INF, INF)
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
@@ -169,6 +177,7 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	if _page_texture_backend != null:
 		_page_texture_backend.clear()
 	_shutdown_gpu_page_normal_backend()
+	_shutdown_gpu_provider_page_texture_backend()
 
 
 func clear_async_state_for_review(wait_for_running: bool = false) -> void:
@@ -275,6 +284,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	last_page_descriptor_preencoded_hits = 0
 	last_gpu_page_normal_dispatches = 0
 	last_gpu_page_normal_error = ""
+	last_gpu_provider_page_dispatches = 0
+	last_gpu_provider_page_error = ""
 	var shared_origin := _shared_origin(viewer_xz)
 	var profile_blocks_far_refresh := _provider_profile_disables_native_grid() and not allow_profile_fallback_sync_rebuilds
 	if profile_blocks_far_refresh and is_finite(_pending_origin.x) and is_finite(_pending_origin.y):
@@ -354,6 +365,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_page_descriptor_preencoded_hits": last_page_descriptor_preencoded_hits,
 		"last_gpu_page_normal_dispatches": last_gpu_page_normal_dispatches,
 		"last_gpu_page_normal_error": last_gpu_page_normal_error,
+		"last_gpu_provider_page_dispatches": last_gpu_provider_page_dispatches,
+		"last_gpu_provider_page_error": last_gpu_provider_page_error,
 	}
 
 
@@ -388,6 +401,8 @@ func stats() -> Dictionary:
 		"last_page_descriptor_preencoded_hits": last_page_descriptor_preencoded_hits,
 		"last_gpu_page_normal_dispatches": last_gpu_page_normal_dispatches,
 		"last_gpu_page_normal_error": last_gpu_page_normal_error,
+		"last_gpu_provider_page_dispatches": last_gpu_provider_page_dispatches,
+		"last_gpu_provider_page_error": last_gpu_provider_page_error,
 	}
 
 
@@ -522,7 +537,23 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	if not use_gpu_normals and not use_height_only_rd_normals:
 		normals = _normals_from_height(height, side, spacing)
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
-	if use_height_only_rd_normals:
+	if _can_use_gpu_provider_page_textures():
+		var gpu_provider_status: Dictionary = _attach_gpu_provider_page_texture(heightfield, level, origin, outer_extent, spacing, side)
+		if gpu_provider_status.get("status", "fail") != "pass":
+			heightfield.erase("height_texture_rid")
+			heightfield.erase("rd_owned_rids")
+			heightfield.erase("height_image_only")
+			heightfield.erase("texture_payload_mode")
+			if use_height_only_rd_normals:
+				heightfield["height_image_data"] = _height_image_data_from_height(height, side)
+				heightfield["height_image_only"] = true
+				heightfield["texture_payload_mode"] = "sync_height_image_data"
+			elif use_gpu_normals:
+				var gpu_normal_status_after_provider: Dictionary = _attach_gpu_page_normal_data(heightfield, height, side, spacing)
+				if gpu_normal_status_after_provider.get("status", "fail") != "pass":
+					normals = _normals_from_height(height, side, spacing)
+					heightfield["normals"] = normals
+	elif use_height_only_rd_normals:
 		heightfield["height_image_data"] = _height_image_data_from_height(height, side)
 		heightfield["height_image_only"] = true
 		heightfield["texture_payload_mode"] = "sync_height_image_data"
@@ -797,6 +828,19 @@ func _shutdown_gpu_page_normal_backend() -> void:
 	if _gpu_page_normal_backend != null:
 		_gpu_page_normal_backend.shutdown()
 	_gpu_page_normal_backend = null
+
+
+func _ensure_gpu_provider_page_texture_backend() -> RefCounted:
+	if _gpu_provider_page_texture_backend == null:
+		_gpu_provider_page_texture_backend = TerrainGpuProviderPageTextureBackendScript.new()
+	return _gpu_provider_page_texture_backend
+
+
+func _shutdown_gpu_provider_page_texture_backend() -> void:
+	if _gpu_provider_page_texture_backend != null and RenderingServer.has_method("get_rendering_device"):
+		var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+		_gpu_provider_page_texture_backend.clear(rd)
+	_gpu_provider_page_texture_backend = null
 
 
 func _protect_active_page_keys() -> void:
@@ -1418,6 +1462,18 @@ func _can_use_height_only_gpu_page_payload() -> bool:
 	return use_gpu_rd_compute_normals
 
 
+func _can_use_gpu_provider_page_textures() -> bool:
+	if not use_gpu_provider_page_textures:
+		return false
+	if not _can_use_height_only_gpu_page_payload():
+		return false
+	if world == null or world.provider == null:
+		return false
+	if not world.provider.has_method("native_prepared_height_grid_request"):
+		return false
+	return true
+
+
 func _can_use_direct_rd_page_textures() -> bool:
 	if not use_persistent_page_mesh:
 		return false
@@ -1730,6 +1786,90 @@ func _attach_gpu_page_normal_data(heightfield: Dictionary, height: PackedFloat32
 	return {"status": "pass"}
 
 
+func _attach_gpu_provider_page_texture(
+	heightfield: Dictionary,
+	level: int,
+	origin: Vector2,
+	outer_extent: float,
+	spacing: float,
+	side: int
+) -> Dictionary:
+	if not _can_use_gpu_provider_page_textures():
+		return {"status": "fail", "error": "gpu_provider_page_textures_unavailable"}
+	var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+	if rd == null:
+		last_gpu_provider_page_error = "rendering_device_unavailable"
+		return {"status": "fail", "error": last_gpu_provider_page_error}
+	var origin_x: float = origin.x - outer_extent
+	var origin_z: float = origin.y - outer_extent
+	if not _provider_page_stays_in_one_region(origin_x, origin_z, spacing, side, side):
+		return {"status": "fail", "error": "grid_crosses_region"}
+	var prepared: Dictionary = world.provider.call(
+		"native_prepared_height_grid_request",
+		origin_x,
+		origin_z,
+		spacing,
+		side,
+		side,
+		int(world.seed),
+		float(world.region_size_m)
+	) as Dictionary
+	if prepared.get("status", "fail") != "pass":
+		last_gpu_provider_page_error = "prepared:%s" % str(prepared.get("error", prepared.get("status", "fail")))
+		return {"status": "fail", "error": last_gpu_provider_page_error}
+	var backend: RefCounted = _ensure_gpu_provider_page_texture_backend()
+	var result: Dictionary = backend.call(
+		"create_height_texture_from_prepared_request",
+		rd,
+		prepared,
+		origin_x,
+		origin_z,
+		spacing,
+		side,
+		side,
+		int(world.seed),
+		float(world.region_size_m)
+	) as Dictionary
+	if result.get("status", "fail") != "pass":
+		last_gpu_provider_page_error = str(result.get("error", "compute_failed"))
+		return result
+	heightfield["height_texture_rid"] = result["height_texture_rid"] as RID
+	heightfield["height_texture_owned_by_residency"] = true
+	heightfield["height_bytes"] = int(result.get("height_bytes", side * side * 4))
+	heightfield["height_image_only"] = true
+	heightfield["texture_payload_mode"] = str(result.get("texture_payload_mode", "gpu_provider_rd_height_texture"))
+	heightfield["rd_owned_rids"] = result.get("rd_owned_rids", []) as Array
+	last_gpu_provider_page_dispatches += 1
+	last_gpu_provider_page_error = ""
+	return {"status": "pass", "level": level}
+
+
+func _provider_page_stays_in_one_region(origin_x: float, origin_z: float, step_m: float, count_x: int, count_z: int) -> bool:
+	if world == null:
+		return false
+	var region_size_m: float = float(world.region_size_m)
+	if not is_finite(origin_x) or not is_finite(origin_z) or not is_finite(step_m) or not is_finite(region_size_m):
+		return false
+	if step_m <= 0.0 or count_x < 1 or count_z < 1 or region_size_m <= 0.0:
+		return false
+	var max_x: float = origin_x + step_m * float(count_x - 1)
+	var max_z: float = origin_z + step_m * float(count_z - 1)
+	return (
+		int(floor(origin_x / region_size_m)) == _provider_page_end_region(max_x, count_x, region_size_m)
+		and int(floor(origin_z / region_size_m)) == _provider_page_end_region(max_z, count_z, region_size_m)
+	)
+
+
+func _provider_page_end_region(end_value: float, count: int, region_size_m: float) -> int:
+	if count <= 1:
+		return int(floor(end_value / region_size_m))
+	var scaled: float = end_value / region_size_m
+	var rounded: float = round(scaled)
+	if absf(scaled - rounded) <= 0.0000001:
+		return int(rounded) - 1
+	return int(floor(scaled))
+
+
 func _height_image_data_from_height(height: PackedFloat32Array, side: int) -> PackedByteArray:
 	var data := PackedByteArray()
 	data.resize(side * side * 4)
@@ -1841,11 +1981,13 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 		return {"status": "fail", "error": "side:%d" % side}
 	var height_data: PackedByteArray = heightfield.get("height_image_data", PackedByteArray()) as PackedByteArray
 	var normal_data: PackedByteArray = heightfield.get("normal_image_data", PackedByteArray()) as PackedByteArray
+	var height_texture_rid: RID = heightfield.get("height_texture_rid", RID()) as RID
+	var has_external_height_texture := height_texture_rid.is_valid()
 	var height_image_only: bool = bool(heightfield.get("height_image_only", false))
 	var expected_height_bytes: int = side * side * 4
 	var expected_normal_bytes: int = side * side * 12
 	var normal_data_required: bool = not height_image_only or not _can_use_height_only_gpu_page_payload()
-	if height_data.size() != expected_height_bytes or (normal_data_required and normal_data.size() != expected_normal_bytes):
+	if (not has_external_height_texture and height_data.size() != expected_height_bytes) or (normal_data_required and normal_data.size() != expected_normal_bytes):
 		return {
 			"status": "fail",
 			"error": "preencoded_size:%d/%d expected:%d/%d" % [
@@ -1856,13 +1998,15 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 			],
 		}
 	var can_use_direct_rd: bool = _can_use_direct_rd_page_textures()
+	if has_external_height_texture and not can_use_direct_rd:
+		return {"status": "fail", "error": "external_height_texture_requires_direct_rd"}
 	var height_image: Image = null
 	var normal_image: Image = null
-	if not can_use_direct_rd:
+	if not has_external_height_texture and not can_use_direct_rd:
 		height_image = Image.create_from_data(side, side, false, Image.FORMAT_RF, height_data)
 	if not can_use_direct_rd and normal_data.size() == expected_normal_bytes:
 		normal_image = Image.create_from_data(side, side, false, Image.FORMAT_RGBF, normal_data)
-	if not can_use_direct_rd and (height_image == null or (normal_data_required and normal_image == null)):
+	if not has_external_height_texture and not can_use_direct_rd and (height_image == null or (normal_data_required and normal_image == null)):
 		return {"status": "fail", "error": "preencoded_image_create_failed"}
 	var height_min: float = float(heightfield.get("height_min_m", 0.0))
 	var height_max: float = float(heightfield.get("height_max_m", height_min))
@@ -1882,8 +2026,14 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 		"normal_values": heightfield.get("normals", PackedVector3Array()) as PackedVector3Array,
 		"cache_key": str(heightfield.get("cache_key", "")),
 		"texture_payload_mode": str(heightfield.get("texture_payload_mode", "")),
-		"height_image_data": height_data,
 	}
+	if has_external_height_texture:
+		descriptor["height_texture_rid"] = height_texture_rid
+		descriptor["height_texture_owned_by_residency"] = bool(heightfield.get("height_texture_owned_by_residency", true))
+		descriptor["height_bytes"] = int(heightfield.get("height_bytes", expected_height_bytes))
+		descriptor["rd_owned_rids"] = heightfield.get("rd_owned_rids", []) as Array
+	else:
+		descriptor["height_image_data"] = height_data
 	if height_image != null:
 		descriptor["height_image"] = height_image
 	if normal_image != null:

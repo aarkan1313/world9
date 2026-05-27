@@ -98,6 +98,33 @@ func create_height_texture(rd: RenderingDevice, descriptor: Dictionary) -> Dicti
 	}
 
 
+func create_height_texture_from_prepared_request(
+	rd: RenderingDevice,
+	prepared_request: Dictionary,
+	origin_x: float,
+	origin_z: float,
+	step_m: float,
+	count_x: int,
+	count_z: int,
+	world_seed: int,
+	region_size_m: float
+) -> Dictionary:
+	var descriptor_builder = TerrainGpuHeightPageBackendScript.new()
+	var descriptor: Dictionary = descriptor_builder.build_prepared_provider_page_descriptor(
+		prepared_request,
+		origin_x,
+		origin_z,
+		step_m,
+		count_x,
+		count_z,
+		world_seed,
+		region_size_m
+	)
+	if descriptor.get("status", "fail") != "pass":
+		return descriptor
+	return create_height_texture(rd, descriptor)
+
+
 func debug_state() -> Dictionary:
 	return {
 		"compile_count": _compile_count,
