@@ -54,7 +54,8 @@ func _run() -> int:
 	if not bool(scene.call("setup")):
 		errors.append("setup_failed:%s" % str(scene.get("errors")))
 	else:
-		await _drain_scene(scene, errors)
+		var drain_summary: Dictionary = _far_page_counter_summary(scene)
+		drain_summary = await _drain_scene(scene, errors, drain_summary)
 		for _index in range(4):
 			await process_frame
 		var capture_path: String = out_dir.path_join("gpu_page_review.png")
@@ -63,12 +64,19 @@ func _run() -> int:
 		_check_image_stats(image_stats, errors)
 		var gpu_stats: Dictionary = _gpu_stats(scene)
 		_check_gpu_stats(gpu_stats, scene, errors)
-		_write_manifest(out_dir, image_stats, gpu_stats, errors)
+		var descriptor_summary: Dictionary = _descriptor_summary(scene)
+		_check_descriptor_summary(descriptor_summary, scene, errors)
+		_check_drain_summary(drain_summary, errors)
+		_write_manifest(out_dir, image_stats, gpu_stats, drain_summary, descriptor_summary, errors)
 
+	var far_clipmap: Node = scene.get("far_clipmap") as Node
+	if far_clipmap != null and far_clipmap.has_method("clear_levels"):
+		far_clipmap.call("clear_levels", true)
 	if scene.has_method("clear_preview"):
 		scene.call("clear_preview")
 	scene.queue_free()
 	viewport.queue_free()
+	await process_frame
 	if not errors.is_empty():
 		_report(errors, out_dir)
 		return 1
@@ -90,16 +98,32 @@ func _rendering_device_available() -> bool:
 	)
 
 
-func _drain_scene(scene: Node3D, errors: Array[String]) -> void:
+func _far_page_counter_summary(scene: Node3D) -> Dictionary:
+	var summary := {
+		"frames": 0,
+		"total_page_descriptor_image_builds": 0,
+		"total_page_descriptor_texture_hits": 0,
+		"total_page_descriptor_preencoded_hits": 0,
+		"total_gpu_page_normal_dispatches": 0,
+		"max_pending_levels": 0,
+	}
+	var far_clipmap: Node = scene.get("far_clipmap") as Node
+	if far_clipmap == null or not far_clipmap.has_method("stats"):
+		return summary
+	return _accumulate_far_page_stats(summary, far_clipmap.call("stats") as Dictionary)
+
+
+func _drain_scene(scene: Node3D, errors: Array[String], summary: Dictionary) -> Dictionary:
 	for _index in range(90):
 		var report: Dictionary = scene.call("step_viewer", 0.0, Vector2.ZERO, 0.0, 0.0) as Dictionary
 		if report.get("status", "fail") != "pass":
 			errors.append("step_failed:%s" % str(report))
-			return
+			return summary
 		var far_clipmap: Node = scene.get("far_clipmap") as Node
 		var stats: Dictionary = {}
 		if far_clipmap != null and far_clipmap.has_method("stats"):
 			stats = far_clipmap.call("stats") as Dictionary
+		summary = _accumulate_far_page_stats(summary, stats)
 		var gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
 		if (
 			int(scene.call("built_chunk_count")) >= int(scene.call("expected_active_count"))
@@ -109,9 +133,20 @@ func _drain_scene(scene: Node3D, errors: Array[String]) -> void:
 			and int(gpu_state.get("rd_uploads", 0)) >= int(scene.get("far_clipmap_level_count"))
 			and int(gpu_state.get("rd_compute_normal_uploads", 0)) >= int(scene.get("far_clipmap_level_count"))
 		):
-			return
+			return summary
 		await process_frame
 	errors.append("drain_timeout:%s" % str(scene.call("diagnostics_text")))
+	return summary
+
+
+func _accumulate_far_page_stats(summary: Dictionary, stats: Dictionary) -> Dictionary:
+	summary["frames"] = int(summary["frames"]) + 1
+	summary["total_page_descriptor_image_builds"] = int(summary["total_page_descriptor_image_builds"]) + int(stats.get("last_page_descriptor_image_builds", 0))
+	summary["total_page_descriptor_texture_hits"] = int(summary["total_page_descriptor_texture_hits"]) + int(stats.get("last_page_descriptor_texture_hits", 0))
+	summary["total_page_descriptor_preencoded_hits"] = int(summary["total_page_descriptor_preencoded_hits"]) + int(stats.get("last_page_descriptor_preencoded_hits", 0))
+	summary["total_gpu_page_normal_dispatches"] = int(summary["total_gpu_page_normal_dispatches"]) + int(stats.get("last_gpu_page_normal_dispatches", 0))
+	summary["max_pending_levels"] = max(int(summary["max_pending_levels"]), int(stats.get("pending_rebuild_count", 0)))
+	return summary
 
 
 func _capture(viewport: SubViewport, path: String, errors: Array[String]) -> Image:
@@ -196,7 +231,73 @@ func _check_gpu_stats(stats: Dictionary, scene: Node3D, errors: Array[String]) -
 		errors.append("image_uploads:%s" % str(stats))
 
 
-func _write_manifest(out_dir: String, image_stats: Dictionary, gpu_stats: Dictionary, errors: Array[String]) -> void:
+func _descriptor_summary(scene: Node3D) -> Dictionary:
+	var summary := {
+		"count": 0,
+		"pass_count": 0,
+		"height_image_data_count": 0,
+		"normal_image_data_count": 0,
+		"height_image_only_count": 0,
+		"height_image_wrapper_count": 0,
+		"normal_image_wrapper_count": 0,
+		"payload_modes": [],
+	}
+	var far_clipmap: Node = scene.get("far_clipmap") as Node
+	if far_clipmap == null:
+		return summary
+	var descriptors: Array = far_clipmap.get("level_material_descriptors") as Array
+	var modes: Dictionary = {}
+	for descriptor_value in descriptors:
+		var descriptor: Dictionary = descriptor_value as Dictionary
+		if descriptor.is_empty():
+			continue
+		summary["count"] = int(summary["count"]) + 1
+		if descriptor.get("status", "fail") == "pass":
+			summary["pass_count"] = int(summary["pass_count"]) + 1
+		if (descriptor.get("height_image_data", PackedByteArray()) as PackedByteArray).size() > 0:
+			summary["height_image_data_count"] = int(summary["height_image_data_count"]) + 1
+		if (descriptor.get("normal_image_data", PackedByteArray()) as PackedByteArray).size() > 0:
+			summary["normal_image_data_count"] = int(summary["normal_image_data_count"]) + 1
+		if bool(descriptor.get("height_image_only", false)):
+			summary["height_image_only_count"] = int(summary["height_image_only_count"]) + 1
+		if descriptor.has("height_image"):
+			summary["height_image_wrapper_count"] = int(summary["height_image_wrapper_count"]) + 1
+		if descriptor.has("normal_image"):
+			summary["normal_image_wrapper_count"] = int(summary["normal_image_wrapper_count"]) + 1
+		var mode: String = str(descriptor.get("texture_payload_mode", ""))
+		if not mode.is_empty():
+			modes[mode] = true
+	summary["payload_modes"] = _sorted_keys(modes)
+	return summary
+
+
+func _check_descriptor_summary(summary: Dictionary, scene: Node3D, errors: Array[String]) -> void:
+	var expected_levels: int = int(scene.get("far_clipmap_level_count"))
+	if int(summary.get("count", 0)) < expected_levels:
+		errors.append("descriptor_count:%s" % str(summary))
+	if int(summary.get("pass_count", 0)) < expected_levels:
+		errors.append("descriptor_pass_count:%s" % str(summary))
+	if int(summary.get("height_image_data_count", 0)) < expected_levels:
+		errors.append("descriptor_height_data:%s" % str(summary))
+	if int(summary.get("height_image_only_count", 0)) < expected_levels:
+		errors.append("descriptor_height_only:%s" % str(summary))
+	if int(summary.get("height_image_wrapper_count", 0)) != 0 or int(summary.get("normal_image_wrapper_count", 0)) != 0:
+		errors.append("descriptor_image_wrappers:%s" % str(summary))
+
+
+func _check_drain_summary(summary: Dictionary, errors: Array[String]) -> void:
+	if int(summary.get("total_page_descriptor_image_builds", 0)) != 0:
+		errors.append("page_descriptor_image_builds:%s" % str(summary))
+
+
+func _write_manifest(
+	out_dir: String,
+	image_stats: Dictionary,
+	gpu_stats: Dictionary,
+	drain_summary: Dictionary,
+	descriptor_summary: Dictionary,
+	errors: Array[String]
+) -> void:
 	var manifest := {
 		"version": 1,
 		"schema": "worldgen9.gpu_page_review_manifest.v1",
@@ -205,6 +306,8 @@ func _write_manifest(out_dir: String, image_stats: Dictionary, gpu_stats: Dictio
 		"capture": "gpu_page_review.png",
 		"image_stats": image_stats,
 		"gpu_page_residency": gpu_stats,
+		"far_page_drain": drain_summary,
+		"far_page_descriptors": descriptor_summary,
 		"errors": errors.duplicate(),
 		"status": "pass" if errors.is_empty() else "fail",
 	}
@@ -230,6 +333,14 @@ func _read_manifest_gpu(out_dir: String) -> Dictionary:
 		return {}
 	var manifest: Dictionary = JSON.parse_string(file.get_as_text()) as Dictionary
 	return manifest.get("gpu_page_residency", {}) as Dictionary
+
+
+func _sorted_keys(dict: Dictionary) -> Array[String]:
+	var out: Array[String] = []
+	for key_value in dict.keys():
+		out.append(str(key_value))
+	out.sort()
+	return out
 
 
 func _report(errors: Array[String], out_dir: String) -> void:

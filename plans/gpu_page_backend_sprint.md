@@ -84,6 +84,10 @@ The current durable direction is persistent terrain pages:
   and verifies direct RD height/normal residency with zero ImageTexture uploads.
 - Runtime readiness now validates the GPU page review manifest directly, not
   just the review-index file presence.
+- The same manifest now records far-page descriptor state and drain counters,
+  locking the rule that the direct-RD review path uses raw height bytes /
+  height-only page descriptors and does not rebuild CPU image wrappers for page
+  materials.
 
 ## Important Constraint
 

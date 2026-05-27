@@ -627,6 +627,15 @@ def _check_gpu_page_review_manifest(manifest: dict[str, Any], errors: list[str])
     check(int(gpu_state.get("rd_compute_normal_uploads", 0)) >= 4, errors, "gpu_page_review_rd_normal_uploads")
     check(int(gpu_state.get("rd_compute_normal_failures", 0)) == 0, errors, "gpu_page_review_rd_normal_failures")
     check(int(gpu_state.get("image_uploads", -1)) == 0, errors, "gpu_page_review_image_uploads")
+    far_page_drain = manifest.get("far_page_drain", {})
+    check(int(far_page_drain.get("total_page_descriptor_image_builds", -1)) == 0, errors, "gpu_page_review_descriptor_image_builds")
+    descriptor_state = manifest.get("far_page_descriptors", {})
+    check(int(descriptor_state.get("count", 0)) >= 4, errors, "gpu_page_review_descriptor_count")
+    check(int(descriptor_state.get("pass_count", 0)) >= 4, errors, "gpu_page_review_descriptor_pass")
+    check(int(descriptor_state.get("height_image_data_count", 0)) >= 4, errors, "gpu_page_review_descriptor_height_data")
+    check(int(descriptor_state.get("height_image_only_count", 0)) >= 4, errors, "gpu_page_review_descriptor_height_only")
+    check(int(descriptor_state.get("height_image_wrapper_count", -1)) == 0, errors, "gpu_page_review_descriptor_height_image_wrapper")
+    check(int(descriptor_state.get("normal_image_wrapper_count", -1)) == 0, errors, "gpu_page_review_descriptor_normal_image_wrapper")
 
 
 def _check_walk_density_manifest(manifest: dict[str, Any], errors: list[str]) -> None:
