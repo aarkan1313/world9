@@ -24,6 +24,7 @@ The current durable direction is persistent terrain pages:
 - Added an opt-in far-clipmap integration flag, `use_gpu_page_normal_backend`, for GPU-generated RGBF normal bytes in sync/fallback page commits.
 - Added direct `Texture2DRD` capability and residency checks.
 - Added an opt-in far-clipmap integration flag, `use_gpu_rd_page_textures`, for direct RD page textures from preencoded RF/RGBF bytes.
+- Added a review-only `TerrainQualityProfile.GPU_PAGE_REVIEW` contract that routes the normal walk-preview scene through direct RD page residency without changing the saved default walk profile.
 - Renderer-enabled proof currently passes on D3D12 / RTX 5090 Laptop GPU.
 - The probe validates:
   - storage-buffer dispatch
@@ -40,6 +41,11 @@ The current durable direction is persistent terrain pages:
   - bounded far-page residency using RD textures instead of ImageTexture uploads
   - opt-in far-clipmap consumption of direct RD page textures
   - explicit RID teardown without leak warnings
+- The GPU page review profile gate validates:
+  - quality-profile wiring into the normal walk-preview scene
+  - direct RD residency under the profile path
+  - zero ImageTexture uploads for the profile's far pages
+  - explicit scene/clipmap teardown without RID leaks
 
 ## Important Constraint
 
@@ -72,6 +78,7 @@ Acceptance for the next slice:
 - no per-frame renderer device creation in live terrain
 - no forced GPU readback in the default walk scene
 - direct RD texture residency remains opt-in until visual/perf acceptance
+- `gpu_page_review` is the review profile for this path; `walk_review` remains the production-safe/default review profile
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
 

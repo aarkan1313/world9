@@ -112,6 +112,7 @@ GPU_CHECKS = [
     "terrain_gpu_page_normal_backend_check.gd",
     "terrain_gpu_texture_rd_probe_check.gd",
     "terrain_gpu_rd_page_residency_check.gd",
+    "terrain_gpu_page_review_profile_check.gd",
 ]
 
 RENDER_CHECKS = [

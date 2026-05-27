@@ -18,6 +18,7 @@ func _start() -> void:
 	_check_profile_contract(profile, errors)
 	_check_local_detail_profile_contract(errors)
 	_check_high_density_profile_contract(errors)
+	_check_gpu_page_profile_contract(errors)
 	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
 	scene.auto_setup_on_ready = false
 	scene.capture_mouse_on_ready = false
@@ -78,6 +79,8 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		"far_clipmap_rebuild_levels_per_update",
 		"use_persistent_page_clipmap",
 		"far_clipmap_gpu_page_residency_max_pages",
+		"use_far_clipmap_gpu_page_normal_backend",
+		"use_far_clipmap_gpu_rd_page_textures",
 		"distance_fog_depth_begin_m",
 		"distance_fog_depth_end_m",
 		"camera_far_m",
@@ -167,6 +170,53 @@ func _check_local_detail_profile_contract(errors: Array[String]) -> void:
 				errors.append("local_detail_profile_node_displacement_disabled")
 			if bool(stats.get("collision_enabled", true)):
 				errors.append("local_detail_profile_node_collision_enabled")
+	scene.queue_free()
+
+
+func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
+	var profile: Dictionary = TerrainQualityProfileScript.profile(TerrainQualityProfileScript.GPU_PAGE_REVIEW)
+	if profile.is_empty():
+		errors.append("gpu_page_profile_missing")
+		return
+	if not TerrainQualityProfileScript.profile_ids().has(TerrainQualityProfileScript.GPU_PAGE_REVIEW):
+		errors.append("gpu_page_profile_not_listed")
+	if not bool(profile.get("review_only", false)):
+		errors.append("gpu_page_profile_not_review_only")
+	var settings: Dictionary = profile.get("settings", {}) as Dictionary
+	if not bool(settings.get("use_far_clipmap_gpu_page_normal_backend", false)):
+		errors.append("gpu_page_profile_normal_backend_disabled")
+	if not bool(settings.get("use_far_clipmap_gpu_rd_page_textures", false)):
+		errors.append("gpu_page_profile_rd_textures_disabled")
+	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
+	if int(budgets.get("gpu_page_review_max_image_uploads", -1)) != 0:
+		errors.append("gpu_page_profile_image_budget:%s" % str(budgets))
+	if int(budgets.get("gpu_page_review_min_rd_uploads", 0)) <= 0:
+		errors.append("gpu_page_profile_rd_budget:%s" % str(budgets))
+	if int(budgets.get("gpu_page_review_min_normal_dispatches", -1)) < 0:
+		errors.append("gpu_page_profile_normal_budget:%s" % str(budgets))
+	var scene: Node3D = TerrainWalkPreviewSceneScript.new()
+	scene.auto_setup_on_ready = false
+	scene.capture_mouse_on_ready = false
+	scene.show_diagnostics_overlay = false
+	scene.quality_profile_id = TerrainQualityProfileScript.GPU_PAGE_REVIEW
+	TerrainQualityProfileScript.apply_to_node(scene, profile)
+	get_root().add_child(scene)
+	var pre_setup_report: Dictionary = scene.quality_profile_report()
+	if pre_setup_report.get("status", "fail") != "pass":
+		errors.append("gpu_page_profile_pre_setup:%s" % str(pre_setup_report))
+	if not scene.setup():
+		errors.append("gpu_page_profile_setup_failed:%s" % str(scene.errors))
+	else:
+		var live_report: Dictionary = scene.quality_profile_report()
+		if live_report.get("status", "fail") != "pass":
+			errors.append("gpu_page_profile_live:%s" % str(live_report))
+		if scene.far_clipmap == null:
+			errors.append("gpu_page_profile_far_missing")
+		else:
+			var stats: Dictionary = scene.far_clipmap.stats()
+			var gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
+			if not bool(gpu_state.get("use_rd_textures", false)):
+				errors.append("gpu_page_profile_rd_not_configured:%s" % str(gpu_state))
 	scene.queue_free()
 
 

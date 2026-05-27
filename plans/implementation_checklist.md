@@ -130,6 +130,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add a renderer-enabled `gpu` runtime gate proving local RenderingDevice compute support and terrain-style height-page normal computation with CPU parity; headless runs report unsupported instead of failing.
 - [x] Add reusable persistent `TerrainGpuPageNormalBackend` and opt-in far-clipmap integration for GPU-generated RGBF page normal bytes while keeping native workers/default walk behavior unchanged.
 - [x] Add opt-in direct `Texture2DRD` far page residency for preencoded RF/RGBF page bytes, plus renderer-enabled coverage for direct RD texture creation, far-clipmap opt-in integration, and RID cleanup.
+- [x] Add review-only `gpu_page_review` quality profile so the normal walk-preview scene can opt into direct RD far-page residency through the shared profile contract while `walk_review` remains unchanged.
 - [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.

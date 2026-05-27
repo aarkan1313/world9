@@ -4,6 +4,7 @@ extends RefCounted
 const WALK_REVIEW := "walk_review"
 const LOCAL_DETAIL_REVIEW := "local_detail_review"
 const HIGH_DENSITY_257_REVIEW := "high_density_257_review"
+const GPU_PAGE_REVIEW := "gpu_page_review"
 
 
 static func profile(profile_id: String) -> Dictionary:
@@ -14,12 +15,14 @@ static func profile(profile_id: String) -> Dictionary:
 			return _local_detail_review_profile()
 		HIGH_DENSITY_257_REVIEW:
 			return _high_density_257_review_profile()
+		GPU_PAGE_REVIEW:
+			return _gpu_page_review_profile()
 		_:
 			return {}
 
 
 static func profile_ids() -> Array[String]:
-	return [WALK_REVIEW, LOCAL_DETAIL_REVIEW, HIGH_DENSITY_257_REVIEW]
+	return [WALK_REVIEW, LOCAL_DETAIL_REVIEW, HIGH_DENSITY_257_REVIEW, GPU_PAGE_REVIEW]
 
 
 static func apply_to_node(node: Object, profile_data: Dictionary) -> void:
@@ -111,6 +114,8 @@ static func _walk_review_profile() -> Dictionary:
 			"use_persistent_page_clipmap": true,
 			"far_clipmap_page_cache_max_pages": 64,
 			"far_clipmap_gpu_page_residency_max_pages": 64,
+			"use_far_clipmap_gpu_page_normal_backend": false,
+			"use_far_clipmap_gpu_rd_page_textures": false,
 			"distance_fog_depth_begin_m": 30000.0,
 			"distance_fog_depth_end_m": 33000.0,
 			"camera_far_m": 120000.0,
@@ -148,6 +153,25 @@ static func _local_detail_review_profile() -> Dictionary:
 		"local_detail_max_param_refresh_ms": 20,
 		"local_detail_max_toggle_displacement_texture_ms": 45,
 		"local_detail_max_patch_move_update_ms": 35,
+	}
+	profile_data["review_only"] = true
+	return profile_data
+
+
+static func _gpu_page_review_profile() -> Dictionary:
+	var profile_data: Dictionary = _walk_review_profile()
+	profile_data["id"] = GPU_PAGE_REVIEW
+	profile_data["description"] = "Opt-in GPU far-page review profile using GPU normal bytes and direct Texture2DRD page residency. Not the default walk profile."
+	var settings: Dictionary = (profile_data["settings"] as Dictionary).duplicate(true)
+	settings.merge({
+		"use_far_clipmap_gpu_page_normal_backend": true,
+		"use_far_clipmap_gpu_rd_page_textures": true,
+	}, true)
+	profile_data["settings"] = settings
+	profile_data["budgets"] = {
+		"gpu_page_review_max_image_uploads": 0,
+		"gpu_page_review_min_rd_uploads": 4,
+		"gpu_page_review_min_normal_dispatches": 0,
 	}
 	profile_data["review_only"] = true
 	return profile_data
