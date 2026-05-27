@@ -117,6 +117,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 61p. [x] Add a renderer-backed GPU page review capture and manifest to the render suite and visual review index, proving the saved direct-RD page scene is not only stats-valid but visibly renderable.
 61q. [x] Extend runtime readiness to validate the GPU page review manifest, including image readability, direct RD upload counts, compute-normal texture counts, and zero ImageTexture uploads.
 61r. [x] Extend the GPU page review manifest/readiness gate to lock zero far-page descriptor image rebuilds and raw height-byte / height-only descriptor use in the direct-RD page path.
+61s. [x] Add a renderer-enabled GPU page motion/recenter manifest gate proving the saved direct-RD page scene can move across multiple far-page origins while keeping settled raw height-byte descriptors, zero descriptor image rebuilds, zero ImageTexture uploads, and no protected page-cache evictions.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.

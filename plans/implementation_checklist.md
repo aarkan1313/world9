@@ -135,6 +135,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add renderer-backed GPU page review capture at `factory/runtime/godot_gpu_page_review/`, include it in the Godot review index, and require the manifest to prove direct RD height/normal page residency with zero ImageTexture uploads.
 - [x] Extend runtime readiness to validate the GPU page review manifest schema, image readability stats, direct RD upload counts, compute-normal upload counts, and zero ImageTexture uploads.
 - [x] Extend the GPU page review manifest/readiness gate to lock zero far-page descriptor image rebuilds plus raw height-byte / height-only descriptor state on the direct-RD path.
+- [x] Add a renderer-enabled GPU page motion/recenter manifest gate that moves the saved direct-RD review scene through multiple far-page origins and verifies settled direct-RD descriptors, zero descriptor image rebuilds, zero ImageTexture uploads, and no protected page-cache evictions.
 - [x] Add renderer-enabled main RenderingDevice compute-to-texture probe proving storage-image writes into `R32F` texture RIDs without invalid main-device `submit/sync` calls.
 - [x] Add opt-in main RenderingDevice far-page normal texture compute so `gpu_page_review` creates RF height textures and writes RGBAF normal textures directly on the renderer device with zero ImageTexture uploads.
 - [x] Add opt-in direct-RD height-image-only far-page sync/worker payloads so GPU review can skip redundant normal-byte generation when renderer-device compute normals are active, while preserving the full RF/RGBF fallback path.

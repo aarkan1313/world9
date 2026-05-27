@@ -88,6 +88,11 @@ The current durable direction is persistent terrain pages:
   locking the rule that the direct-RD review path uses raw height bytes /
   height-only page descriptors and does not rebuild CPU image wrappers for page
   materials.
+- Added `terrain_gpu_page_review_motion_check.gd` to the renderer-enabled GPU
+  suite. It drives `terrain_gpu_page_review.tscn` through several page-recenter
+  movements, writes `factory/runtime/godot_gpu_page_review/gpu_page_motion_manifest.json`,
+  and verifies each settled stop keeps direct-RD descriptors, zero descriptor
+  image rebuilds, zero ImageTexture uploads, and no protected page-cache evictions.
 
 ## Important Constraint
 
@@ -125,6 +130,8 @@ Acceptance for the next slice:
 - `gpu_page_review` and `terrain_gpu_page_review.tscn` are the review entry points for this path; `walk_review` and `terrain_walk_preview.tscn` remain the production-safe/default review path
 - the GPU page review capture must stay present in the Godot review index before
   the direct-RD path can be considered visually accepted
+- the GPU page motion manifest must stay present in runtime readiness before
+  the direct-RD path can be promoted beyond review-only use
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
 

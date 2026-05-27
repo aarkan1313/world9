@@ -63,6 +63,7 @@ def validate() -> dict[str, Any]:
         "debug_mode_perf_report": RUNTIME / "godot_performance" / "debug_mode_perf_report.json",
         "streaming_far_overview_manifest": RUNTIME / "godot_streaming_far_overview" / "streaming_far_overview_manifest.json",
         "gpu_page_review_manifest": RUNTIME / "godot_gpu_page_review" / "gpu_page_review_manifest.json",
+        "gpu_page_motion_manifest": RUNTIME / "godot_gpu_page_review" / "gpu_page_motion_manifest.json",
         "walk_density_manifest": RUNTIME / "godot_walk_density_review" / "walk_density_manifest.json",
         "local_detail_displacement_manifest": RUNTIME / "godot_local_detail_displacement" / "local_detail_displacement_manifest.json",
         "walk_local_detail_manifest": RUNTIME / "godot_walk_local_detail_review" / "walk_local_detail_manifest.json",
@@ -101,6 +102,7 @@ def validate() -> dict[str, Any]:
     debug_mode_perf_report = read_json(paths["debug_mode_perf_report"])
     streaming_far_overview_manifest = read_json(paths["streaming_far_overview_manifest"])
     gpu_page_review_manifest = read_json(paths["gpu_page_review_manifest"])
+    gpu_page_motion_manifest = read_json(paths["gpu_page_motion_manifest"])
     walk_density_manifest = read_json(paths["walk_density_manifest"])
     local_detail_displacement_manifest = read_json(paths["local_detail_displacement_manifest"])
     walk_local_detail_manifest = read_json(paths["walk_local_detail_manifest"])
@@ -193,6 +195,7 @@ def validate() -> dict[str, Any]:
     _check_debug_mode_perf_report(debug_mode_perf_report, errors)
     _check_streaming_far_overview_budget(runtime_budget, streaming_far_overview_manifest, errors)
     _check_gpu_page_review_manifest(gpu_page_review_manifest, errors)
+    _check_gpu_page_motion_manifest(gpu_page_motion_manifest, errors)
     _check_walk_density_manifest(walk_density_manifest, errors)
     _check_local_detail_review_manifests(local_detail_displacement_manifest, walk_local_detail_manifest, errors)
 
@@ -636,6 +639,33 @@ def _check_gpu_page_review_manifest(manifest: dict[str, Any], errors: list[str])
     check(int(descriptor_state.get("height_image_only_count", 0)) >= 4, errors, "gpu_page_review_descriptor_height_only")
     check(int(descriptor_state.get("height_image_wrapper_count", -1)) == 0, errors, "gpu_page_review_descriptor_height_image_wrapper")
     check(int(descriptor_state.get("normal_image_wrapper_count", -1)) == 0, errors, "gpu_page_review_descriptor_normal_image_wrapper")
+
+
+def _check_gpu_page_motion_manifest(manifest: dict[str, Any], errors: list[str]) -> None:
+    check(manifest.get("schema") == "worldgen9.gpu_page_motion_manifest.v1", errors, "gpu_page_motion_schema")
+    check(manifest.get("status") == "pass", errors, "gpu_page_motion_status")
+    check(str(manifest.get("scene", "")) == "res://worldgen_terrain/scenes/terrain_gpu_page_review.tscn", errors, "gpu_page_motion_scene")
+    samples = manifest.get("samples", [])
+    check(int(manifest.get("sample_count", 0)) >= 5, errors, "gpu_page_motion_sample_count")
+    check(len(samples) >= 5, errors, "gpu_page_motion_samples_missing")
+    for index, sample in enumerate(samples):
+        check(bool(sample.get("settled", False)), errors, f"gpu_page_motion_settled:{index}")
+        check(int(sample.get("total_page_descriptor_image_builds", -1)) == 0, errors, f"gpu_page_motion_descriptor_image_builds:{index}")
+        descriptor_state = sample.get("final_descriptor_state", {})
+        check(int(descriptor_state.get("count", 0)) >= 4, errors, f"gpu_page_motion_descriptor_count:{index}")
+        check(int(descriptor_state.get("pass_count", 0)) >= 4, errors, f"gpu_page_motion_descriptor_pass:{index}")
+        check(int(descriptor_state.get("height_image_data_count", 0)) >= 4, errors, f"gpu_page_motion_descriptor_height_data:{index}")
+        check(int(descriptor_state.get("height_image_only_count", 0)) >= 4, errors, f"gpu_page_motion_descriptor_height_only:{index}")
+        check(int(descriptor_state.get("height_image_wrapper_count", -1)) == 0, errors, f"gpu_page_motion_height_wrapper:{index}")
+        check(int(descriptor_state.get("normal_image_wrapper_count", -1)) == 0, errors, f"gpu_page_motion_normal_wrapper:{index}")
+    final_stats = manifest.get("final_far_stats", {})
+    gpu_state = final_stats.get("gpu_page_residency", {})
+    page_cache = final_stats.get("page_cache", {})
+    check(int(gpu_state.get("rd_uploads", 0)) >= 4, errors, "gpu_page_motion_rd_uploads")
+    check(int(gpu_state.get("rd_compute_normal_uploads", 0)) >= 4, errors, "gpu_page_motion_rd_normal_uploads")
+    check(int(gpu_state.get("rd_compute_normal_failures", -1)) == 0, errors, "gpu_page_motion_rd_normal_failures")
+    check(int(gpu_state.get("image_uploads", -1)) == 0, errors, "gpu_page_motion_image_uploads")
+    check(int(page_cache.get("protected_evictions", -1)) == 0, errors, "gpu_page_motion_protected_page_evictions")
 
 
 def _check_walk_density_manifest(manifest: dict[str, Any], errors: list[str]) -> None:
