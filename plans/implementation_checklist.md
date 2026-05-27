@@ -136,6 +136,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add opt-in main RenderingDevice far-page normal texture compute so `gpu_page_review` creates RF height textures and writes RGBAF normal textures directly on the renderer device with zero ImageTexture uploads.
 - [x] Add opt-in direct-RD height-image-only far-page sync/worker payloads so GPU review can skip redundant normal-byte generation when renderer-device compute normals are active, while preserving the full RF/RGBF fallback path.
 - [x] Skip CPU `Image` wrapper construction for opt-in direct-RD far-page descriptors so GPU review hands raw RF/RGBF bytes straight to `Texture2DRD`, with ImageTexture fallback built only if RD cannot be used.
+- [x] Add `TerrainPageTextureBackend` so descriptor-to-texture fallback, direct-RD page residency, protected keys, and diagnostics are behind a backend boundary instead of living directly in `TerrainFarClipmapNode`.
 - [x] Document clipmap debt policy: fix holes, hard seams, crashes, and review blockers immediately; route remaining subtle LOD/quality shifts through the GPU-resident page/ring path instead of more interim fog/alpha/CPU-mesh patches.
 - [x] Add compact kernel-gallery review scene plus headless contact-sheet gate proving all 36 current runtime kernel IDs can be selected as live provider terrain.
 - [x] Fix kernel-gallery camera setup order so filtered galleries can launch without `look_at()` before tree insertion.

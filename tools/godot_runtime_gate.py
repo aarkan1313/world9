@@ -52,6 +52,7 @@ FAST_HEADLESS_CHECKS = [
     "terrain_quality_profile_check.gd",
     "terrain_visibility_contract_check.gd",
     "terrain_elevation_color_material_check.gd",
+    "terrain_page_texture_backend_check.gd",
     "terrain_gpu_page_residency_check.gd",
     "native_clipmap_mesh_payload_from_height_check.gd",
     "terrain_far_clipmap_budget_check.gd",

@@ -6,7 +6,7 @@ const TerrainSurfaceTextureBuilderScript := preload("res://worldgen_terrain/runt
 const TerrainFarClipmapPayloadWorkerScript := preload("res://worldgen_terrain/mesh/terrain_far_clipmap_payload_worker.gd")
 const TerrainPageRequestScript := preload("res://worldgen_terrain/core/terrain_page_request.gd")
 const TerrainPageCacheScript := preload("res://worldgen_terrain/core/terrain_page_cache.gd")
-const TerrainGpuPageResidencyScript := preload("res://worldgen_terrain/core/terrain_gpu_page_residency.gd")
+const TerrainPageTextureBackendScript := preload("res://worldgen_terrain/core/terrain_page_texture_backend.gd")
 const TerrainGpuPageNormalBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_page_normal_backend.gd")
 
 @export var level_count: int = 3
@@ -85,7 +85,7 @@ var _surface_texture_shader_opaque: Shader
 var _surface_texture_shader_fade: Shader
 var _page_height_shader: Shader
 var _page_cache: RefCounted
-var _gpu_page_residency: RefCounted
+var _page_texture_backend: RefCounted
 var _gpu_page_normal_backend: RefCounted
 
 
@@ -119,7 +119,7 @@ func setup(p_world: RefCounted) -> bool:
 		level_page_blend_start_ms.append(0)
 		level_previous_page_cache_keys.append("")
 	_ensure_page_cache()
-	_ensure_gpu_page_residency()
+	_ensure_page_texture_backend()
 	return true
 
 
@@ -166,8 +166,8 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	_staged_native_origin = Vector2(INF, INF)
 	if _page_cache != null:
 		_page_cache.clear()
-	if _gpu_page_residency != null:
-		_gpu_page_residency.clear()
+	if _page_texture_backend != null:
+		_page_texture_backend.clear()
 	_shutdown_gpu_page_normal_backend()
 
 
@@ -338,7 +338,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"staged_native_payload_count": _staged_native_payloads.size(),
 		"use_persistent_page_mesh": use_persistent_page_mesh,
 		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
-		"gpu_page_residency": _gpu_page_residency.debug_state() if _gpu_page_residency != null else {},
+		"gpu_page_residency": _gpu_page_residency_state(),
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
 		"last_scheduled_levels": last_scheduled_levels.duplicate(),
 		"last_deferred_levels": last_deferred_levels.duplicate(),
@@ -372,7 +372,7 @@ func stats() -> Dictionary:
 		"staged_native_payload_count": _staged_native_payloads.size(),
 		"use_persistent_page_mesh": use_persistent_page_mesh,
 		"page_cache": _page_cache.debug_state() if _page_cache != null else {},
-		"gpu_page_residency": _gpu_page_residency.debug_state() if _gpu_page_residency != null else {},
+		"gpu_page_residency": _gpu_page_residency_state(),
 		"last_rebuilt_levels": last_rebuilt_levels.duplicate(),
 		"last_scheduled_levels": last_scheduled_levels.duplicate(),
 		"last_deferred_levels": last_deferred_levels.duplicate(),
@@ -410,8 +410,8 @@ func invalidate_pages_for_profile_change() -> void:
 	_staged_native_origin = Vector2(INF, INF)
 	if _page_cache != null:
 		_page_cache.clear()
-	if _gpu_page_residency != null:
-		_gpu_page_residency.clear()
+	if _page_texture_backend != null:
+		_page_texture_backend.clear()
 	pending_rebuild_count = _count_pending_rebuilds()
 
 
@@ -770,14 +770,21 @@ func _ensure_page_cache() -> void:
 	_page_cache.configure(page_cache_max_pages)
 
 
-func _ensure_gpu_page_residency() -> void:
-	if _gpu_page_residency == null:
-		_gpu_page_residency = TerrainGpuPageResidencyScript.new()
-	_gpu_page_residency.configure(
+func _ensure_page_texture_backend() -> void:
+	if _page_texture_backend == null:
+		_page_texture_backend = TerrainPageTextureBackendScript.new()
+	_page_texture_backend.configure(
+		use_persistent_page_mesh,
 		gpu_page_residency_max_pages,
 		use_gpu_rd_page_textures,
 		use_gpu_rd_compute_normals
 	)
+
+
+func _gpu_page_residency_state() -> Dictionary:
+	if _page_texture_backend == null:
+		_ensure_page_texture_backend()
+	return _page_texture_backend.gpu_page_residency_state()
 
 
 func _ensure_gpu_page_normal_backend() -> Dictionary:
@@ -811,8 +818,8 @@ func _protect_active_page_keys() -> void:
 		if not key.is_empty():
 			protected.append(key)
 	_page_cache.set_protected_keys(protected)
-	if _gpu_page_residency != null:
-		_gpu_page_residency.set_protected_keys(protected)
+	if _page_texture_backend != null:
+		_page_texture_backend.set_protected_keys(protected)
 
 
 func _track_previous_page_key_for_blend(level: int, cache_key: String, has_previous_page: bool) -> void:
@@ -1801,7 +1808,7 @@ func _material_descriptor_from_heightfield(heightfield: Dictionary) -> Dictionar
 
 func _page_material_descriptor_from_heightfield(heightfield: Dictionary) -> Dictionary:
 	var cache_key: String = str(heightfield.get("cache_key", ""))
-	if use_persistent_page_mesh and _gpu_page_residency != null and _gpu_page_residency.has_page(cache_key):
+	if use_persistent_page_mesh and _page_texture_backend != null and _page_texture_backend.has_page(cache_key):
 		last_page_descriptor_texture_hits += 1
 		var height_min: float = float(heightfield.get("height_min_m", 0.0))
 		var height_max: float = float(heightfield.get("height_max_m", height_min))
@@ -2016,27 +2023,17 @@ func _page_height_material_for_descriptor(
 
 func _gpu_page_textures_for_descriptor(descriptor: Dictionary) -> Dictionary:
 	var cache_key: String = str(descriptor.get("cache_key", ""))
-	if use_persistent_page_mesh:
-		_ensure_gpu_page_residency()
-		var resident: Dictionary = _gpu_page_residency.get_or_create_textures(cache_key, descriptor) as Dictionary
-		if resident.get("status", "fail") == "pass":
-			if str(resident.get("normal_texture_mode", "")) == "rd_compute":
-				last_gpu_page_normal_dispatches += 1
-			return resident
-	return _gpu_page_image_textures_for_descriptor(descriptor, cache_key)
+	_ensure_page_texture_backend()
+	var entry: Dictionary = _page_texture_backend.get_or_create_textures(cache_key, descriptor) as Dictionary
+	if entry.get("status", "fail") == "pass" and str(entry.get("normal_texture_mode", "")) == "rd_compute":
+		last_gpu_page_normal_dispatches += 1
+	return entry
 
 
 func _gpu_page_image_textures_for_descriptor(descriptor: Dictionary, cache_key: String) -> Dictionary:
-	var height_image: Image = descriptor.get("height_image") as Image
-	var normal_image: Image = descriptor.get("normal_image") as Image
-	if height_image == null or normal_image == null:
-		return {"status": "fail", "error": "missing_fallback_images"}
-	return {
-		"status": "pass",
-		"cache_key": cache_key,
-		"height_texture": ImageTexture.create_from_image(height_image),
-		"normal_texture": ImageTexture.create_from_image(normal_image),
-	}
+	var fallback_backend = TerrainPageTextureBackendScript.new()
+	fallback_backend.configure(false, 0, false, false)
+	return fallback_backend.get_or_create_textures(cache_key, descriptor)
 
 
 func _refresh_page_morph_sources() -> void:

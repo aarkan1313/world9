@@ -74,6 +74,10 @@ The current durable direction is persistent terrain pages:
   raw RF/RGBF bytes can be handed directly to `Texture2DRD`; fallback
   ImageTexture descriptors are still built on demand if direct RD cannot be
   used.
+- Added `TerrainPageTextureBackend` as the first page texture backend boundary.
+  It owns the descriptor-to-texture decision, ImageTexture fallback, bounded GPU
+  page residency, protected keys, and diagnostics while leaving
+  `TerrainFarClipmapNode` as clipmap orchestration.
 
 ## Important Constraint
 
@@ -88,14 +92,13 @@ The production path should avoid CPU readback where possible:
 
 ## Next Integration Boundary
 
-The next code boundary should be a page-normal/texture backend interface:
+The current code boundary is now:
 
 ```text
 height page bytes + page metadata
-  -> backend choice
-    -> native preencoded RF/RGBF bytes
-    -> GPU compute proof path
-    -> direct Texture2DRD residency path
+  -> TerrainPageTextureBackend
+    -> ImageTexture fallback
+    -> bounded Texture2DRD residency
     -> opt-in main RenderingDevice compute-to-texture normal path
   -> existing page residency/material commit contract
 ```
