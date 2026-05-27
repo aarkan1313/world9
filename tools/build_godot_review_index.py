@@ -65,6 +65,8 @@ SECTIONS: list[dict[str, Any]] = [
             "factory/runtime/godot_streaming_far_overview/streaming_far_overview_manifest.json",
             "factory/runtime/godot_streaming_far_overview/streaming_far_overview_3ring.png",
             "factory/runtime/godot_streaming_far_overview/streaming_far_overview_4ring.png",
+            "factory/runtime/godot_gpu_page_review/gpu_page_review.png",
+            "factory/runtime/godot_gpu_page_review/gpu_page_review_manifest.json",
         ],
     },
     {

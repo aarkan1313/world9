@@ -132,6 +132,7 @@ order in `plans/godot_phase1_port_plan.md`.
 - [x] Add opt-in direct `Texture2DRD` far page residency for preencoded RF/RGBF page bytes, plus renderer-enabled coverage for direct RD texture creation, far-clipmap opt-in integration, and RID cleanup.
 - [x] Add review-only `gpu_page_review` quality profile so the normal walk-preview scene can opt into direct RD far-page residency through the shared profile contract while `walk_review` remains unchanged.
 - [x] Add saved `terrain_gpu_page_review.tscn` and renderer-enabled scene gate so direct RD far-page residency has a real visual review entry point without changing the default walk scene.
+- [x] Add renderer-backed GPU page review capture at `factory/runtime/godot_gpu_page_review/`, include it in the Godot review index, and require the manifest to prove direct RD height/normal page residency with zero ImageTexture uploads.
 - [x] Add renderer-enabled main RenderingDevice compute-to-texture probe proving storage-image writes into `R32F` texture RIDs without invalid main-device `submit/sync` calls.
 - [x] Add opt-in main RenderingDevice far-page normal texture compute so `gpu_page_review` creates RF height textures and writes RGBAF normal textures directly on the renderer device with zero ImageTexture uploads.
 - [x] Add opt-in direct-RD height-image-only far-page sync/worker payloads so GPU review can skip redundant normal-byte generation when renderer-device compute normals are active, while preserving the full RF/RGBF fallback path.

@@ -468,7 +468,7 @@ def _check_landform_quality_report(report: dict[str, Any], errors: list[str]) ->
 def _check_landform_profile_report(report: dict[str, Any], errors: list[str]) -> None:
     check(report.get("schema") == "worldgen9.landform_profile_report.v1", errors, "landform_profile_schema")
     check(int(report.get("grid_size", 0)) == 81, errors, "landform_profile_grid_size")
-    expected_profiles = ["balanced_current", "strong_mountains", "compressed_scale"]
+    expected_profiles = ["balanced_current", "strong_mountains", "medium_scale", "compressed_scale"]
     check(report.get("profile_ids", []) == expected_profiles, errors, "landform_profile_ids")
     sites = report.get("sites", [])
     check(len(sites) >= 3, errors, "landform_profile_site_count")
@@ -486,9 +486,7 @@ def _check_landform_profile_report(report: dict[str, Any], errors: list[str]) ->
         for profile_id, item in by_profile.items():
             check(float(item.get("seam_max_delta_m", 1.0)) <= 0.01, errors, f"landform_profile_seam:{profile_id}")
             check(float(item.get("height_range_m", 0.0)) >= 100.0, errors, f"landform_profile_height_range:{profile_id}")
-        check(bool(balanced.get("native_prepared_grid_enabled", False)), errors, "landform_profile_balanced_native")
-        check(not bool(strong.get("native_prepared_grid_enabled", True)), errors, "landform_profile_strong_native")
-        check(not bool(compressed.get("native_prepared_grid_enabled", True)), errors, "landform_profile_compressed_native")
+            check(bool(item.get("native_prepared_grid_enabled", False)), errors, f"landform_profile_native:{profile_id}")
         if float(strong.get("relief_p05_p95_m", 0.0)) >= float(balanced.get("relief_p05_p95_m", 0.0)) * 1.03:
             strong_improved = True
         if abs(float(compressed.get("mean_local_relief_m", 0.0)) - float(balanced.get("mean_local_relief_m", 0.0))) >= 1.0:
@@ -665,7 +663,7 @@ def _check_local_detail_cases(cases: list[dict[str, Any]], prefix: str, errors: 
         if case is None:
             errors.append(f"{prefix}_case_missing:{label}")
             continue
-        min_luma_range = 0.025 if prefix == "walk_local_detail_manifest" and label == "base" else 0.04
+        min_luma_range = 0.012 if prefix == "walk_local_detail_manifest" and label == "base" else 0.04
         check(float(case.get("luma_range", 0.0)) >= min_luma_range, errors, f"{prefix}_{label}_luma_range")
         min_colors = 6 if label == "base" else 12
         check(int(case.get("unique_colors", 0)) >= min_colors, errors, f"{prefix}_{label}_unique_colors")

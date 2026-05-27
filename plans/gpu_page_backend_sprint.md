@@ -78,6 +78,10 @@ The current durable direction is persistent terrain pages:
   It owns the descriptor-to-texture decision, ImageTexture fallback, bounded GPU
   page residency, protected keys, and diagnostics while leaving
   `TerrainFarClipmapNode` as clipmap orchestration.
+- Added `terrain_gpu_page_review_capture_check.gd` to the renderer-backed
+  artifact path. It captures `terrain_gpu_page_review.tscn`, writes
+  `factory/runtime/godot_gpu_page_review/gpu_page_review.png` plus a manifest,
+  and verifies direct RD height/normal residency with zero ImageTexture uploads.
 
 ## Important Constraint
 
@@ -113,6 +117,8 @@ Acceptance for the next slice:
 - height-image-only worker payloads remain tied to the direct-RD compute-normal
   path and must not be used by fallback ImageTexture materials
 - `gpu_page_review` and `terrain_gpu_page_review.tscn` are the review entry points for this path; `walk_review` and `terrain_walk_preview.tscn` remain the production-safe/default review path
+- the GPU page review capture must stay present in the Godot review index before
+  the direct-RD path can be considered visually accepted
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
 
