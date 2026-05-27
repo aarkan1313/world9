@@ -143,6 +143,23 @@ func _build_payload(request: Dictionary) -> Dictionary:
 			for local_x in range(count_x):
 				height[dst_row + x0 + local_x] = values[src_row + local_x]
 	if bool(request.get("height_page_only", false)):
+		if bool(request.get("height_image_only", false)):
+			return {
+				"status": "pass",
+				"payload_mode": "height_page",
+				"height": height,
+				"height_image_data": _height_image_data_from_height(height, side),
+				"texture_payload_mode": "native_height_image_data",
+				"height_image_only": true,
+				"level": int(request["level"]),
+				"origin_x": float(request["origin_x"]),
+				"origin_z": float(request["origin_z"]),
+				"outer_extent_m": float(request["outer_extent_m"]),
+				"inner_extent_m": float(request["inner_extent_m"]),
+				"spacing_m": float(request["spacing_m"]),
+				"side": side,
+				"request_id": str(request["request_id"]),
+			}
 		var normal_payload: Dictionary = backend.call(
 			"build_normal_payload_from_height",
 			height,
@@ -213,3 +230,12 @@ func _build_payload(request: Dictionary) -> Dictionary:
 	mesh["request_id"] = str(request["request_id"])
 	mesh["payload_mode"] = "mesh_payload"
 	return mesh
+
+
+func _height_image_data_from_height(height: PackedFloat32Array, side: int) -> PackedByteArray:
+	var data := PackedByteArray()
+	data.resize(side * side * 4)
+	var limit: int = min(height.size(), side * side)
+	for index in range(limit):
+		data.encode_float(index * 4, float(height[index]))
+	return data

@@ -64,6 +64,12 @@ The current durable direction is persistent terrain pages:
   - `Texture2DRD` wrapping of both height and computed normal texture RIDs
   - zero ImageTexture uploads on the opt-in review path
   - explicit cleanup of page texture and compute uniform-set RIDs
+- Added renderer-only height-image far-page commits and worker payloads for the direct-RD
+  review path. When `use_gpu_rd_page_textures` and
+  `use_gpu_rd_compute_normals` are both active and the main RenderingDevice is
+  available, sync commits and native workers now use RF height bytes only and
+  skip CPU/native RGBF normal-byte generation. The old RF/RGBF payload stays as
+  the fallback when RD compute is not available.
 
 ## Important Constraint
 
@@ -97,6 +103,8 @@ Acceptance for the next slice:
 - no forced GPU readback in the default walk scene
 - direct RD texture residency remains opt-in until visual/perf acceptance
 - direct RD compute normals remain opt-in until visual/perf acceptance
+- height-image-only worker payloads remain tied to the direct-RD compute-normal
+  path and must not be used by fallback ImageTexture materials
 - `gpu_page_review` and `terrain_gpu_page_review.tscn` are the review entry points for this path; `walk_review` and `terrain_walk_preview.tscn` remain the production-safe/default review path
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled

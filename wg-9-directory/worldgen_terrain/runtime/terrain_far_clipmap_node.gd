@@ -518,10 +518,15 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var normals := PackedVector3Array()
 	var use_gpu_normals := use_gpu_page_normal_backend and use_persistent_page_mesh
-	if not use_gpu_normals:
+	var use_height_only_rd_normals := _can_use_height_only_gpu_page_payload()
+	if not use_gpu_normals and not use_height_only_rd_normals:
 		normals = _normals_from_height(height, side, spacing)
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
-	if use_gpu_normals:
+	if use_height_only_rd_normals:
+		heightfield["height_image_data"] = _height_image_data_from_height(height, side)
+		heightfield["height_image_only"] = true
+		heightfield["texture_payload_mode"] = "sync_height_image_data"
+	elif use_gpu_normals:
 		var gpu_normal_status: Dictionary = _attach_gpu_page_normal_data(heightfield, height, side, spacing)
 		if gpu_normal_status.get("status", "fail") != "pass":
 			normals = _normals_from_height(height, side, spacing)
@@ -578,13 +583,19 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
 	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var normals: PackedVector3Array = payload.get("normals", PackedVector3Array()) as PackedVector3Array
-	var payload_has_preencoded: bool = payload.has("height_image_data") and payload.has("normal_image_data")
-	if normals.size() != side * side and not (use_gpu_page_normal_backend and use_persistent_page_mesh and not payload_has_preencoded):
+	var payload_is_height_only: bool = bool(payload.get("height_image_only", false))
+	var payload_has_height_image: bool = payload.has("height_image_data")
+	var payload_has_normal_image: bool = payload.has("normal_image_data")
+	var payload_has_preencoded: bool = payload_has_height_image and (payload_has_normal_image or payload_is_height_only)
+	if normals.size() != side * side and not (use_gpu_page_normal_backend and use_persistent_page_mesh and not payload_has_preencoded) and not (payload_is_height_only and _can_use_height_only_gpu_page_payload()):
 		normals = _normals_from_height(height, side, spacing)
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
 	if payload_has_preencoded:
 		heightfield["height_image_data"] = payload["height_image_data"] as PackedByteArray
-		heightfield["normal_image_data"] = payload["normal_image_data"] as PackedByteArray
+		if payload_has_normal_image:
+			heightfield["normal_image_data"] = payload["normal_image_data"] as PackedByteArray
+		if payload_is_height_only:
+			heightfield["height_image_only"] = true
 		heightfield["texture_payload_mode"] = str(payload.get("texture_payload_mode", ""))
 	elif use_gpu_page_normal_backend and use_persistent_page_mesh:
 		var gpu_normal_status: Dictionary = _attach_gpu_page_normal_data(heightfield, height, side, spacing)
@@ -1336,6 +1347,7 @@ func _prepare_worker_request(level: int, origin: Vector2) -> Dictionary:
 		"world_seed": world.seed,
 		"region_size_m": world.region_size_m,
 		"height_page_only": use_persistent_page_mesh,
+		"height_image_only": _can_use_height_only_gpu_page_payload(),
 		"blocks": blocks,
 	}
 	request["request_id"] = _worker_request_id(request)
@@ -1343,7 +1355,7 @@ func _prepare_worker_request(level: int, origin: Vector2) -> Dictionary:
 
 
 func _worker_request_id(request: Dictionary) -> String:
-	return "%d:%s:%s:%d:%s:%s:%s:%s" % [
+	return "%d:%s:%s:%d:%s:%s:%s:%s:%s" % [
 		int(request.get("level", -1)),
 		_float_request_id(float(request.get("origin_x", INF))),
 		_float_request_id(float(request.get("origin_z", INF))),
@@ -1352,6 +1364,7 @@ func _worker_request_id(request: Dictionary) -> String:
 		_float_request_id(float(request.get("outer_extent_m", 0.0))),
 		_float_request_id(float(request.get("inner_extent_m", 0.0))),
 		"height_page" if bool(request.get("height_page_only", false)) else "mesh",
+		"height_image_only" if bool(request.get("height_image_only", false)) else "full_texture",
 	]
 
 
@@ -1386,8 +1399,20 @@ func _worker_request_matches_origin(level: int, request: Dictionary, origin: Vec
 		return false
 	if bool(request.get("height_page_only", false)) != use_persistent_page_mesh:
 		return false
+	if bool(request.get("height_image_only", false)) != _can_use_height_only_gpu_page_payload():
+		return false
 	var request_origin := Vector2(float(request.get("origin_x", INF)), float(request.get("origin_z", INF)))
 	return request_origin == origin
+
+
+func _can_use_height_only_gpu_page_payload() -> bool:
+	if not use_persistent_page_mesh:
+		return false
+	if not use_gpu_rd_page_textures or not use_gpu_rd_compute_normals:
+		return false
+	if not ClassDB.class_exists("Texture2DRD") or not RenderingServer.has_method("get_rendering_device"):
+		return false
+	return RenderingServer.call("get_rendering_device") != null
 
 
 func _stage_native_payload(level: int, payload: Dictionary) -> void:
@@ -1803,9 +1828,11 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 		return {"status": "fail", "error": "side:%d" % side}
 	var height_data: PackedByteArray = heightfield.get("height_image_data", PackedByteArray()) as PackedByteArray
 	var normal_data: PackedByteArray = heightfield.get("normal_image_data", PackedByteArray()) as PackedByteArray
+	var height_image_only: bool = bool(heightfield.get("height_image_only", false))
 	var expected_height_bytes: int = side * side * 4
 	var expected_normal_bytes: int = side * side * 12
-	if height_data.size() != expected_height_bytes or normal_data.size() != expected_normal_bytes:
+	var normal_data_required: bool = not height_image_only or not _can_use_height_only_gpu_page_payload()
+	if height_data.size() != expected_height_bytes or (normal_data_required and normal_data.size() != expected_normal_bytes):
 		return {
 			"status": "fail",
 			"error": "preencoded_size:%d/%d expected:%d/%d" % [
@@ -1816,13 +1843,15 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 			],
 		}
 	var height_image: Image = Image.create_from_data(side, side, false, Image.FORMAT_RF, height_data)
-	var normal_image: Image = Image.create_from_data(side, side, false, Image.FORMAT_RGBF, normal_data)
-	if height_image == null or normal_image == null:
+	var normal_image: Image = null
+	if normal_data.size() == expected_normal_bytes:
+		normal_image = Image.create_from_data(side, side, false, Image.FORMAT_RGBF, normal_data)
+	if height_image == null or (normal_data_required and normal_image == null):
 		return {"status": "fail", "error": "preencoded_image_create_failed"}
 	var height_min: float = float(heightfield.get("height_min_m", 0.0))
 	var height_max: float = float(heightfield.get("height_max_m", height_min))
 	var level: int = int(heightfield.get("level", 0))
-	return {
+	var descriptor := {
 		"status": "pass",
 		"level": level,
 		"origin_x": float(heightfield.get("origin_x", 0.0)),
@@ -1835,13 +1864,18 @@ func _page_descriptor_from_preencoded_heightfield(heightfield: Dictionary) -> Di
 		"height_max_m": height_max,
 		"height_range_m": max(0.0, height_max - height_min),
 		"height_image": height_image,
-		"normal_image": normal_image,
 		"normal_values": heightfield.get("normals", PackedVector3Array()) as PackedVector3Array,
 		"cache_key": str(heightfield.get("cache_key", "")),
 		"texture_payload_mode": str(heightfield.get("texture_payload_mode", "")),
 		"height_image_data": height_data,
-		"normal_image_data": normal_data,
 	}
+	if normal_image != null:
+		descriptor["normal_image"] = normal_image
+	if normal_data.size() == expected_normal_bytes:
+		descriptor["normal_image_data"] = normal_data
+	if height_image_only:
+		descriptor["height_image_only"] = true
+	return descriptor
 
 
 func _ensure_persistent_page_mesh(level: int, side: int, spacing: float, outer_extent: float, inner_extent: float) -> void:
@@ -1920,6 +1954,16 @@ func _page_height_material_for_descriptor(
 	reusable_material: ShaderMaterial = null
 ) -> ShaderMaterial:
 	var texture_entry: Dictionary = _gpu_page_textures_for_descriptor(descriptor)
+	if texture_entry.get("status", "fail") != "pass":
+		last_page_error = "page_texture:%s" % str(texture_entry.get("error", "unknown"))
+		if level >= 0 and level < level_heightfields.size():
+			var fallback_descriptor: Dictionary = _material_descriptor_from_heightfield(level_heightfields[level] as Dictionary)
+			if fallback_descriptor.get("status", "fail") == "pass":
+				texture_entry = _gpu_page_image_textures_for_descriptor(fallback_descriptor, str(descriptor.get("cache_key", "")))
+	if texture_entry.get("status", "fail") != "pass":
+		var error_material := ShaderMaterial.new()
+		error_material.shader = _page_height_material_shader()
+		return error_material
 	var height_texture: Texture2D = texture_entry["height_texture"] as Texture2D
 	var normal_texture: Texture2D = texture_entry["normal_texture"] as Texture2D
 	var page_origin := Vector2(float(descriptor.get("origin_x", 0.0)), float(descriptor.get("origin_z", 0.0)))
@@ -1966,12 +2010,22 @@ func _gpu_page_textures_for_descriptor(descriptor: Dictionary) -> Dictionary:
 		_ensure_gpu_page_residency()
 		var resident: Dictionary = _gpu_page_residency.get_or_create_textures(cache_key, descriptor) as Dictionary
 		if resident.get("status", "fail") == "pass":
+			if str(resident.get("normal_texture_mode", "")) == "rd_compute":
+				last_gpu_page_normal_dispatches += 1
 			return resident
+	return _gpu_page_image_textures_for_descriptor(descriptor, cache_key)
+
+
+func _gpu_page_image_textures_for_descriptor(descriptor: Dictionary, cache_key: String) -> Dictionary:
+	var height_image: Image = descriptor.get("height_image") as Image
+	var normal_image: Image = descriptor.get("normal_image") as Image
+	if height_image == null or normal_image == null:
+		return {"status": "fail", "error": "missing_fallback_images"}
 	return {
 		"status": "pass",
 		"cache_key": cache_key,
-		"height_texture": ImageTexture.create_from_image(descriptor["height_image"] as Image),
-		"normal_texture": ImageTexture.create_from_image(descriptor["normal_image"] as Image),
+		"height_texture": ImageTexture.create_from_image(height_image),
+		"normal_texture": ImageTexture.create_from_image(normal_image),
 	}
 
 

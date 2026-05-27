@@ -18,6 +18,7 @@ func _start() -> void:
 	_check_direct_rd_residency(errors)
 	_check_direct_rd_compute_normal_residency(errors)
 	_check_far_clipmap_rd_opt_in(errors)
+	_check_far_clipmap_height_only_worker_opt_in(errors)
 	if not errors.is_empty():
 		for error in errors:
 			push_error(error)
@@ -67,6 +68,16 @@ func _check_direct_rd_compute_normal_residency(errors: Array[String]) -> void:
 		errors.append("rd_compute_normal_failures:%s" % str(state))
 	if int(state.get("image_uploads", 0)) != 0:
 		errors.append("rd_compute_image_uploads:%s" % str(state))
+	var height_only_entry: Dictionary = residency.get_or_create_textures("rd_compute_height_only", _height_only_descriptor(16, 8.0))
+	if height_only_entry.get("status", "fail") != "pass":
+		errors.append("rd_compute_height_only_failed:%s" % str(height_only_entry))
+	elif str(height_only_entry.get("normal_texture_mode", "")) != "rd_compute":
+		errors.append("rd_compute_height_only_mode:%s" % str(height_only_entry))
+	var height_only_state: Dictionary = residency.debug_state()
+	if int(height_only_state.get("rd_compute_normal_uploads", 0)) != 2:
+		errors.append("rd_compute_height_only_uploads:%s" % str(height_only_state))
+	if int(height_only_state.get("image_uploads", 0)) != 0:
+		errors.append("rd_compute_height_only_image_uploads:%s" % str(height_only_state))
 	residency.clear()
 
 
@@ -102,6 +113,65 @@ func _check_far_clipmap_rd_opt_in(errors: Array[String]) -> void:
 		errors.append("clipmap_rd_compute_normal_failures:%s" % str(gpu_state))
 	if int(stats.get("last_gpu_page_normal_dispatches", 0)) < node.level_count:
 		errors.append("clipmap_gpu_normal_dispatches:%s" % str(stats))
+	for heightfield_value in node.level_heightfields:
+		var heightfield: Dictionary = heightfield_value as Dictionary
+		if not bool(heightfield.get("height_image_only", false)):
+			errors.append("clipmap_sync_height_only_missing:%s" % str(heightfield.keys()))
+		if heightfield.has("normal_image_data"):
+			errors.append("clipmap_sync_normal_bytes_present")
+	node.clear_levels(true)
+	node.queue_free()
+
+
+func _check_far_clipmap_height_only_worker_opt_in(errors: Array[String]) -> void:
+	if not ClassDB.class_exists("Wg9TerrainNativeBackend"):
+		return
+	var world = TerrainWorldScript.new()
+	if not world.setup_procedural(2551):
+		errors.append("height_only_world_setup_failed:%s" % str(world.errors))
+		return
+	var node = TerrainFarClipmapNodeScript.new()
+	node.level_count = 2
+	node.use_persistent_page_mesh = true
+	node.use_native_workers = true
+	node.use_gpu_page_normal_backend = true
+	node.use_gpu_rd_page_textures = true
+	node.use_gpu_rd_compute_normals = true
+	node.gpu_page_residency_max_pages = 8
+	get_root().add_child(node)
+	if not node.setup(world):
+		errors.append("height_only_clipmap_setup_failed")
+		node.clear_levels(true)
+		node.queue_free()
+		return
+	node.update_viewer(Vector2.ZERO)
+	for _index in range(260):
+		var stats: Dictionary = node.stats()
+		if int(stats.get("pending_rebuild_count", 0)) == 0 and int(stats.get("active_worker_count", 0)) == 0:
+			break
+		node.update_viewer(Vector2.ZERO)
+		OS.delay_msec(5)
+	var final_stats: Dictionary = node.stats()
+	var gpu_state: Dictionary = final_stats.get("gpu_page_residency", {}) as Dictionary
+	if int(final_stats.get("pending_rebuild_count", 0)) != 0:
+		errors.append("height_only_pending:%s" % str(final_stats))
+	if int(final_stats.get("active_worker_count", 0)) != 0:
+		errors.append("height_only_workers:%s" % str(final_stats))
+	if str(final_stats.get("last_worker_payload_mode", "")) != "height_page":
+		errors.append("height_only_worker_mode:%s" % str(final_stats))
+	if int(gpu_state.get("rd_compute_normal_uploads", 0)) < node.level_count:
+		errors.append("height_only_rd_compute_uploads:%s" % str(gpu_state))
+	if int(gpu_state.get("image_uploads", 0)) != 0:
+		errors.append("height_only_image_uploads:%s" % str(gpu_state))
+	for heightfield_value in node.level_heightfields:
+		var heightfield: Dictionary = heightfield_value as Dictionary
+		if heightfield.is_empty():
+			errors.append("height_only_heightfield_empty")
+			continue
+		if not bool(heightfield.get("height_image_only", false)):
+			errors.append("height_only_flag_missing:%s" % str(heightfield.keys()))
+		if heightfield.has("normal_image_data"):
+			errors.append("height_only_normal_bytes_present")
 	node.clear_levels(true)
 	node.queue_free()
 
@@ -125,4 +195,19 @@ func _descriptor(count: int, base_height: float) -> Dictionary:
 		"normal_image_data": normal_data,
 		"height_image": Image.create_from_data(count, count, false, Image.FORMAT_RF, height_data),
 		"normal_image": Image.create_from_data(count, count, false, Image.FORMAT_RGBF, normal_data),
+	}
+
+
+func _height_only_descriptor(count: int, base_height: float) -> Dictionary:
+	var height_data := PackedByteArray()
+	height_data.resize(count * count * 4)
+	for index in range(count * count):
+		height_data.encode_float(index * 4, base_height + float(index) * 0.125)
+	return {
+		"status": "pass",
+		"vertices_per_side": count,
+		"spacing_m": 4.0,
+		"height_image_data": height_data,
+		"height_image": Image.create_from_data(count, count, false, Image.FORMAT_RF, height_data),
+		"height_image_only": true,
 	}

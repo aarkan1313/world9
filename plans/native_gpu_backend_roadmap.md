@@ -1,6 +1,6 @@
 # WorldGen9 Native/GPU Backend Roadmap
 
-Last updated: 2026-05-26
+Last updated: 2026-05-27
 
 ## Decision
 
@@ -111,6 +111,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 61j. [x] Add saved `terrain_gpu_page_review.tscn` as the direct RD far-page visual review entry point, with a renderer-enabled scene gate proving the saved scene reaches RD uploads and zero ImageTexture uploads.
 61k. [x] Add a main RenderingDevice compute-to-texture probe proving storage-image writes into an `R32F` texture RID; note that main renderer devices must not use local-device `submit()` / `sync()` calls.
 61l. [x] Add opt-in main RenderingDevice far-page normal texture compute inside `TerrainGpuPageResidency` (`use_gpu_rd_compute_normals`), so `gpu_page_review` uploads RF height pages as direct RD textures and writes RGBAF normal textures on-GPU without CPU readback or ImageTexture uploads.
+61m. [x] Let opt-in direct-RD far-page sync commits and native workers emit/use height-image-only payloads when renderer-device normal compute is available, skipping redundant CPU/Rust normal-byte generation while keeping the full RF/RGBF payload path as fallback.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.
@@ -125,7 +126,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 73. [x] Add an experimental live pass/corridor tour scene, then table it as an acceptance gate until route/corridor facts are native/GPU-page compatible.
 74. [x] Feed deterministic pass/corridor shaping into the native prepared-grid path so opt-in corridor profiles no longer force CPU fallback for chunks/far pages.
 75. [ ] Re-promote live corridor review only after the native/page path is visually stable enough to run it at landform-tour scale without shrinking the review area or lagging.
-76. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted; current lower-churn steps are height-page-only native worker payloads, native preencoded RF/RGBF image data, blend-window page-residency protection, same-shape texture reuse, a renderer-enabled GPU compute proof for terrain normal generation, opt-in direct `Texture2DRD` far page residency, and opt-in main RenderingDevice normal texture compute for far pages.
+76. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted; current lower-churn steps are height-page-only native worker payloads, native preencoded RF/RGBF image data, direct-RD height-image-only sync/worker payloads for renderer-computed normals, blend-window page-residency protection, same-shape texture reuse, a renderer-enabled GPU compute proof for terrain normal generation, opt-in direct `Texture2DRD` far page residency, and opt-in main RenderingDevice normal texture compute for far pages.
 77. [ ] Replace remaining subtle far/LOD quality shifts through the GPU-resident page/ring path, not more interim mesh/fog/alpha patches. Immediate fixes are still required for black holes, hard seams, crashes, or review-blocking regressions.
 
 ## First Backend Shape
