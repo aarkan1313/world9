@@ -26,6 +26,7 @@ The current durable direction is persistent terrain pages:
 - Added an opt-in far-clipmap integration flag, `use_gpu_rd_page_textures`, for direct RD page textures from preencoded RF/RGBF bytes.
 - Added a review-only `TerrainQualityProfile.GPU_PAGE_REVIEW` contract that routes the normal walk-preview scene through direct RD page residency without changing the saved default walk profile.
 - Added saved review scene `res://worldgen_terrain/scenes/terrain_gpu_page_review.tscn`.
+- Added a main-renderer-device compute-to-texture probe proving a compute shader can write an `R32F` texture RID that can be sampled/wrapped later.
 - Renderer-enabled proof currently passes on D3D12 / RTX 5090 Laptop GPU.
 - The probe validates:
   - storage-buffer dispatch
@@ -51,6 +52,10 @@ The current durable direction is persistent terrain pages:
   - the `.tscn` has the GPU review profile id
   - the saved scene enables the GPU page-normal/RD texture flags
   - the saved scene reaches direct RD page uploads with zero ImageTexture uploads
+- The compute-to-texture probe validates:
+  - main RenderingDevice storage-image writes
+  - `R32F` texture readback for proof only
+  - no invalid main-device `submit()` / `sync()` calls
 
 ## Important Constraint
 
@@ -91,6 +96,7 @@ Acceptance for the next slice:
 
 - Default live use of direct RD page textures.
 - GPU compute-to-texture page writes.
+- Terrain integration of compute-to-texture page writes.
 - GPU-resident material masks.
 - GPU page generation from DEM/provider facts.
 - Live walk scene defaulting to GPU compute.
