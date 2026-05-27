@@ -81,6 +81,8 @@ func _start() -> void:
 	var counts_after_drain: Array = _far_counts(scene)
 	var descriptors: Array = scene.far_clipmap.active_surface_texture_descriptors()
 	var surface_texture_ms: int = int(stats_after_drain.get("last_surface_texture_ms", 0))
+	if page_async and str(stats_after_drain.get("last_worker_payload_mode", "")) != "height_page":
+		errors.append("surface_page_worker_payload_mode:%s" % str(stats_after_drain))
 	if int(stats_after_drain.get("pending_rebuild_count", 0)) != 0:
 		errors.append("surface_pending_after_drain:%d" % int(stats_after_drain.get("pending_rebuild_count", 0)))
 	if _count_delta(counts_before_cross, counts_after_drain) != expected_level_count:
@@ -104,6 +106,7 @@ func _start() -> void:
 		"first_scheduled_levels": scheduled_after_first,
 		"pending_after_first": pending_after_first,
 		"workers_after_first": workers_after_first,
+		"last_worker_payload_mode": str(stats_after_drain.get("last_worker_payload_mode", "")),
 		"surface_texture_ms": surface_texture_ms,
 	}
 	_report_and_quit(scene, errors, report)

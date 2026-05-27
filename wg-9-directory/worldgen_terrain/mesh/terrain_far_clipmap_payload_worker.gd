@@ -142,6 +142,34 @@ func _build_payload(request: Dictionary) -> Dictionary:
 			var dst_row: int = (z0 + local_z) * side
 			for local_x in range(count_x):
 				height[dst_row + x0 + local_x] = values[src_row + local_x]
+	if bool(request.get("height_page_only", false)):
+		var normal_payload: Dictionary = backend.call(
+			"build_normal_payload_from_height",
+			height,
+			side,
+			float(request["spacing_m"])
+		) as Dictionary
+		var normal_status: String = str(normal_payload["status"]) if normal_payload.has("status") else "fail"
+		if normal_status != "pass":
+			return {
+				"status": "fail",
+				"error": "normal_payload:%s" % (str(normal_payload["error"]) if normal_payload.has("error") else "unknown"),
+				"level": int(request["level"]),
+			}
+		return {
+			"status": "pass",
+			"payload_mode": "height_page",
+			"height": height,
+			"normals": normal_payload["normals"] as PackedVector3Array,
+			"level": int(request["level"]),
+			"origin_x": float(request["origin_x"]),
+			"origin_z": float(request["origin_z"]),
+			"outer_extent_m": float(request["outer_extent_m"]),
+			"inner_extent_m": float(request["inner_extent_m"]),
+			"spacing_m": float(request["spacing_m"]),
+			"side": side,
+			"request_id": str(request["request_id"]),
+		}
 	var mesh: Dictionary = backend.call(
 		"build_clipmap_mesh_payload_from_height",
 		height,
@@ -166,4 +194,5 @@ func _build_payload(request: Dictionary) -> Dictionary:
 	mesh["spacing_m"] = float(request["spacing_m"])
 	mesh["side"] = side
 	mesh["request_id"] = str(request["request_id"])
+	mesh["payload_mode"] = "mesh_payload"
 	return mesh

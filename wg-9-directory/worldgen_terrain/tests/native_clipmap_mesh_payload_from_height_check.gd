@@ -56,8 +56,31 @@ func _start() -> void:
 	var expected_indices: PackedInt32Array = _expected_clipmap_indices(count, spacing, outer_extent, inner_extent)
 	if indices != expected_indices:
 		errors.append("indices_mismatch:%d expected:%d" % [indices.size(), expected_indices.size()])
+	_check_normal_payload(backend, height, count, spacing, normals, errors)
 	_check_invalid_clipmap_inputs(backend, height, count, spacing, outer_extent, errors)
 	_report(errors, indices.size())
+
+
+func _check_normal_payload(
+	backend: Object,
+	height: PackedFloat32Array,
+	count: int,
+	spacing: float,
+	mesh_normals: PackedVector3Array,
+	errors: Array[String]
+) -> void:
+	var normal_payload: Dictionary = backend.call("build_normal_payload_from_height", height, count, spacing) as Dictionary
+	if normal_payload.get("status", "fail") != "pass":
+		errors.append("normal_payload_failed:%s" % str(normal_payload))
+		return
+	var normals: PackedVector3Array = normal_payload["normals"] as PackedVector3Array
+	if normals.size() != count * count:
+		errors.append("normal_payload_count:%d" % normals.size())
+		return
+	for index in range(normals.size()):
+		if normals[index].distance_to(mesh_normals[index]) > FLOAT_EPSILON:
+			errors.append("normal_payload_mismatch:%d:%s expected:%s" % [index, str(normals[index]), str(mesh_normals[index])])
+			return
 
 
 func _check_invalid_clipmap_inputs(
@@ -74,6 +97,9 @@ func _check_invalid_clipmap_inputs(
 	var bad_inner: Dictionary = backend.call("build_clipmap_mesh_payload_from_height", height, count, spacing, outer_extent, outer_extent) as Dictionary
 	if bad_inner.get("status", "pass") != "fail":
 		errors.append("clipmap_bad_inner_passed:%s" % str(bad_inner))
+	var zero_normal_step: Dictionary = backend.call("build_normal_payload_from_height", height, count, 0.0) as Dictionary
+	if zero_normal_step.get("status", "pass") != "fail":
+		errors.append("normal_zero_step_passed:%s" % str(zero_normal_step))
 
 
 func _expected_clipmap_indices(count: int, spacing: float, outer_extent: float, inner_extent: float) -> PackedInt32Array:

@@ -92,6 +92,8 @@ func _check_worker_request_signature(clipmap: Node3D, errors: Array[String]) -> 
 	if not clipmap._worker_request_matches_pending(0, request):
 		errors.append("worker_request_rejected_valid:%s" % str(request))
 	var request_id: String = str(request.get("request_id", ""))
+	if bool(request.get("height_page_only", false)):
+		errors.append("worker_request_nonpersistent_height_only:%s" % str(request))
 	var wrong_side: Dictionary = request.duplicate(true)
 	wrong_side["side"] = int(wrong_side["side"]) + 2
 	if clipmap._worker_request_matches_pending(0, wrong_side):
@@ -103,6 +105,11 @@ func _check_worker_request_signature(clipmap: Node3D, errors: Array[String]) -> 
 	var changed_id: String = clipmap._worker_request_id(wrong_side)
 	if changed_id == request_id:
 		errors.append("worker_request_id_not_geometry_specific:%s" % request_id)
+	var changed_mode: Dictionary = request.duplicate(true)
+	changed_mode["height_page_only"] = true
+	var changed_mode_id: String = clipmap._worker_request_id(changed_mode)
+	if changed_mode_id == request_id:
+		errors.append("worker_request_id_not_payload_mode_specific:%s" % request_id)
 
 
 func _check_geometric_transition_band(clipmap: Node3D, errors: Array[String]) -> void:

@@ -99,6 +99,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 59. [x] Reuse persistent far page shader materials across page commits while preserving previous/current height-page blend sources.
 60. [x] Skip far page height/normal image rebuilds when a page commit can reuse already GPU-resident textures.
 61. [x] Gate walk-motion far page GPU upload/eviction budgets so page-residency churn cannot silently regress.
+61a. [x] Stop building throwaway far mesh payloads in persistent page-worker mode; native workers now emit height-page payloads plus native-computed normals for texture-displaced rings and reserve full mesh payloads for fallback geometry mode.
 62. [x] Add an opt-in `local_detail_review` quality profile and gate it as review-only before default enabling.
 63. [x] Move local-detail review surface/material perf budgets into the `local_detail_review` profile and consume them from the runtime gate.
 64. [x] Add an opt-in `high_density_257_review` quality profile and make the 257v walk perf probe consume its settings and budgets.
@@ -113,7 +114,7 @@ GPU-friendly buffers. GPU work comes after that contract is stable.
 73. [x] Add an experimental live pass/corridor tour scene, then table it as an acceptance gate until route/corridor facts are native/GPU-page compatible.
 74. [x] Feed deterministic pass/corridor shaping into the native prepared-grid path so opt-in corridor profiles no longer force CPU fallback for chunks/far pages.
 75. [ ] Re-promote live corridor review only after the native/page path is visually stable enough to run it at landform-tour scale without shrinking the review area or lagging.
-76. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted.
+76. [ ] Move far page generation/upload toward GPU compute or lower-churn native texture upload after texture-displaced page rendering remains visually accepted; current lower-churn step is height-page-only native worker payloads for persistent texture-displaced rings.
 77. [ ] Replace remaining subtle far/LOD quality shifts through the GPU-resident page/ring path, not more interim mesh/fog/alpha patches. Immediate fixes are still required for black holes, hard seams, crashes, or review-blocking regressions.
 
 ## First Backend Shape

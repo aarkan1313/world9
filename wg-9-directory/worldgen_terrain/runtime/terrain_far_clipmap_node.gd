@@ -58,6 +58,7 @@ var last_deferred_levels: Array[int] = []
 var active_worker_count: int = 0
 var last_worker_elapsed_ms: int = 0
 var last_worker_error: String = ""
+var last_worker_payload_mode: String = ""
 var last_page_error: String = ""
 var last_surface_material_reused: bool = false
 var last_page_material_reused: bool = false
@@ -139,6 +140,7 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	active_worker_count = 0
 	last_worker_elapsed_ms = 0
 	last_worker_error = ""
+	last_worker_payload_mode = ""
 	last_page_error = ""
 	last_surface_material_reused = false
 	last_page_material_reused = false
@@ -324,6 +326,7 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"active_worker_count": active_worker_count,
 		"last_worker_elapsed_ms": last_worker_elapsed_ms,
 		"last_worker_error": last_worker_error,
+		"last_worker_payload_mode": last_worker_payload_mode,
 		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
 		"last_page_material_reused": last_page_material_reused,
@@ -354,6 +357,7 @@ func stats() -> Dictionary:
 		"active_worker_count": active_worker_count,
 		"last_worker_elapsed_ms": last_worker_elapsed_ms,
 		"last_worker_error": last_worker_error,
+		"last_worker_payload_mode": last_worker_payload_mode,
 		"last_page_error": last_page_error,
 		"last_surface_material_reused": last_surface_material_reused,
 		"last_page_material_reused": last_page_material_reused,
@@ -538,11 +542,12 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	var height: PackedFloat32Array = payload["height"] as PackedFloat32Array
 	_cache_page_payload(level, origin, outer_extent, spacing, side, height)
 	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
-	var normals := PackedVector3Array()
-	normals.resize(side * side)
-	for z in range(side):
-		for x in range(side):
-			normals[z * side + x] = _normal_at(height, side, x, z, spacing)
+	var normals: PackedVector3Array = payload.get("normals", PackedVector3Array()) as PackedVector3Array
+	if normals.size() != side * side:
+		normals.resize(side * side)
+		for z in range(side):
+			for x in range(side):
+				normals[z * side + x] = _normal_at(height, side, x, z, spacing)
 	var heightfield: Dictionary = _heightfield_for_level(level, origin, outer_extent, spacing, side, height, normals)
 	level_heightfields[level] = heightfield
 	level_surface_descriptors[level] = {}
@@ -574,7 +579,11 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
 	level_origins[level] = origin
 	level_build_counts[level] = int(level_build_counts[level]) + 1
-	_set_level_geometry_counts(level, side * side, (payload["indices"] as PackedInt32Array).size())
+	_set_level_geometry_counts(
+		level,
+		side * side,
+		int(payload.get("index_count", _clipmap_index_count(side, spacing, outer_extent, float(payload["inner_extent_m"]))))
+	)
 	_start_page_blend(level, previous_height_texture != null and use_transition)
 	_refresh_page_morph_sources()
 	_protect_active_page_keys()
@@ -1162,6 +1171,7 @@ func _poll_native_workers() -> void:
 			continue
 		last_worker_error = ""
 		last_worker_elapsed_ms = int(payload.get("worker_elapsed_ms", 0))
+		last_worker_payload_mode = str(payload.get("payload_mode", "mesh_payload"))
 		_stage_native_payload(level, payload)
 	active_worker_count = _native_workers.size()
 
@@ -1235,6 +1245,7 @@ func _prepare_worker_request(level: int, origin: Vector2) -> Dictionary:
 		"side": side,
 		"world_seed": world.seed,
 		"region_size_m": world.region_size_m,
+		"height_page_only": use_persistent_page_mesh,
 		"blocks": blocks,
 	}
 	request["request_id"] = _worker_request_id(request)
@@ -1242,7 +1253,7 @@ func _prepare_worker_request(level: int, origin: Vector2) -> Dictionary:
 
 
 func _worker_request_id(request: Dictionary) -> String:
-	return "%d:%s:%s:%d:%s:%s:%s" % [
+	return "%d:%s:%s:%d:%s:%s:%s:%s" % [
 		int(request.get("level", -1)),
 		_float_request_id(float(request.get("origin_x", INF))),
 		_float_request_id(float(request.get("origin_z", INF))),
@@ -1250,6 +1261,7 @@ func _worker_request_id(request: Dictionary) -> String:
 		_float_request_id(float(request.get("spacing_m", 0.0))),
 		_float_request_id(float(request.get("outer_extent_m", 0.0))),
 		_float_request_id(float(request.get("inner_extent_m", 0.0))),
+		"height_page" if bool(request.get("height_page_only", false)) else "mesh",
 	]
 
 
@@ -1282,6 +1294,8 @@ func _worker_request_matches_origin(level: int, request: Dictionary, origin: Vec
 		return false
 	if not is_equal_approx(float(request.get("region_size_m", -1.0)), float(world.region_size_m)):
 		return false
+	if bool(request.get("height_page_only", false)) != use_persistent_page_mesh:
+		return false
 	var request_origin := Vector2(float(request.get("origin_x", INF)), float(request.get("origin_z", INF)))
 	return request_origin == origin
 
@@ -1290,6 +1304,14 @@ func _stage_native_payload(level: int, payload: Dictionary) -> void:
 	var origin := Vector2(float(payload.get("origin_x", INF)), float(payload.get("origin_z", INF)))
 	if origin != _pending_origin:
 		last_worker_error = "level_%d:stale_payload_origin" % level
+		return
+	var expected_mode: String = "height_page" if use_persistent_page_mesh else "mesh_payload"
+	if str(payload.get("payload_mode", "mesh_payload")) != expected_mode:
+		last_worker_error = "level_%d:stale_payload_mode:%s expected:%s" % [
+			level,
+			str(payload.get("payload_mode", "")),
+			expected_mode,
+		]
 		return
 	_clear_staged_payloads_for_other_origin(origin)
 	_staged_native_origin = origin

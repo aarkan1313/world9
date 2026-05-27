@@ -176,6 +176,37 @@ impl Wg9TerrainNativeBackend {
     }
 
     #[func]
+    pub fn build_normal_payload_from_height(
+        &self,
+        height: PackedFloat32Array,
+        vertices_per_side: i64,
+        step_m: f64,
+    ) -> VarDictionary {
+        let count = match validated_grid_count(vertices_per_side) {
+            Ok(value) => value,
+            Err(error) => return fail_dictionary(error),
+        };
+        if !step_m.is_finite() || step_m <= 0.0 {
+            return fail_dictionary(format!("invalid_step_m:{step_m}"));
+        }
+        let expected = count * count;
+        let height_values = height.as_slice();
+        if let Some(error) = validate_height_values(height_values, expected) {
+            return fail_dictionary(error);
+        }
+        let normals = build_normals(height_values, count, step_m as f32);
+
+        let mut payload = VarDictionary::new();
+        payload.set("schema", BACKEND_SCHEMA);
+        payload.set("backend_class", BACKEND_CLASS_NAME);
+        payload.set("status", "pass");
+        payload.set("vertices_per_side", vertices_per_side);
+        payload.set("step_m", step_m);
+        payload.set("normals", &normals);
+        payload
+    }
+
+    #[func]
     pub fn build_visual_displacement_from_height(
         &self,
         height: PackedFloat32Array,
