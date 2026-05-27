@@ -24,7 +24,7 @@ The current durable direction is persistent terrain pages:
 - Added an opt-in far-clipmap integration flag, `use_gpu_page_normal_backend`, for GPU-generated RGBF normal bytes in sync/fallback page commits.
 - Added direct `Texture2DRD` capability and residency checks.
 - Added an opt-in far-clipmap integration flag, `use_gpu_rd_page_textures`, for direct RD page textures from preencoded RF/RGBF bytes.
-- Added a review-only `TerrainQualityProfile.GPU_PAGE_REVIEW` contract that routes the normal walk-preview scene through direct RD page residency without changing the saved default walk profile.
+- Added a review-only `TerrainQualityProfile.GPU_PAGE_REVIEW` contract that first routed the normal walk-preview scene through direct RD page residency without changing the saved default walk profile; that path has now been promoted into `walk_review` after startup/motion gates passed.
 - Added saved review scene `res://worldgen_terrain/scenes/terrain_gpu_page_review.tscn`.
 - Added a main-renderer-device compute-to-texture probe proving a compute shader can write an `R32F` texture RID that can be sampled/wrapped later.
 - Added opt-in main-renderer-device far-page normal texture compute (`use_gpu_rd_compute_normals`) inside `TerrainGpuPageResidency`.
@@ -93,6 +93,13 @@ The current durable direction is persistent terrain pages:
   movements, writes `factory/runtime/godot_gpu_page_review/gpu_page_motion_manifest.json`,
   and verifies each settled stop keeps direct-RD descriptors, zero descriptor
   image rebuilds, zero ImageTexture uploads, and no protected page-cache evictions.
+- Promoted the default `walk_review` far-page path to use direct `Texture2DRD`
+  height textures plus main RenderingDevice-computed normal textures whenever the
+  renderer device is available.
+- Added `terrain_walk_gpu_page_default_check.gd` so the saved
+  `terrain_walk_preview.tscn` itself proves direct-RD far-page residency with
+  zero ImageTexture uploads; `gpu_page_review` remains as the explicit visual
+  acceptance scene for this same path.
 
 ## Important Constraint
 
@@ -130,18 +137,17 @@ Acceptance for the next slice:
 - `gpu_page_review` and `terrain_gpu_page_review.tscn` are the review entry points for this path; `walk_review` and `terrain_walk_preview.tscn` remain the production-safe/default review path
 - the GPU page review capture must stay present in the Godot review index before
   the direct-RD path can be considered visually accepted
-- the GPU page motion manifest must stay present in runtime readiness before
-  the direct-RD path can be promoted beyond review-only use
+- the GPU page motion manifest must stay present in runtime readiness now that
+  the direct-RD path is promoted into `walk_review`
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
 
 ## Not Done Yet
 
-- Default live use of direct RD page textures.
 - GPU compute-to-texture height-page generation from provider facts.
 - GPU-resident material masks.
 - GPU page generation from DEM/provider facts.
-- Live walk scene defaulting to GPU compute.
+- Full live walk scene height generation on GPU compute.
 - Re-promoting corridor tour as an acceptance gate.
 
 Those remain roadmap work, not accepted finished systems.

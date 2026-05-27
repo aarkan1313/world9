@@ -93,6 +93,12 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		errors.append("rebuild_budget_below_level_count")
 	if not bool(settings.get("use_persistent_page_clipmap", false)):
 		errors.append("profile_page_clipmap_disabled")
+	if not bool(settings.get("use_far_clipmap_gpu_page_normal_backend", false)):
+		errors.append("walk_profile_gpu_normal_backend_disabled")
+	if not bool(settings.get("use_far_clipmap_gpu_rd_page_textures", false)):
+		errors.append("walk_profile_rd_textures_disabled")
+	if not bool(settings.get("use_far_clipmap_gpu_rd_compute_normals", false)):
+		errors.append("walk_profile_rd_compute_normals_disabled")
 	var visibility: Dictionary = TerrainQualityProfileScript.visibility_contract(profile)
 	if float(visibility.get("hidden_buffer_m", 0.0)) <= 0.0:
 		errors.append("visibility_hidden_buffer:%.3f" % float(visibility.get("hidden_buffer_m", 0.0)))

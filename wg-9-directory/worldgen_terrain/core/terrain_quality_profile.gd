@@ -81,7 +81,7 @@ static func _walk_review_profile() -> Dictionary:
 	return {
 		"id": WALK_REVIEW,
 		"schema": "worldgen9.terrain_quality_profile.v1",
-		"description": "Default live walk/fly review profile for 129v near chunks plus 4-level page-backed far clipmap.",
+		"description": "Default live walk/fly review profile for 129v near chunks plus 4-level direct-RD page-backed far clipmap when the renderer device is available.",
 		"settings": {
 			"chunk_size_m": 512.0,
 			"debug_mode": "elevation_color",
@@ -114,9 +114,9 @@ static func _walk_review_profile() -> Dictionary:
 			"use_persistent_page_clipmap": true,
 			"far_clipmap_page_cache_max_pages": 64,
 			"far_clipmap_gpu_page_residency_max_pages": 64,
-			"use_far_clipmap_gpu_page_normal_backend": false,
-			"use_far_clipmap_gpu_rd_page_textures": false,
-			"use_far_clipmap_gpu_rd_compute_normals": false,
+			"use_far_clipmap_gpu_page_normal_backend": true,
+			"use_far_clipmap_gpu_rd_page_textures": true,
+			"use_far_clipmap_gpu_rd_compute_normals": true,
 			"distance_fog_depth_begin_m": 30000.0,
 			"distance_fog_depth_end_m": 33000.0,
 			"camera_far_m": 120000.0,
@@ -162,7 +162,7 @@ static func _local_detail_review_profile() -> Dictionary:
 static func _gpu_page_review_profile() -> Dictionary:
 	var profile_data: Dictionary = _walk_review_profile()
 	profile_data["id"] = GPU_PAGE_REVIEW
-	profile_data["description"] = "Opt-in GPU far-page review profile using GPU normal bytes and direct Texture2DRD page residency. Not the default walk profile."
+	profile_data["description"] = "Explicit GPU far-page review profile using the same direct Texture2DRD page residency path as walk_review, kept as a stable renderer-enabled acceptance target."
 	var settings: Dictionary = (profile_data["settings"] as Dictionary).duplicate(true)
 	settings.merge({
 		"use_far_clipmap_gpu_page_normal_backend": true,
