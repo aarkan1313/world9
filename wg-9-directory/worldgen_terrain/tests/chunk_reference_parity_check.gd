@@ -76,6 +76,7 @@ func _run() -> int:
 		generated_by_coord["%d,%d" % [int(coord[0]), int(coord[1])]] = generated
 
 	_check_edges(generated_by_coord, vertices_per_side, errors)
+	_check_axis_crossing_seams(provider, reference_seed, region_size_m, step_m, vertices_per_side, errors)
 
 	if not errors.is_empty():
 		for error in errors:
@@ -97,6 +98,40 @@ func _check_edges(generated_by_coord: Dictionary, vertices_per_side: int, errors
 	_check_north_south(generated_by_coord, "0,0", "0,1", vertices_per_side, errors)
 	_check_east_west(generated_by_coord, "0,1", "1,1", vertices_per_side, errors)
 	_check_north_south(generated_by_coord, "1,0", "1,1", vertices_per_side, errors)
+
+
+# The manifest-driven edge checks above only cover positive-coordinate
+# neighbors. Seams that cross the x=0 / z=0 axes are the classic floor-vs-
+# truncate failure mode for procedural terrain, so sample those neighbor pairs
+# directly from the provider (independent of the reference fixtures, which do
+# not include negative chunks) and require exact zero shared-edge deltas.
+func _check_axis_crossing_seams(
+	provider: RefCounted,
+	seed: int,
+	region_size_m: float,
+	step_m: float,
+	vertices_per_side: int,
+	errors: Array[String]
+) -> void:
+	var chunk_span_m: float = step_m * float(vertices_per_side - 1)
+	var samples: Dictionary = {}
+	for coord in [Vector2i(-1, 0), Vector2i(0, 0), Vector2i(0, -1), Vector2i(-1, -1)]:
+		samples["%d,%d" % [coord.x, coord.y]] = provider.sample_height_grid(
+			float(coord.x) * chunk_span_m,
+			float(coord.y) * chunk_span_m,
+			step_m,
+			vertices_per_side,
+			vertices_per_side,
+			seed,
+			region_size_m
+		)
+	# x=0 crossing: east edge of (-1,0) must equal west edge of (0,0).
+	_check_east_west(samples, "-1,0", "0,0", vertices_per_side, errors)
+	# z=0 crossing: south edge of (0,-1) must equal north edge of (0,0).
+	_check_north_south(samples, "0,-1", "0,0", vertices_per_side, errors)
+	# corner approach along the negative quadrant for completeness.
+	_check_east_west(samples, "-1,-1", "0,-1", vertices_per_side, errors)
+	_check_north_south(samples, "-1,-1", "-1,0", vertices_per_side, errors)
 
 
 func _check_east_west(generated_by_coord: Dictionary, a_key: String, b_key: String, vertices_per_side: int, errors: Array[String]) -> void:

@@ -76,9 +76,14 @@ func _check_gpu_page_review_profile(errors: Array[String]) -> void:
 		if not str(stats.get("last_gpu_provider_page_error", "")).is_empty():
 			errors.append("provider_page_error:%s" % str(stats))
 	var terrain_stats: Dictionary = scene.terrain.build_stats() if scene.terrain != null else {}
-	if not bool(terrain_stats.get("use_gpu_page_chunks", false)):
-		errors.append("near_gpu_page_chunks_disabled:%s" % str(terrain_stats))
-	if int(terrain_stats.get("gpu_page_chunk_count", 0)) < int((profile.get("budgets", {}) as Dictionary).get("gpu_page_review_expected_near_page_chunks", 0)):
+	# Near GPU page chunks stay OFF in the accepted saved review profile per
+	# roadmap 61zg; saved review proves direct-RD far pages over native-worker
+	# near chunks. The experimental near-page path is measured by the separate
+	# hitch-profile scene/gate. Keep this consistent with the scene and motion
+	# checks against the same gpu_page_review profile.
+	if bool(terrain_stats.get("use_gpu_page_chunks", false)):
+		errors.append("near_gpu_page_chunks_active:%s" % str(terrain_stats))
+	if int(terrain_stats.get("gpu_page_chunk_count", 0)) != int((profile.get("budgets", {}) as Dictionary).get("gpu_page_review_expected_near_page_chunks", 0)):
 		errors.append("near_gpu_page_chunks:%s" % str(terrain_stats))
 	if not str(terrain_stats.get("last_gpu_page_chunk_error", "")).is_empty():
 		errors.append("near_gpu_page_chunk_error:%s" % str(terrain_stats))

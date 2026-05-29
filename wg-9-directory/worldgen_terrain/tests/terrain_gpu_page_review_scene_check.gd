@@ -55,19 +55,22 @@ func _check_scene(packed: PackedScene, errors: Array[String]) -> void:
 		errors.append("rd_compute_normals_disabled")
 	if not bool(scene.get("use_far_clipmap_gpu_provider_page_textures")):
 		errors.append("gpu_provider_page_textures_disabled")
-	if not bool(scene.get("use_gpu_page_chunks")):
-		errors.append("near_gpu_page_chunks_disabled")
-	if not bool(scene.get("use_gpu_rd_chunk_page_textures")):
-		errors.append("near_gpu_page_rd_textures_disabled")
+	# Near GPU page chunks must stay OFF in the saved visual-review scene per
+	# roadmap 61zg / the renderer-correctness hard stop: saved review proves the
+	# accepted direct-RD far-page path on top of native-worker near chunks, while
+	# the experimental near-page path is measured separately by the hitch-profile
+	# scene/gate. This must match terrain_gpu_page_review_motion_check.gd.
+	if bool(scene.get("use_gpu_page_chunks")):
+		errors.append("near_gpu_page_chunks_enabled_in_saved_review")
 	if not bool(scene.call("setup")):
 		errors.append("setup_failed:%s" % str(scene.get("errors")))
 	else:
 		var terrain: Node = scene.get("terrain") as Node
 		var terrain_stats: Dictionary = terrain.call("build_stats") as Dictionary if terrain != null else {}
-		if not bool(terrain_stats.get("use_gpu_page_chunks", false)):
-			errors.append("near_gpu_page_chunks_inactive:%s" % str(terrain_stats))
-		if int(terrain_stats.get("gpu_page_chunk_count", 0)) <= 0:
-			errors.append("near_gpu_page_chunks_not_committed:%s" % str(terrain_stats))
+		if bool(terrain_stats.get("use_gpu_page_chunks", false)):
+			errors.append("near_gpu_page_chunks_active:%s" % str(terrain_stats))
+		if int(terrain_stats.get("gpu_page_chunk_count", 0)) != 0:
+			errors.append("near_gpu_page_chunks_committed:%s" % str(terrain_stats))
 		if not str(terrain_stats.get("last_gpu_page_chunk_error", "")).is_empty():
 			errors.append("near_gpu_page_chunk_error:%s" % str(terrain_stats))
 		var far_clipmap: Node = scene.get("far_clipmap") as Node

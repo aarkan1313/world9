@@ -577,11 +577,32 @@ func invalidate_pages_for_profile_change() -> void:
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
 	_staged_native_commit_ready = false
+	# Detach page materials from every level node BEFORE freeing the texture
+	# backend. The backend clear frees the RD RIDs and nulls them out of the
+	# Texture2DRD objects still bound to these materials, which would otherwise
+	# render the far rings black for several frames until each level's async
+	# rebuild commits a fresh material (rebuild is budgeted to one level/update).
+	# Swapping to the texture-free gray material keeps the rings visible (flat
+	# gray) during that window instead of black.
+	_detach_page_materials_for_invalidation()
 	if _page_cache != null:
 		_page_cache.clear()
 	if _page_texture_backend != null:
 		_page_texture_backend.clear()
 	pending_rebuild_count = _count_pending_rebuilds()
+
+
+func _detach_page_materials_for_invalidation() -> void:
+	for level in range(level_nodes.size()):
+		var mesh_instance: MeshInstance3D = level_nodes[level] as MeshInstance3D
+		if mesh_instance == null:
+			continue
+		var placeholder := ShaderMaterial.new()
+		placeholder.shader = _gray_material_shader(false)
+		placeholder.set_shader_parameter("fade_alpha", 1.0)
+		placeholder.set_shader_parameter("elevation_color_enabled", use_elevation_color_material)
+		_apply_level_edge_fog_shader_parameters(level, placeholder)
+		mesh_instance.material_override = placeholder
 
 
 func _set_level_geometry_counts(level: int, vertex_count: int, index_count: int) -> void:

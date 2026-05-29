@@ -196,7 +196,13 @@ static func _gpu_page_review_profile() -> Dictionary:
 		"use_far_clipmap_gpu_rd_page_textures": true,
 		"use_far_clipmap_gpu_rd_compute_normals": true,
 		"use_far_clipmap_gpu_provider_page_textures": true,
-		"use_gpu_page_chunks": true,
+		# Near GPU page chunks stay OFF in the accepted saved review profile per
+		# roadmap 61zg / the renderer-correctness hard stop: saved review proves
+		# the direct-RD far-page path over native-worker near chunks. The near
+		# page-displacement path is still exercised by the hitch-profile scene.
+		# The near-page settings below remain as ready configuration but are
+		# inert while this master switch is false.
+		"use_gpu_page_chunks": false,
 		"use_gpu_provider_page_chunk_textures": true,
 		"use_gpu_provider_page_chunk_descriptor_staging": true,
 		"use_gpu_rd_chunk_page_textures": true,
@@ -217,7 +223,7 @@ static func _gpu_page_review_profile() -> Dictionary:
 		"gpu_page_review_min_normal_dispatches": 0,
 		"gpu_page_review_min_rd_compute_normal_uploads": 4,
 		"gpu_page_review_min_provider_page_dispatches": 0,
-		"gpu_page_review_expected_near_page_chunks": 1,
+		"gpu_page_review_expected_near_page_chunks": 0,
 	}
 	profile_data["review_only"] = true
 	return profile_data
