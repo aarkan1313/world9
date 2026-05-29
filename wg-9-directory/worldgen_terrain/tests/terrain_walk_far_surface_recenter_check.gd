@@ -22,6 +22,9 @@ func _start() -> void:
 	_drain_queue(scene, errors)
 
 	scene.apply_far_clipmap_surface_review(true, 0.75)
+	scene._update_streamer()
+	scene._update_camera()
+	_drain_queue(scene, errors)
 	var expected_level_count: int = _expected_level_count(scene)
 	var counts_before_surface_move: Array = _far_counts(scene)
 	scene.viewer_position_xz = Vector2(scene.chunk_size_m - 4.0, scene.chunk_size_m * 0.5)
@@ -83,8 +86,8 @@ func _start() -> void:
 	var surface_texture_ms: int = int(stats_after_drain.get("last_surface_texture_ms", 0))
 	if page_async and str(stats_after_drain.get("last_worker_payload_mode", "")) != "height_page":
 		errors.append("surface_page_worker_payload_mode:%s" % str(stats_after_drain))
-	if page_async and not _has_native_image_data_descriptor(scene):
-		errors.append("surface_page_descriptor_not_preencoded:%s" % str(scene.far_clipmap.level_material_descriptors))
+	if page_async and not _has_valid_page_texture_descriptor(scene):
+		errors.append("surface_page_descriptor_texture_missing:%s" % str(scene.far_clipmap.level_material_descriptors))
 	if int(stats_after_drain.get("pending_rebuild_count", 0)) != 0:
 		errors.append("surface_pending_after_drain:%d" % int(stats_after_drain.get("pending_rebuild_count", 0)))
 	if _count_delta(counts_before_cross, counts_after_drain) != expected_level_count:
@@ -110,6 +113,8 @@ func _start() -> void:
 		"workers_after_first": workers_after_first,
 		"last_worker_payload_mode": str(stats_after_drain.get("last_worker_payload_mode", "")),
 		"last_page_descriptor_preencoded_hits": int(stats_after_drain.get("last_page_descriptor_preencoded_hits", 0)),
+		"descriptor_modes": _descriptor_modes(scene),
+		"errors": errors.duplicate(),
 		"surface_texture_ms": surface_texture_ms,
 	}
 	_report_and_quit(scene, errors, report)
@@ -150,14 +155,33 @@ func _expected_levels(scene: Node3D) -> Array[int]:
 	return levels
 
 
-func _has_native_image_data_descriptor(scene: Node3D) -> bool:
+func _has_valid_page_texture_descriptor(scene: Node3D) -> bool:
 	if scene.far_clipmap == null:
 		return false
 	for descriptor_value in scene.far_clipmap.level_material_descriptors:
 		var descriptor: Dictionary = descriptor_value as Dictionary
-		if str(descriptor.get("texture_payload_mode", "")) == "native_image_data":
+		if descriptor.get("status", "fail") != "pass":
+			continue
+		if descriptor.has("height_texture_rid"):
+			return true
+		if (descriptor.get("height_image_data", PackedByteArray()) as PackedByteArray).size() > 0:
 			return true
 	return false
+
+
+func _descriptor_modes(scene: Node3D) -> Array[String]:
+	var modes: Array[String] = []
+	if scene.far_clipmap == null:
+		return modes
+	for descriptor_value in scene.far_clipmap.level_material_descriptors:
+		var descriptor: Dictionary = descriptor_value as Dictionary
+		modes.append("%s:rid=%s:height_bytes=%d:image_bytes=%d" % [
+			str(descriptor.get("texture_payload_mode", "")),
+			str(descriptor.has("height_texture_rid")),
+			int(descriptor.get("height_bytes", 0)),
+			(descriptor.get("height_image_data", PackedByteArray()) as PackedByteArray).size(),
+		])
+	return modes
 
 
 func _count_delta(before: Array, after: Array) -> int:

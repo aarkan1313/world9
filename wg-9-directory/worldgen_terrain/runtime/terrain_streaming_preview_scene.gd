@@ -10,16 +10,18 @@ const TerrainFarClipmapNodeScript := preload("res://worldgen_terrain/runtime/ter
 const TerrainLocalDetailNodeScript := preload("res://worldgen_terrain/runtime/terrain_local_detail_node.gd")
 const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_world_node.gd")
 
-@export_enum("gray", "elevation_color", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
+@export_enum("gray", "elevation_color", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology", "surface_owner") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
 @export_range(17, 257, 16) var vertices_per_side: int = 33
 @export_range(1, 5, 1) var visible_radius_chunks: int = 1
 @export_range(1, 16, 1) var build_budget_per_frame: int = 1
-@export_range(0, 3, 1) var prefetch_forward_chunks: int = 0
+@export_range(0, 8, 1) var prefetch_forward_chunks: int = 0
+@export_range(0, 3, 1) var residency_halo_chunks: int = 0
 @export_range(1, 6, 1) var max_lod: int = 4
 @export_range(0, 24, 1) var warmup_build_steps: int = 3
 @export var preload_active_chunks_before_start: bool = false
 @export_range(0, 256, 1) var preload_active_chunk_limit: int = 0
 @export var auto_setup_on_ready: bool = true
+@warning_ignore("shadowed_global_identifier")
 @export var seed: int = 1337
 @export var chunk_size_m: float = TerrainSettingsScript.CHUNK_SIZE_M
 @export var move_speed_mps: float = 1800.0
@@ -51,6 +53,22 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export var use_native_chunk_payloads: bool = false
 @export var use_native_chunk_workers: bool = false
 @export_range(1, 8, 1) var max_native_chunk_workers: int = 2
+@export_range(1, 16, 1) var max_native_chunk_worker_results_per_update: int = 1
+@export var use_gpu_page_chunks: bool = false
+@export var use_gpu_provider_page_chunk_textures: bool = false
+@export var use_gpu_provider_page_chunk_descriptor_staging: bool = false
+@export var use_gpu_rd_chunk_page_textures: bool = false
+@export var use_gpu_rd_chunk_compute_normals: bool = true
+@export_range(1, 16, 1) var max_gpu_page_chunk_builds_per_update: int = 1
+@export_range(1, 16, 1) var max_gpu_page_prefetch_chunk_builds_per_update: int = 2
+@export_range(0, 1000, 1) var max_gpu_page_chunk_build_ms_per_update: int = 0
+@export_range(0, 16, 1) var max_gpu_provider_chunk_descriptor_stages_per_update: int = 1
+@export_range(1, 16, 1) var max_gpu_provider_chunk_descriptor_workers: int = 2
+@export_range(0, 512, 1) var chunk_page_cache_max_pages: int = 96
+@export_range(0, 512, 1) var chunk_gpu_page_residency_max_pages: int = 96
+@export_range(0, 512, 1) var gpu_provider_chunk_descriptor_cache_max_entries: int = 96
+@export var defer_inactive_chunk_retire_until_active_ready: bool = false
+@export_range(0, 256, 1) var max_retained_inactive_chunk_nodes: int = 0
 @export_range(0, 4, 1) var review_sync_hole_fill_radius_chunks: int = 0
 @export_range(0, 256, 1) var review_sync_hole_fill_max_chunks_per_frame: int = 0
 @export var use_lod_mesh_density: bool = false
@@ -62,8 +80,8 @@ const TerrainWorldNodeScript := preload("res://worldgen_terrain/runtime/terrain_
 @export var far_clipmap_base_spacing_m: float = 64.0
 @export var far_clipmap_base_outer_extent_m: float = 4096.0
 @export var far_clipmap_handoff_overlap_m: float = 64.0
-@export var far_clipmap_visual_y_bias_per_level_m: float = -4.0
-@export var far_clipmap_full_underlay_level0: bool = false
+@export var far_clipmap_visual_y_bias_per_level_m: float = -0.08
+@export var far_clipmap_full_underlay_level0: bool = true
 @export var far_clipmap_recenter_distance_m: float = 768.0
 @export_range(1, 16, 1) var far_clipmap_rebuild_levels_per_update: int = 1
 @export_range(0.0, 3.0, 0.05) var far_clipmap_transition_fade_seconds: float = 0.45
@@ -184,6 +202,22 @@ func setup() -> bool:
 	terrain.use_native_chunk_payloads = use_native_chunk_payloads
 	terrain.use_native_chunk_workers = use_native_chunk_workers
 	terrain.max_native_chunk_workers = max_native_chunk_workers
+	terrain.max_native_chunk_worker_results_per_update = max_native_chunk_worker_results_per_update
+	terrain.use_gpu_page_chunks = use_gpu_page_chunks
+	terrain.use_gpu_provider_page_chunk_textures = use_gpu_provider_page_chunk_textures
+	terrain.use_gpu_provider_page_chunk_descriptor_staging = use_gpu_provider_page_chunk_descriptor_staging
+	terrain.use_gpu_rd_chunk_page_textures = use_gpu_rd_chunk_page_textures
+	terrain.use_gpu_rd_chunk_compute_normals = use_gpu_rd_chunk_compute_normals
+	terrain.max_gpu_page_chunk_builds_per_update = max_gpu_page_chunk_builds_per_update
+	terrain.max_gpu_page_prefetch_chunk_builds_per_update = max_gpu_page_prefetch_chunk_builds_per_update
+	terrain.max_gpu_page_chunk_build_ms_per_update = max_gpu_page_chunk_build_ms_per_update
+	terrain.max_gpu_provider_chunk_descriptor_stages_per_update = max_gpu_provider_chunk_descriptor_stages_per_update
+	terrain.max_gpu_provider_chunk_descriptor_workers = max_gpu_provider_chunk_descriptor_workers
+	terrain.chunk_page_cache_max_pages = chunk_page_cache_max_pages
+	terrain.chunk_gpu_page_residency_max_pages = chunk_gpu_page_residency_max_pages
+	terrain.gpu_provider_chunk_descriptor_cache_max_entries = gpu_provider_chunk_descriptor_cache_max_entries
+	terrain.defer_inactive_chunk_retire_until_active_ready = defer_inactive_chunk_retire_until_active_ready
+	terrain.max_retained_inactive_chunk_nodes = max_retained_inactive_chunk_nodes
 	terrain.allow_profile_fallback_sync_rebuilds = allow_profile_fallback_sync_rebuilds
 	terrain.use_lod_mesh_density = use_lod_mesh_density
 	terrain.use_mesh_skirts = use_mesh_skirts
@@ -216,6 +250,7 @@ func setup() -> bool:
 		"max_lod": max_lod,
 		"build_budget_per_frame": build_budget_per_frame,
 		"prefetch_forward_chunks": prefetch_forward_chunks,
+		"residency_halo_chunks": residency_halo_chunks,
 		"queue_policy": TerrainStreamerScript.QUEUE_POLICY_PRIORITY_CANCEL,
 	})
 	_add_light()
@@ -255,13 +290,15 @@ func step_viewer(delta: float, movement: Vector2, yaw_delta: float = 0.0) -> Dic
 	if terrain == null:
 		return {"status": "fail", "errors": ["terrain_not_setup"]}
 	camera_yaw_rad += yaw_delta
+	var forward := Vector2(sin(camera_yaw_rad), cos(camera_yaw_rad))
 	if movement.length_squared() > 0.000001:
 		var normalized := movement.normalized()
-		var forward := Vector2(sin(camera_yaw_rad), cos(camera_yaw_rad))
 		var right := Vector2(forward.y, -forward.x)
 		var world_direction: Vector2 = (right * normalized.x + forward * normalized.y).normalized()
-		_stream_priority_direction = world_direction
+		_stream_priority_direction = forward.normalized()
 		viewer_position_xz += world_direction * move_speed_mps * delta
+	elif _stream_priority_direction.length_squared() <= 0.000001:
+		_stream_priority_direction = forward.normalized()
 	var report := _update_streamer()
 	_update_camera()
 	return report
@@ -326,6 +363,26 @@ func expected_active_count() -> int:
 
 func built_chunk_count() -> int:
 	return terrain.built_chunk_count() if terrain != null else 0
+
+
+func surface_provenance() -> Dictionary:
+	var near_surfaces: Array = []
+	if terrain != null and terrain.has_method("surface_provenance"):
+		near_surfaces = terrain.call("surface_provenance") as Array
+	var far_surfaces: Array = []
+	if far_clipmap != null and far_clipmap.has_method("surface_provenance"):
+		far_surfaces = far_clipmap.call("surface_provenance") as Array
+	var all_surfaces: Array = []
+	all_surfaces.append_array(near_surfaces)
+	all_surfaces.append_array(far_surfaces)
+	return {
+		"schema": "worldgen9.terrain_surface_provenance.v1",
+		"viewer_position_xz": [snappedf(viewer_position_xz.x, 0.001), snappedf(viewer_position_xz.y, 0.001)],
+		"debug_mode": debug_mode,
+		"near_count": near_surfaces.size(),
+		"far_count": far_surfaces.size(),
+		"surfaces": all_surfaces,
+	}
 
 
 func apply_local_detail_surface_review(
@@ -444,13 +501,19 @@ func diagnostics_text() -> String:
 	var viewer_chunk: Array = last_stream_report.get("viewer_chunk", [0, 0]) as Array
 	var fps: float = Engine.get_frames_per_second()
 	var stats: Dictionary = terrain.build_stats() if terrain != null else {}
+	var base_missing_count: int = 0
+	if terrain != null and terrain.has_method("active_missing_chunk_count"):
+		base_missing_count = int(terrain.call("active_missing_chunk_count", visible_radius_chunks))
 	var spacing_m: float = chunk_size_m / float(max(1, vertices_per_side - 1))
 	var clipmap_stats: Dictionary = far_clipmap.stats() if far_clipmap != null else {}
 	var detail_stats: Dictionary = local_detail.build_stats() if local_detail != null else {}
-	return "fps %.0f | chunks %d/%d | queue %d+%d | workers %d | fill %d preload %d | build %.0fms avg %.0fms h %.0fms mesh %.0fms | far %dL %.0fms t%.0fms %s p%d w%d | detail %d b%.0f/a%.0f/t%.0fms mat %s disp %s %.2f/%.1fm | pool %d | vtx %d step %.0fm | cam %.0fm/%.0fm | mode %s | viewer %d,%d | delta +%d -%d" % [
+	return "fps %.0f | chunks %d/%d vis %d standby %d base miss %d | queue %d+%d | workers %d | fill %d preload %d | build %.0fms avg %.0fms h %.0fms mesh %.0fms page %d %.0fms | far %dL %.0fms t%.0fms %s p%d w%d | detail %d b%.0f/a%.0f/t%.0fms mat %s disp %s %.2f/%.1fm | pool %d | vtx %d step %.0fm | cam %.0fm/%.0fm | mode %s | viewer %d,%d | delta +%d -%d" % [
 		fps,
 		built_chunk_count(),
 		active_count,
+		int(stats.get("visible_chunk_count", built_chunk_count())),
+		int(stats.get("standby_chunk_count", 0)),
+		base_missing_count,
 		queued_count,
 		int(stats.get("queued_native_worker_builds", 0)),
 		int(stats.get("active_native_workers", 0)),
@@ -460,6 +523,8 @@ func diagnostics_text() -> String:
 		float(stats.get("avg_recent_chunk_build_ms", 0.0)),
 		float(stats.get("last_height_grid_ms", 0.0)),
 		float(stats.get("last_native_mesh_payload_ms", 0.0)),
+		int(stats.get("gpu_page_chunk_count", 0)),
+		float(stats.get("last_gpu_page_chunk_ms", 0.0)),
 		int(clipmap_stats.get("levels", 0)),
 		float(clipmap_stats.get("last_build_ms", 0.0)),
 		float(clipmap_stats.get("last_surface_texture_ms", 0.0)),
@@ -574,7 +639,7 @@ func _fill_near_chunk_holes_for_review() -> void:
 	if review_sync_hole_fill_radius_chunks <= 0 or terrain == null or last_stream_report.is_empty():
 		return
 	var active_count: int = int(last_stream_report.get("active_count", 0))
-	if active_count <= 0 or terrain.built_chunk_count() >= active_count:
+	if active_count <= 0:
 		return
 	if not terrain.has_method("build_missing_nearby_for_preview"):
 		return
@@ -601,6 +666,8 @@ func _far_clipmap_center_xz() -> Vector2:
 
 
 func _far_clipmap_near_hole_extent_m() -> float:
+	if far_clipmap_full_underlay_level0:
+		return 0.0
 	var spacing_margin: float = max(0.0, far_clipmap_base_spacing_m)
 	var underlap_margin: float = max(spacing_margin, max(0.0, far_clipmap_handoff_overlap_m))
 	var anchor_drift_margin: float = max(chunk_size_m * 0.5, far_clipmap_recenter_distance_m)
@@ -612,6 +679,21 @@ func _near_chunk_window_half_extent_m() -> float:
 
 
 func _has_pending_visual_work() -> bool:
+	if terrain != null:
+		var stats: Dictionary = terrain.build_stats()
+		var active_count: int = int(last_stream_report.get("active_count", 0))
+		if active_count > 0 and terrain.built_chunk_count() < active_count:
+			return true
+		if int(stats.get("active_missing_chunk_count", 0)) > 0:
+			return true
+		if int(last_stream_report.get("queued_build_count", 0)) > 0:
+			return true
+		if int(stats.get("queued_native_worker_builds", 0)) > 0:
+			return true
+		if int(stats.get("active_native_workers", 0)) > 0:
+			return true
+		if int(stats.get("active_gpu_provider_chunk_descriptor_workers", 0)) > 0:
+			return true
 	if far_clipmap != null and far_clipmap.has_pending_rebuilds():
 		return true
 	if use_local_detail and local_detail == null and terrain != null:
@@ -629,8 +711,8 @@ func _update_camera() -> void:
 	camera.look_at_from_position(camera_position, target, Vector3.UP)
 
 
-func _zoom_camera(scale: float) -> void:
-	camera_distance_m = clampf(camera_distance_m * scale, min_camera_distance_m, max_camera_distance_m)
+func _zoom_camera(zoom_scale: float) -> void:
+	camera_distance_m = clampf(camera_distance_m * zoom_scale, min_camera_distance_m, max_camera_distance_m)
 	var wanted_height: float = camera_distance_m * camera_height_distance_ratio
 	camera_height_m = clampf(wanted_height, min_camera_height_m, max_camera_height_m)
 	_update_camera()
@@ -761,7 +843,7 @@ func _configure_far_clipmap_node() -> void:
 		far_clipmap_base_outer_extent_m
 	):
 		errors.append("far_clipmap_reconfigure_failed")
-	far_clipmap.set_debug_level_colors(far_clipmap_debug_levels)
+	far_clipmap.set_debug_level_colors(far_clipmap_debug_levels or debug_mode == TerrainWorldScript.DEBUG_SURFACE_OWNER)
 	far_clipmap.max_rebuild_levels_per_update = far_clipmap_rebuild_levels_per_update
 	far_clipmap.transition_fade_seconds = far_clipmap_transition_fade_seconds
 	far_clipmap.use_native_workers = use_far_clipmap_native_workers
@@ -784,7 +866,7 @@ func _configure_far_clipmap_node() -> void:
 
 
 func _far_clipmap_config_key_for_current_settings() -> String:
-	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d:%d" % [
+	return "%d:%.6f:%.6f:%d:%d:%.6f:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%.6f:%.6f:%d:%d:%.6f:%.6f:%.6f:%.6f:%.6f:%d:%d:%d:%d" % [
 		far_clipmap_level_count,
 		far_clipmap_base_spacing_m,
 		far_clipmap_base_outer_extent_m,
@@ -811,6 +893,7 @@ func _far_clipmap_config_key_for_current_settings() -> String:
 		distance_fog_color.g,
 		distance_fog_color.b,
 		1 if debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR else 0,
+		1 if debug_mode == TerrainWorldScript.DEBUG_SURFACE_OWNER else 0,
 		1 if allow_profile_fallback_sync_rebuilds else 0,
 		max_profile_fallback_far_levels_per_update,
 	]
@@ -846,6 +929,8 @@ func _apply_debug_key_input() -> void:
 		apply_debug_mode(TerrainWorldScript.DEBUG_HYDROLOGY)
 	elif Input.is_key_pressed(KEY_8):
 		apply_debug_mode(TerrainWorldScript.DEBUG_ELEVATION_COLOR)
+	elif Input.is_key_pressed(KEY_9):
+		apply_debug_mode(TerrainWorldScript.DEBUG_SURFACE_OWNER)
 
 
 func _apply_local_detail_review_key_input() -> void:
@@ -876,12 +961,12 @@ func _warm_load_visible_region_kernels() -> void:
 		return
 	var provider: RefCounted = terrain.world.provider
 	var region_size_m: float = terrain.world.region_size_m
-	var chunk_size_m: float = terrain.world.chunk_size_m
+	var warm_chunk_size_m: float = terrain.world.chunk_size_m
 	var seen: Dictionary = {}
 	for cz in range(-visible_radius_chunks, visible_radius_chunks + 1):
 		for cx in range(-visible_radius_chunks, visible_radius_chunks + 1):
-			var origin_x: float = float(cx) * chunk_size_m
-			var origin_z: float = float(cz) * chunk_size_m
+			var origin_x: float = float(cx) * warm_chunk_size_m
+			var origin_z: float = float(cz) * warm_chunk_size_m
 			var rx: int = int(floor(origin_x / region_size_m))
 			var rz: int = int(floor(origin_z / region_size_m))
 			for dz in range(2):

@@ -12,6 +12,7 @@ var max_lod: int = 4
 var build_budget_per_frame: int = 2
 var queue_policy: String = QUEUE_POLICY_PRIORITY_CANCEL
 var prefetch_forward_chunks: int = 0
+var residency_halo_chunks: int = 0
 var active: Dictionary = {}
 var queued_builds: Array[String] = []
 var step_index: int = 0
@@ -29,6 +30,7 @@ func setup(settings: Dictionary) -> bool:
 	build_budget_per_frame = int(settings["build_budget_per_frame"])
 	queue_policy = str(settings["queue_policy"])
 	prefetch_forward_chunks = max(0, int(settings.get("prefetch_forward_chunks", 0)))
+	residency_halo_chunks = max(0, int(settings.get("residency_halo_chunks", 0)))
 	reset()
 	return true
 
@@ -48,12 +50,12 @@ func set_priority_direction(direction: Vector2) -> void:
 
 
 func expected_active_count() -> int:
-	return wanted_chunks(Vector2i.ZERO, visible_radius_chunks, max_lod, priority_direction, prefetch_forward_chunks).size()
+	return wanted_chunks(Vector2i.ZERO, visible_radius_chunks, max_lod, priority_direction, prefetch_forward_chunks, residency_halo_chunks).size()
 
 
 func update_viewer(point: Vector2) -> Dictionary:
 	var center: Vector2i = viewer_chunk(point, chunk_size_m)
-	var wanted: Dictionary = wanted_chunks(center, visible_radius_chunks, max_lod, priority_direction, prefetch_forward_chunks)
+	var wanted: Dictionary = wanted_chunks(center, visible_radius_chunks, max_lod, priority_direction, prefetch_forward_chunks, residency_halo_chunks)
 	var created: Array[String] = _sorted_difference(wanted, active)
 	var retired: Array[String] = _sorted_difference(active, wanted)
 	var kept: Array[String] = _sorted_intersection(wanted, active)
@@ -106,6 +108,7 @@ func update_viewer(point: Vector2) -> Dictionary:
 		"viewer_chunk": [center.x, center.y],
 		"active_count": active.size(),
 		"expected_active_count": wanted.size(),
+		"visible_radius_chunks": visible_radius_chunks,
 		"created_count": created.size(),
 		"retired_count": retired.size(),
 		"lod_changed_count": lod_changed.size(),
@@ -125,6 +128,8 @@ func update_viewer(point: Vector2) -> Dictionary:
 		report["base_active_count"] = _base_active_count(visible_radius_chunks)
 		report["prefetch_forward_chunks"] = prefetch_forward_chunks
 		report["prefetch_step"] = _prefetch_step_array(priority_direction)
+	if residency_halo_chunks > 0:
+		report["residency_halo_chunks"] = residency_halo_chunks
 	step_index += 1
 	return report
 
@@ -144,10 +149,11 @@ static func wanted_chunks(
 	visible_radius: int,
 	p_max_lod: int,
 	direction: Vector2 = Vector2.ZERO,
-	prefetch_steps: int = 0
+	prefetch_steps: int = 0,
+	halo_chunks: int = 0
 ) -> Dictionary:
 	var result: Dictionary = {}
-	_merge_wanted_chunks_for_center(result, center, visible_radius, p_max_lod)
+	_merge_wanted_chunks_for_center(result, center, visible_radius + max(0, halo_chunks), p_max_lod)
 	var step: Vector2i = _prefetch_step_from_direction(direction)
 	for prefetch_index in range(1, max(0, prefetch_steps) + 1):
 		if step == Vector2i.ZERO:
@@ -179,6 +185,7 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 	var sim_build_budget_per_frame: int = int(settings["build_budget_per_frame"])
 	var sim_queue_policy: String = str(settings["queue_policy"])
 	var sim_prefetch_forward_chunks: int = max(0, int(settings.get("prefetch_forward_chunks", 0)))
+	var sim_residency_halo_chunks: int = max(0, int(settings.get("residency_halo_chunks", 0)))
 	var derive_priority_direction: bool = bool(settings.get("derive_priority_direction_from_path", false))
 	var fixed_priority_direction: Vector2 = _priority_direction_from_settings(settings.get("priority_direction", Vector2.ZERO))
 	var sim_active: Dictionary = {}
@@ -199,7 +206,7 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 			var delta: Vector2 = point - path[sim_step_index - 1]
 			if delta.length_squared() > 0.000001:
 				sim_priority_direction = delta.normalized()
-		var wanted: Dictionary = wanted_chunks(center, visible_radius, sim_max_lod, sim_priority_direction, sim_prefetch_forward_chunks)
+		var wanted: Dictionary = wanted_chunks(center, visible_radius, sim_max_lod, sim_priority_direction, sim_prefetch_forward_chunks, sim_residency_halo_chunks)
 		var expected_count: int = wanted.size()
 		max_expected_count = max(max_expected_count, expected_count)
 		var created: Array[String] = _sorted_difference(wanted, sim_active)
@@ -257,6 +264,7 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 			"viewer_chunk": [center.x, center.y],
 			"active_count": sim_active.size(),
 			"expected_active_count": expected_count,
+			"visible_radius_chunks": visible_radius,
 			"created_count": created.size(),
 			"retired_count": retired.size(),
 			"lod_changed_count": lod_changed.size(),
@@ -275,6 +283,8 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 			step_report["base_active_count"] = _base_active_count(visible_radius)
 			step_report["prefetch_forward_chunks"] = sim_prefetch_forward_chunks
 			step_report["prefetch_step"] = _prefetch_step_array(sim_priority_direction)
+		if sim_residency_halo_chunks > 0:
+			step_report["residency_halo_chunks"] = sim_residency_halo_chunks
 		steps.append(step_report)
 
 	var errors: Array[String] = []
@@ -291,7 +301,7 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 		"max_lod": sim_max_lod,
 		"build_budget_per_frame": sim_build_budget_per_frame,
 		"queue_policy": sim_queue_policy,
-		"expected_active_count": wanted_chunks(Vector2i.ZERO, visible_radius, sim_max_lod, fixed_priority_direction, sim_prefetch_forward_chunks).size(),
+		"expected_active_count": wanted_chunks(Vector2i.ZERO, visible_radius, sim_max_lod, fixed_priority_direction, sim_prefetch_forward_chunks, sim_residency_halo_chunks).size(),
 	}
 	if sim_prefetch_forward_chunks > 0:
 		report_settings["prefetch_forward_chunks"] = sim_prefetch_forward_chunks
@@ -300,6 +310,8 @@ static func simulate(path: PackedVector2Array, settings: Dictionary) -> Dictiona
 		report_settings["priority_direction"] = [fixed_priority_direction.x, fixed_priority_direction.y]
 	if derive_priority_direction:
 		report_settings["derive_priority_direction_from_path"] = derive_priority_direction
+	if sim_residency_halo_chunks > 0:
+		report_settings["residency_halo_chunks"] = sim_residency_halo_chunks
 	return {
 		"version": 1,
 		"schema": "worldgen9.streamer_reference.v1",
@@ -364,6 +376,8 @@ static func _validate_settings(settings: Dictionary) -> Array[String]:
 		result.append("invalid_build_budget_per_frame")
 	if int(settings.get("prefetch_forward_chunks", 0)) < 0:
 		result.append("invalid_prefetch_forward_chunks")
+	if int(settings.get("residency_halo_chunks", 0)) < 0:
+		result.append("invalid_residency_halo_chunks")
 	var policy: String = str(settings["queue_policy"])
 	if policy != QUEUE_POLICY_PRIORITY_CANCEL and policy != QUEUE_POLICY_FIFO:
 		result.append("invalid_queue_policy:%s" % policy)
@@ -456,6 +470,8 @@ static func _queue_priority_less(a: String, b: String, wanted: Dictionary, cente
 	var adz: int = abs(a_chunk.chunk_z - center.y)
 	var bdx: int = abs(b_chunk.chunk_x - center.x)
 	var bdz: int = abs(b_chunk.chunk_z - center.y)
+	var a_runtime_ring: int = max(adx, adz)
+	var b_runtime_ring: int = max(bdx, bdz)
 	var a_ahead: int = 0
 	var b_ahead: int = 0
 	if direction.length_squared() > 0.000001:
@@ -463,8 +479,8 @@ static func _queue_priority_less(a: String, b: String, wanted: Dictionary, cente
 		var b_offset := Vector2(float(b_chunk.chunk_x - center.x), float(b_chunk.chunk_z - center.y))
 		a_ahead = int(round(a_offset.dot(direction) * 1000.0))
 		b_ahead = int(round(b_offset.dot(direction) * 1000.0))
-	var a_values: Array[int] = [a_chunk.ring, a_chunk.lod, -a_ahead, adx + adz, a_chunk.chunk_z, a_chunk.chunk_x]
-	var b_values: Array[int] = [b_chunk.ring, b_chunk.lod, -b_ahead, bdx + bdz, b_chunk.chunk_z, b_chunk.chunk_x]
+	var a_values: Array[int] = [a_runtime_ring, a_chunk.lod, a_chunk.ring, -a_ahead, adx + adz, a_chunk.chunk_z, a_chunk.chunk_x]
+	var b_values: Array[int] = [b_runtime_ring, b_chunk.lod, b_chunk.ring, -b_ahead, bdx + bdz, b_chunk.chunk_z, b_chunk.chunk_x]
 	for index in range(a_values.size()):
 		if a_values[index] != b_values[index]:
 			return a_values[index] < b_values[index]

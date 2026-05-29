@@ -5,12 +5,17 @@ const TerrainSettingsScript := preload("res://worldgen_terrain/core/terrain_sett
 const TerrainMeshBuilderScript := preload("res://worldgen_terrain/mesh/terrain_mesh_builder.gd")
 const TerrainChunkBuildJobScript := preload("res://worldgen_terrain/mesh/terrain_chunk_build_job.gd")
 const TerrainNativeChunkPayloadWorkerScript := preload("res://worldgen_terrain/mesh/terrain_native_chunk_payload_worker.gd")
+const TerrainGpuProviderChunkDescriptorWorkerScript := preload("res://worldgen_terrain/mesh/terrain_gpu_provider_chunk_descriptor_worker.gd")
+const TerrainPageRequestScript := preload("res://worldgen_terrain/core/terrain_page_request.gd")
+const TerrainGpuHeightPageBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_height_page_backend.gd")
+const TerrainGpuProviderPageTextureBackendScript := preload("res://worldgen_terrain/core/terrain_gpu_provider_page_texture_backend.gd")
 const TerrainWorldScript := preload("res://worldgen_terrain/runtime/terrain_world.gd")
 const TerrainChunkRendererScript := preload("res://worldgen_terrain/runtime/terrain_chunk_renderer.gd")
+const TerrainChunkPageRendererScript := preload("res://worldgen_terrain/runtime/terrain_chunk_page_renderer.gd")
 const HydrologyTileCacheScript := preload("res://worldgen_terrain/hydrology/hydrology_tile_cache.gd")
 
 @export_enum("procedural", "flat") var provider_mode: String = TerrainWorldScript.PROVIDER_PROCEDURAL
-@export_enum("gray", "elevation_color", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
+@export_enum("gray", "elevation_color", "chunk_id", "lod_ring", "height_bands", "seam", "family_palette", "hydrology", "surface_owner") var debug_mode: String = TerrainWorldScript.DEBUG_GRAY
 @export var seed: int = 1337
 @export var flat_height_m: float = 0.0
 @export_range(17, 257, 16) var vertices_per_side: int = TerrainSettingsScript.LOD0_VERTICES_PER_SIDE
@@ -23,6 +28,21 @@ const HydrologyTileCacheScript := preload("res://worldgen_terrain/hydrology/hydr
 @export var use_native_chunk_workers: bool = false
 @export_range(1, 8, 1) var max_native_chunk_workers: int = 2
 @export_range(1, 16, 1) var max_native_chunk_worker_results_per_update: int = 1
+@export var use_gpu_page_chunks: bool = false
+@export var use_gpu_provider_page_chunk_textures: bool = false
+@export var use_gpu_provider_page_chunk_descriptor_staging: bool = false
+@export var use_gpu_rd_chunk_page_textures: bool = false
+@export var use_gpu_rd_chunk_compute_normals: bool = true
+@export_range(1, 16, 1) var max_gpu_page_chunk_builds_per_update: int = 1
+@export_range(1, 16, 1) var max_gpu_page_prefetch_chunk_builds_per_update: int = 2
+@export_range(0, 1000, 1) var max_gpu_page_chunk_build_ms_per_update: int = 0
+@export_range(0, 16, 1) var max_gpu_provider_chunk_descriptor_stages_per_update: int = 1
+@export_range(1, 16, 1) var max_gpu_provider_chunk_descriptor_workers: int = 2
+@export_range(0, 512, 1) var chunk_page_cache_max_pages: int = 96
+@export_range(0, 512, 1) var chunk_gpu_page_residency_max_pages: int = 96
+@export_range(0, 512, 1) var gpu_provider_chunk_descriptor_cache_max_entries: int = 96
+@export var defer_inactive_chunk_retire_until_active_ready: bool = false
+@export_range(0, 256, 1) var max_retained_inactive_chunk_nodes: int = 0
 @export var use_lod_mesh_density: bool = false
 @export var use_mesh_skirts: bool = false
 @export var mesh_skirt_depth_m: float = 50.0
@@ -65,6 +85,25 @@ var _native_worker_requests: Dictionary = {}
 var _native_worker_queue: Array[Dictionary] = []
 var _native_worker_results_applied_this_update: int = 0
 var _last_native_worker_results_applied: int = 0
+var _chunk_page_renderer: RefCounted
+var _chunk_gpu_provider_page_texture_backend: RefCounted
+var _last_gpu_page_chunk_ms: int = 0
+var _last_gpu_page_chunk_texture_ms: int = 0
+var _gpu_page_chunk_count: int = 0
+var _gpu_page_chunk_fallback_count: int = 0
+var _last_gpu_page_chunk_error: String = ""
+var _gpu_page_chunks_built_this_update: int = 0
+var _gpu_page_prefetch_chunks_built_this_update: int = 0
+var _gpu_page_chunk_ms_this_update: int = 0
+var _gpu_provider_chunk_descriptor_cache: Dictionary = {}
+var _gpu_provider_chunk_descriptor_lru: Array[String] = []
+var _last_gpu_provider_chunk_descriptor_stages: int = 0
+var _total_gpu_provider_chunk_descriptor_stages: int = 0
+var _last_gpu_provider_chunk_descriptor_stage_ms: int = 0
+var _last_gpu_provider_chunk_descriptor_worker_elapsed_ms: int = 0
+var _last_gpu_provider_chunk_descriptor_error: String = ""
+var _gpu_provider_chunk_descriptor_workers: Dictionary = {}
+var _gpu_provider_chunk_descriptor_worker_requests: Dictionary = {}
 
 
 func _ready() -> void:
@@ -76,6 +115,13 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	_clear_native_chunk_workers(true)
+	if _chunk_page_renderer != null:
+		_chunk_page_renderer.call("clear")
+	if _chunk_renderer != null:
+		_chunk_renderer.call("clear_all")
+	_clear_chunk_gpu_provider_texture_backend()
+	_clear_gpu_provider_chunk_descriptor_workers(true)
+	TerrainGpuProviderChunkDescriptorWorkerScript.cleanup_detached_workers(0, true, 5000)
 	TerrainNativeChunkPayloadWorkerScript.cleanup_detached_workers(0, true, 5000)
 
 
@@ -100,8 +146,15 @@ func setup_world(mode: String = TerrainWorldScript.PROVIDER_PROCEDURAL, p_seed: 
 
 func update_viewer(position_xz: Vector2) -> Dictionary:
 	TerrainNativeChunkPayloadWorkerScript.cleanup_detached_workers()
+	TerrainGpuProviderChunkDescriptorWorkerScript.cleanup_detached_workers()
 	_native_worker_results_applied_this_update = 0
 	_last_native_worker_results_applied = 0
+	_gpu_page_chunks_built_this_update = 0
+	_gpu_page_prefetch_chunks_built_this_update = 0
+	_gpu_page_chunk_ms_this_update = 0
+	_last_gpu_provider_chunk_descriptor_stages = 0
+	_last_gpu_provider_chunk_descriptor_stage_ms = 0
+	_last_gpu_provider_chunk_descriptor_worker_elapsed_ms = 0
 	if world == null:
 		if not setup_world(provider_mode, seed):
 			return {"status": "fail", "errors": errors}
@@ -110,13 +163,17 @@ func update_viewer(position_xz: Vector2) -> Dictionary:
 	if last_report.get("status", "pass") != "pass":
 		return last_report
 	_refresh_active_info_index()
+	_stage_gpu_provider_chunk_page_descriptors()
 	_retag_full_density_chunk_nodes()
 	_retire_inactive_chunk_nodes()
+	_prune_streamer_queue_for_built_chunks()
 	_prune_native_worker_queue()
 	_poll_native_chunk_workers()
 	_build_queued_chunks(last_report.get("build_now", []) as Array)
 	_poll_native_chunk_workers()
 	_prune_streamer_queue_for_built_chunks()
+	_sync_chunk_visibility_for_runtime_window()
+	_update_chunk_page_protected_keys()
 	return last_report
 
 
@@ -170,8 +227,12 @@ func rebuild_all_active_for_preview(max_chunks: int = 0) -> int:
 		var key: String = _chunk_key(chunk_x, chunk_z)
 		_remove_streamer_queued_build_for_key(key)
 		_remove_queued_native_worker_for_key(key)
-		_build_or_update_chunk_node(key, chunk_x, chunk_z, int(item["ring"]), int(item["lod"]))
-		built += 1
+		var allow_sync_staged_provider: bool = _can_use_staged_gpu_provider_chunk_pages()
+		if allow_sync_staged_provider:
+			_finish_staged_gpu_provider_chunk_descriptor(chunk_x, chunk_z, int(item["ring"]), int(item["lod"]))
+		if _build_or_update_chunk_node(key, chunk_x, chunk_z, int(item["ring"]), int(item["lod"]), allow_sync_staged_provider):
+			built += 1
+	_sync_chunk_visibility_for_runtime_window()
 	return built
 
 
@@ -212,8 +273,9 @@ func rebuild_nearby_for_preview(radius_chunks: int = 2) -> int:
 		var key: String = _chunk_key(chunk_x, chunk_z)
 		_remove_streamer_queued_build_for_key(key)
 		_remove_queued_native_worker_for_key(key)
-		_build_or_update_chunk_node(key, chunk_x, chunk_z, int(item["ring"]), int(item["lod"]))
-		built += 1
+		if _build_or_update_chunk_node(key, chunk_x, chunk_z, int(item["ring"]), int(item["lod"])):
+			built += 1
+	_sync_chunk_visibility_for_runtime_window()
 	return built
 
 
@@ -246,13 +308,17 @@ func build_missing_nearby_for_preview(radius_chunks: int = 2, max_chunks: int = 
 			break
 		var chunk_x: int = int(item["chunk_x"])
 		var chunk_z: int = int(item["chunk_z"])
+		var ring: int = int(item["ring"])
+		var lod: int = int(item["lod"])
 		var key: String = _chunk_key(chunk_x, chunk_z)
 		if _chunk_node_matches_active_info(key, item):
 			continue
 		_remove_streamer_queued_build_for_key(key)
 		_remove_queued_native_worker_for_key(key)
-		_build_or_update_chunk_node(key, chunk_x, chunk_z, int(item["ring"]), int(item["lod"]))
-		built += 1
+		var allow_sync_staged_provider := false
+		if _build_or_update_chunk_node(key, chunk_x, chunk_z, ring, lod, allow_sync_staged_provider):
+			built += 1
+	_sync_chunk_visibility_for_runtime_window()
 	return built
 
 
@@ -280,6 +346,9 @@ func clear_chunks() -> void:
 	_ensure_chunk_renderer()
 	_clear_native_chunk_workers()
 	_chunk_renderer.call("clear_all")
+	if _chunk_page_renderer != null:
+		_chunk_page_renderer.call("clear")
+	_clear_chunk_gpu_provider_texture_backend()
 	_recent_chunk_build_ms.clear()
 	_active_info_by_key.clear()
 	_total_chunk_builds = 0
@@ -293,6 +362,30 @@ func clear_chunks() -> void:
 	_native_chunk_payload_count = 0
 	_native_worker_payload_count = 0
 	_cpu_chunk_payload_count = 0
+	_last_gpu_page_chunk_ms = 0
+	_last_gpu_page_chunk_texture_ms = 0
+	_gpu_page_chunk_count = 0
+	_gpu_page_chunk_fallback_count = 0
+	_last_gpu_page_chunk_error = ""
+	_gpu_page_chunks_built_this_update = 0
+	_gpu_page_prefetch_chunks_built_this_update = 0
+	_gpu_page_chunk_ms_this_update = 0
+	_gpu_provider_chunk_descriptor_cache.clear()
+	_gpu_provider_chunk_descriptor_lru.clear()
+	_clear_gpu_provider_chunk_descriptor_workers(true)
+	_last_gpu_provider_chunk_descriptor_stages = 0
+	_total_gpu_provider_chunk_descriptor_stages = 0
+	_last_gpu_provider_chunk_descriptor_stage_ms = 0
+	_last_gpu_provider_chunk_descriptor_worker_elapsed_ms = 0
+	_last_gpu_provider_chunk_descriptor_error = ""
+
+
+func _clear_chunk_gpu_provider_texture_backend() -> void:
+	if _chunk_gpu_provider_page_texture_backend == null:
+		return
+	if RenderingServer.has_method("get_rendering_device"):
+		var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+		_chunk_gpu_provider_page_texture_backend.call("clear", rd)
 
 
 func built_chunk_count() -> int:
@@ -314,6 +407,10 @@ func build_stats() -> Dictionary:
 	var recent_count: int = _recent_chunk_build_ms.size()
 	return {
 		"active_chunks": chunk_nodes.size(),
+		"visible_chunk_count": _visible_chunk_count(),
+		"standby_chunk_count": _standby_chunk_count(),
+		"active_missing_chunk_count": _active_missing_chunk_count(),
+		"retained_inactive_chunk_count": _retained_inactive_chunk_count(),
 		"pooled_chunks": pooled_chunk_count(),
 		"child_nodes": get_child_count(),
 		"total_chunk_builds": _total_chunk_builds,
@@ -332,9 +429,74 @@ func build_stats() -> Dictionary:
 		"queued_native_worker_builds": _native_worker_queue.size(),
 		"last_native_worker_results_applied": _last_native_worker_results_applied,
 		"max_native_chunk_worker_results_per_update": max_native_chunk_worker_results_per_update,
+		"use_gpu_page_chunks": use_gpu_page_chunks,
+		"gpu_page_chunk_count": _gpu_page_chunk_count,
+		"gpu_page_chunk_fallback_count": _gpu_page_chunk_fallback_count,
+		"last_gpu_page_chunk_ms": _last_gpu_page_chunk_ms,
+		"last_gpu_page_chunk_texture_ms": _last_gpu_page_chunk_texture_ms,
+		"last_gpu_page_chunk_error": _last_gpu_page_chunk_error,
+		"last_gpu_page_chunks_built": _gpu_page_chunks_built_this_update,
+		"last_gpu_page_prefetch_chunks_built": _gpu_page_prefetch_chunks_built_this_update,
+		"gpu_page_chunk_ms_this_update": _gpu_page_chunk_ms_this_update,
+		"max_gpu_page_chunk_builds_per_update": max_gpu_page_chunk_builds_per_update,
+		"max_gpu_page_prefetch_chunk_builds_per_update": max_gpu_page_prefetch_chunk_builds_per_update,
+		"max_gpu_page_chunk_build_ms_per_update": max_gpu_page_chunk_build_ms_per_update,
+		"use_gpu_provider_page_chunk_descriptor_staging": use_gpu_provider_page_chunk_descriptor_staging,
+		"gpu_provider_chunk_descriptor_cache_count": _gpu_provider_chunk_descriptor_cache.size(),
+		"last_gpu_provider_chunk_descriptor_stages": _last_gpu_provider_chunk_descriptor_stages,
+		"total_gpu_provider_chunk_descriptor_stages": _total_gpu_provider_chunk_descriptor_stages,
+		"last_gpu_provider_chunk_descriptor_stage_ms": _last_gpu_provider_chunk_descriptor_stage_ms,
+		"last_gpu_provider_chunk_descriptor_worker_elapsed_ms": _last_gpu_provider_chunk_descriptor_worker_elapsed_ms,
+		"active_gpu_provider_chunk_descriptor_workers": _gpu_provider_chunk_descriptor_workers.size(),
+		"max_gpu_provider_chunk_descriptor_workers": max_gpu_provider_chunk_descriptor_workers,
+		"last_gpu_provider_chunk_descriptor_error": _last_gpu_provider_chunk_descriptor_error,
+		"chunk_gpu_page_residency": _chunk_gpu_page_residency_state(),
+		"chunk_gpu_provider_page_texture_backend": _chunk_gpu_provider_texture_backend_state(),
 		"avg_recent_chunk_build_ms": float(total_recent) / float(max(1, recent_count)),
 		"max_recent_chunk_build_ms": max_recent,
 	}
+
+
+func active_missing_chunk_count(radius_chunks: int = -1) -> int:
+	return _active_missing_chunk_count(radius_chunks)
+
+
+func surface_provenance() -> Array[Dictionary]:
+	var surfaces: Array[Dictionary] = []
+	var keys: Array[String] = []
+	for key_value in chunk_nodes.keys():
+		keys.append(str(key_value))
+	keys.sort()
+	for key in keys:
+		var mesh_instance: MeshInstance3D = chunk_nodes[key] as MeshInstance3D
+		if mesh_instance == null:
+			continue
+		var chunk_x: int = int(mesh_instance.get_meta("chunk_x", 0))
+		var chunk_z: int = int(mesh_instance.get_meta("chunk_z", 0))
+		var ring: int = int(mesh_instance.get_meta("ring", -1))
+		var lod: int = int(mesh_instance.get_meta("lod", -1))
+		var material: Material = mesh_instance.material_override
+		surfaces.append({
+			"owner": "near_chunk",
+			"node": mesh_instance.name,
+			"key": key,
+			"chunk_x": chunk_x,
+			"chunk_z": chunk_z,
+			"ring": ring,
+			"lod": lod,
+			"payload_mode": "gpu_page_chunk" if bool(mesh_instance.get_meta("gpu_page_chunk", false)) else _near_chunk_payload_mode(),
+			"debug_mode": debug_mode,
+			"material_mode": _material_mode(material),
+			"height_texture_valid": _shader_texture_valid(material, "height_texture"),
+			"normal_texture_valid": _shader_texture_valid(material, "normal_texture"),
+			"custom_aabb": _aabb_dictionary(mesh_instance.custom_aabb),
+			"global_position": _vec3_array(mesh_instance.global_position),
+			"visible": mesh_instance.visible,
+			"loaded": mesh_instance.mesh != null,
+			"resident": chunk_nodes.has(key),
+			"mesh": _mesh_summary(mesh_instance.mesh),
+		})
+	return surfaces
 
 
 func refresh_debug_materials() -> void:
@@ -345,6 +507,9 @@ func refresh_debug_materials() -> void:
 		var chunk_z: int = int(mesh_instance.get_meta("chunk_z"))
 		var ring: int = int(mesh_instance.get_meta("ring"))
 		var lod: int = int(mesh_instance.get_meta("lod"))
+		if bool(mesh_instance.get_meta("gpu_page_chunk", false)) and _can_use_gpu_page_chunks():
+			_build_or_update_chunk_node(key, chunk_x, chunk_z, ring, lod)
+			continue
 		mesh_instance.material_override = _material_for_chunk(chunk_x, chunk_z, ring, lod)
 
 
@@ -358,13 +523,44 @@ func apply_edge_fog(enabled: bool, begin_m: float, end_m: float, color: Color) -
 
 
 func _build_queued_chunks(build_now: Array) -> void:
-	for coord_value in build_now:
+	var items_to_build: Array = build_now
+	if _can_use_staged_gpu_provider_chunk_pages():
+		items_to_build = _ready_staged_gpu_provider_build_items(build_now)
+	for coord_value in items_to_build:
 		var coord: Array = coord_value as Array
 		var chunk_x: int = int(coord[0])
 		var chunk_z: int = int(coord[1])
 		var key: String = _chunk_key(chunk_x, chunk_z)
 		var active_info: Dictionary = _active_info_for_key(key)
 		if active_info.is_empty():
+			continue
+		if _chunk_node_matches_active_info(key, active_info):
+			continue
+		var is_visible_runtime_chunk: bool = _active_info_in_visible_runtime_window(active_info)
+		if not is_visible_runtime_chunk and _gpu_page_prefetch_update_budget_exhausted():
+			_requeue_streamer_build_key(key)
+			continue
+		if _can_use_staged_gpu_provider_chunk_pages() and _staged_gpu_provider_chunk_descriptor_ready(chunk_x, chunk_z, int(active_info["ring"]), int(active_info["lod"])):
+			if _gpu_page_chunk_update_budget_exhausted():
+				_requeue_streamer_build_key(key)
+				continue
+			_build_or_update_chunk_node(key, chunk_x, chunk_z, int(active_info["ring"]), int(active_info["lod"]))
+			if not is_visible_runtime_chunk:
+				_gpu_page_prefetch_chunks_built_this_update += 1
+			continue
+		if _can_use_staged_gpu_provider_chunk_pages():
+			_defer_staged_gpu_provider_chunk_build(key, chunk_x, chunk_z, int(active_info["ring"]), int(active_info["lod"]))
+			continue
+		if _can_use_gpu_page_chunks() and _can_use_native_chunk_workers():
+			_enqueue_native_worker_build(key, chunk_x, chunk_z, int(active_info["ring"]), int(active_info["lod"]))
+			continue
+		if _can_use_gpu_page_chunks():
+			if _gpu_page_chunk_update_budget_exhausted():
+				_requeue_streamer_build_key(key)
+				continue
+			_build_or_update_chunk_node(key, chunk_x, chunk_z, int(active_info["ring"]), int(active_info["lod"]))
+			if not is_visible_runtime_chunk:
+				_gpu_page_prefetch_chunks_built_this_update += 1
 			continue
 		if _can_use_native_chunk_workers():
 			_enqueue_native_worker_build(key, chunk_x, chunk_z, int(active_info["ring"]), int(active_info["lod"]))
@@ -373,12 +569,128 @@ func _build_queued_chunks(build_now: Array) -> void:
 	_pump_native_worker_queue()
 
 
-func _build_or_update_chunk_node(key: String, chunk_x: int, chunk_z: int, ring: int, lod: int) -> void:
+func _ready_staged_gpu_provider_build_items(build_now: Array) -> Array:
+	if world == null or world.streamer == null:
+		return build_now
+	var target_count: int = max(1, build_now.size())
+	var queue: Array[String] = []
+	for key_value in world.streamer.queued_builds:
+		var queued_key: String = str(key_value)
+		if not queued_key.is_empty() and not queue.has(queued_key):
+			queue.append(queued_key)
+	for coord_value in build_now:
+		var coord: Array = coord_value as Array
+		if coord.size() < 2:
+			continue
+		var key: String = _chunk_key(int(coord[0]), int(coord[1]))
+		if not queue.has(key):
+			queue.append(key)
+	_sort_streamer_build_keys_by_runtime_priority(queue)
+	var selected: Array = []
+	var retained: Array[String] = []
+	for key in queue:
+		var active_info: Dictionary = _active_info_for_key(key)
+		if active_info.is_empty():
+			continue
+		var ready := _staged_gpu_provider_chunk_descriptor_ready(
+			int(active_info["chunk_x"]),
+			int(active_info["chunk_z"]),
+			int(active_info["ring"]),
+			int(active_info["lod"])
+		)
+		if ready and selected.size() < target_count:
+			selected.append([int(active_info["chunk_x"]), int(active_info["chunk_z"])])
+		else:
+			retained.append(key)
+	world.streamer.queued_builds = retained
+	return selected
+
+
+func _sort_streamer_build_keys_by_runtime_priority(keys: Array[String]) -> void:
+	var center: Array = last_report.get("viewer_chunk", [0, 0]) as Array
+	var center_x: int = int(center[0])
+	var center_z: int = int(center[1])
+	var direction := Vector2.ZERO
+	if world != null and world.streamer != null:
+		direction = world.streamer.priority_direction
+	keys.sort_custom(func(a: String, b: String) -> bool:
+		var a_info: Dictionary = _active_info_for_key(a)
+		var b_info: Dictionary = _active_info_for_key(b)
+		if a_info.is_empty() != b_info.is_empty():
+			return not a_info.is_empty()
+		var ar: int = int(a_info.get("ring", 9999))
+		var br: int = int(b_info.get("ring", 9999))
+		var a_ready := false
+		var b_ready := false
+		if not a_info.is_empty():
+			a_ready = _staged_gpu_provider_chunk_descriptor_ready(
+				int(a_info["chunk_x"]),
+				int(a_info["chunk_z"]),
+				int(a_info["ring"]),
+				int(a_info["lod"])
+			)
+		if not b_info.is_empty():
+			b_ready = _staged_gpu_provider_chunk_descriptor_ready(
+				int(b_info["chunk_x"]),
+				int(b_info["chunk_z"]),
+				int(b_info["ring"]),
+				int(b_info["lod"])
+			)
+		if a_ready != b_ready:
+			return a_ready
+		if ar != br:
+			return ar < br
+		var alod: int = int(a_info.get("lod", 9999))
+		var blod: int = int(b_info.get("lod", 9999))
+		if alod != blod:
+			return alod < blod
+		var ax: int = int(a_info.get("chunk_x", _key_x(a)))
+		var az: int = int(a_info.get("chunk_z", _key_z(a)))
+		var bx: int = int(b_info.get("chunk_x", _key_x(b)))
+		var bz: int = int(b_info.get("chunk_z", _key_z(b)))
+		var aahead := 0.0
+		var bahead := 0.0
+		if direction.length_squared() > 0.000001:
+			aahead = Vector2(float(ax - center_x), float(az - center_z)).dot(direction)
+			bahead = Vector2(float(bx - center_x), float(bz - center_z)).dot(direction)
+		if not is_equal_approx(aahead, bahead):
+			return aahead > bahead
+		var ad: int = abs(ax - center_x) + abs(az - center_z)
+		var bd: int = abs(bx - center_x) + abs(bz - center_z)
+		if ad != bd:
+			return ad < bd
+		if az != bz:
+			return az < bz
+		return ax < bx
+	)
+
+
+func _build_or_update_chunk_node(
+	key: String,
+	chunk_x: int,
+	chunk_z: int,
+	ring: int,
+	lod: int,
+	allow_sync_staged_provider: bool = false
+) -> bool:
 	_ensure_chunk_renderer()
+	if (
+		_can_use_staged_gpu_provider_chunk_pages()
+		and not allow_sync_staged_provider
+		and not _staged_gpu_provider_chunk_descriptor_ready(chunk_x, chunk_z, ring, lod)
+	):
+		_defer_staged_gpu_provider_chunk_build(key, chunk_x, chunk_z, ring, lod)
+		return false
 	var build_start_ms: int = Time.get_ticks_msec()
+	if _can_use_gpu_page_chunks() and _try_apply_gpu_page_chunk(key, chunk_x, chunk_z, ring, lod, allow_sync_staged_provider):
+		_record_chunk_build_time(Time.get_ticks_msec() - build_start_ms)
+		_gpu_page_chunk_count += 1
+		_gpu_page_chunks_built_this_update += 1
+		_gpu_page_chunk_ms_this_update += _last_gpu_page_chunk_ms
+		return true
 	var mesh: ArrayMesh = _build_chunk_mesh(chunk_x, chunk_z, ring, lod)
 	_record_chunk_build_time(Time.get_ticks_msec() - build_start_ms)
-	_chunk_renderer.call(
+	var mesh_instance: MeshInstance3D = _chunk_renderer.call(
 		"apply_chunk",
 		key,
 		chunk_x,
@@ -388,7 +700,683 @@ func _build_or_update_chunk_node(key: String, chunk_x: int, chunk_z: int, ring: 
 		world.chunk_size_m,
 		mesh,
 		_material_for_chunk(chunk_x, chunk_z, ring, lod)
+	) as MeshInstance3D
+	if mesh_instance != null:
+		mesh_instance.set_meta("gpu_page_chunk", false)
+	return mesh_instance != null
+
+
+func _gpu_page_chunk_update_budget_exhausted() -> bool:
+	if _gpu_page_chunks_built_this_update >= max(1, max_gpu_page_chunk_builds_per_update):
+		return true
+	if max_gpu_page_chunk_build_ms_per_update <= 0:
+		return false
+	return (
+		_gpu_page_chunks_built_this_update > 0
+		and _gpu_page_chunk_ms_this_update >= max_gpu_page_chunk_build_ms_per_update
 	)
+
+
+func _gpu_page_prefetch_update_budget_exhausted() -> bool:
+	return _gpu_page_prefetch_chunks_built_this_update >= max(1, max_gpu_page_prefetch_chunk_builds_per_update)
+
+
+func _defer_staged_gpu_provider_chunk_build(key: String, chunk_x: int, chunk_z: int, ring: int, lod: int) -> void:
+	_requeue_streamer_build_key(key)
+
+
+func _try_apply_gpu_page_chunk(
+	key: String,
+	chunk_x: int,
+	chunk_z: int,
+	ring: int,
+	lod: int,
+	allow_sync_staged_provider: bool = false
+) -> bool:
+	var descriptor: Dictionary = _gpu_page_chunk_descriptor(chunk_x, chunk_z, ring, lod, allow_sync_staged_provider)
+	if descriptor.get("status", "fail") != "pass":
+		_gpu_page_chunk_fallback_count += 1
+		_last_gpu_page_chunk_error = str(descriptor.get("error", "descriptor_failed"))
+		return false
+	var applied: Dictionary = _ensure_chunk_page_renderer().call(
+		"apply_descriptor",
+		_chunk_renderer,
+		key,
+		chunk_x,
+		chunk_z,
+		ring,
+		lod,
+		world.chunk_size_m,
+		descriptor
+	) as Dictionary
+	_last_gpu_page_chunk_texture_ms = int(applied.get("texture_ms", 0))
+	if applied.get("status", "fail") != "pass":
+		_gpu_page_chunk_fallback_count += 1
+		_last_gpu_page_chunk_error = str(applied.get("error", "apply_failed"))
+		return false
+	_last_gpu_page_chunk_error = ""
+	_last_gpu_page_chunk_ms = int(descriptor.get("build_ms", 0)) + _last_gpu_page_chunk_texture_ms
+	return true
+
+
+func _chunk_page_request(chunk_x: int, chunk_z: int, ring: int, lod: int, count: int, chunk_size: float) -> RefCounted:
+	return TerrainPageRequestScript.from_chunk(
+		chunk_x,
+		chunk_z,
+		chunk_size,
+		count,
+		int(world.seed),
+		"near_chunk_height",
+		_chunk_page_quality_profile(lod),
+		_chunk_page_feature_flags(ring, lod),
+		{
+			"ring": ring,
+			"lod": lod,
+			"debug_mode": debug_mode,
+		}
+	)
+
+
+func _stage_gpu_provider_chunk_page_descriptors() -> void:
+	if not _can_use_staged_gpu_provider_chunk_pages() or last_report.is_empty():
+		return
+	var started_ms: int = Time.get_ticks_msec()
+	var completed: int = _poll_gpu_provider_chunk_descriptor_workers()
+	var budget: int = max(0, max_gpu_provider_chunk_descriptor_stages_per_update)
+	if budget <= 0:
+		_last_gpu_provider_chunk_descriptor_stages = completed
+		if completed > 0:
+			_total_gpu_provider_chunk_descriptor_stages += completed
+			_last_gpu_provider_chunk_descriptor_stage_ms = Time.get_ticks_msec() - started_ms
+		return
+	var queued := 0
+	var queued_prefetch := 0
+	var items: Array = (last_report.get("active_chunks", []) as Array).duplicate(true)
+	_sort_stream_items_by_runtime_priority(items)
+	for item_value in items:
+		if queued >= budget:
+			break
+		if _gpu_provider_chunk_descriptor_workers.size() >= max(1, max_gpu_provider_chunk_descriptor_workers):
+			break
+		var item: Dictionary = item_value as Dictionary
+		var chunk_x: int = int(item.get("chunk_x", 0))
+		var chunk_z: int = int(item.get("chunk_z", 0))
+		var ring: int = int(item.get("ring", 0))
+		var lod: int = int(item.get("lod", 0))
+		var key: String = _chunk_key(chunk_x, chunk_z)
+		if _chunk_node_matches_active_info(key, item):
+			continue
+		var is_visible_runtime_chunk: bool = _active_info_in_visible_runtime_window(item)
+		if not is_visible_runtime_chunk and queued_prefetch >= max(1, max_gpu_page_prefetch_chunk_builds_per_update):
+			continue
+		if _stage_gpu_provider_chunk_page_descriptor(chunk_x, chunk_z, ring, lod):
+			queued += 1
+			if not is_visible_runtime_chunk:
+				queued_prefetch += 1
+	_last_gpu_provider_chunk_descriptor_stages = completed
+	if completed > 0:
+		_total_gpu_provider_chunk_descriptor_stages += completed
+		_last_gpu_provider_chunk_descriptor_stage_ms = Time.get_ticks_msec() - started_ms
+
+
+func _sort_stream_items_by_runtime_priority(items: Array) -> void:
+	var center: Array = last_report.get("viewer_chunk", [0, 0]) as Array
+	var center_x: int = int(center[0])
+	var center_z: int = int(center[1])
+	var direction := Vector2.ZERO
+	if world != null and world.streamer != null:
+		direction = world.streamer.priority_direction
+	items.sort_custom(func(a_value: Variant, b_value: Variant) -> bool:
+		var a: Dictionary = a_value as Dictionary
+		var b: Dictionary = b_value as Dictionary
+		var ax: int = int(a.get("chunk_x", 0))
+		var az: int = int(a.get("chunk_z", 0))
+		var bx: int = int(b.get("chunk_x", 0))
+		var bz: int = int(b.get("chunk_z", 0))
+		var ar: int = max(abs(ax - center_x), abs(az - center_z))
+		var br: int = max(abs(bx - center_x), abs(bz - center_z))
+		if ar != br:
+			return ar < br
+		var alod: int = int(a.get("lod", 0))
+		var blod: int = int(b.get("lod", 0))
+		if alod != blod:
+			return alod < blod
+		var a_stream_ring: int = int(a.get("ring", ar))
+		var b_stream_ring: int = int(b.get("ring", br))
+		if a_stream_ring != b_stream_ring:
+			return a_stream_ring < b_stream_ring
+		var aahead := 0.0
+		var bahead := 0.0
+		if direction.length_squared() > 0.000001:
+			aahead = Vector2(float(ax - center_x), float(az - center_z)).dot(direction)
+			bahead = Vector2(float(bx - center_x), float(bz - center_z)).dot(direction)
+		if not is_equal_approx(aahead, bahead):
+			return aahead > bahead
+		var ad: int = abs(ax - center_x) + abs(az - center_z)
+		var bd: int = abs(bx - center_x) + abs(bz - center_z)
+		if ad != bd:
+			return ad < bd
+		if az != bz:
+			return az < bz
+		return ax < bx
+	)
+
+
+func _stage_gpu_provider_chunk_page_descriptor(chunk_x: int, chunk_z: int, ring: int, lod: int) -> bool:
+	var count: int = _vertices_for_lod(lod)
+	if count < 2:
+		_last_gpu_provider_chunk_descriptor_error = "vertices_per_side:%d" % count
+		return false
+	var chunk_size: float = float(world.chunk_size_m)
+	var step_m: float = chunk_size / float(count - 1)
+	if not is_finite(step_m) or step_m <= 0.0:
+		_last_gpu_provider_chunk_descriptor_error = "step_m:%f" % step_m
+		return false
+	var request = _chunk_page_request(chunk_x, chunk_z, ring, lod, count, chunk_size)
+	var validation: String = request.validate()
+	if not validation.is_empty():
+		_last_gpu_provider_chunk_descriptor_error = "request:%s" % validation
+		return false
+	var cache_key: String = request.cache_key()
+	if _gpu_provider_chunk_descriptor_cache.has(cache_key):
+		_touch_gpu_provider_chunk_descriptor(cache_key)
+		return false
+	if _gpu_provider_chunk_descriptor_workers.has(cache_key):
+		return false
+	var origin := Vector2(float(chunk_x) * chunk_size, float(chunk_z) * chunk_size)
+	var blocks: Array = _gpu_provider_chunk_page_blocks(origin, step_m, count)
+	if blocks.is_empty():
+		_last_gpu_provider_chunk_descriptor_error = "prepared_blocks_empty"
+		return false
+	var first_block: Dictionary = blocks[0] as Dictionary
+	if first_block.get("status", "pass") != "pass":
+		_last_gpu_provider_chunk_descriptor_error = "prepared:%s" % str(first_block.get("error", "fail"))
+		return false
+	var worker_request := {
+		"cache_key": cache_key,
+		"blocks": blocks,
+		"step_m": step_m,
+		"count": count,
+		"world_seed": int(world.seed),
+		"region_size_m": float(world.region_size_m),
+		"chunk_x": chunk_x,
+		"chunk_z": chunk_z,
+		"ring": ring,
+		"lod": lod,
+		"vertices_per_side": count,
+	}
+	var worker: RefCounted = TerrainGpuProviderChunkDescriptorWorkerScript.new()
+	if not bool(worker.call("start", worker_request)):
+		_last_gpu_provider_chunk_descriptor_error = "worker_start_failed"
+		return false
+	_gpu_provider_chunk_descriptor_workers[cache_key] = worker
+	_gpu_provider_chunk_descriptor_worker_requests[cache_key] = worker_request
+	_last_gpu_provider_chunk_descriptor_error = ""
+	return true
+
+
+func _poll_gpu_provider_chunk_descriptor_workers() -> int:
+	var completed := 0
+	var keys: Array = _gpu_provider_chunk_descriptor_workers.keys()
+	for key_value in keys:
+		var cache_key: String = str(key_value)
+		var worker: RefCounted = _gpu_provider_chunk_descriptor_workers.get(cache_key) as RefCounted
+		if worker == null:
+			_gpu_provider_chunk_descriptor_workers.erase(cache_key)
+			_gpu_provider_chunk_descriptor_worker_requests.erase(cache_key)
+			continue
+		if not bool(worker.call("is_done")):
+			continue
+		var result: Dictionary = worker.call("take_result") as Dictionary
+		var request: Dictionary = _gpu_provider_chunk_descriptor_worker_requests.get(cache_key, {}) as Dictionary
+		_gpu_provider_chunk_descriptor_workers.erase(cache_key)
+		_gpu_provider_chunk_descriptor_worker_requests.erase(cache_key)
+		if not _store_gpu_provider_chunk_descriptor_result(cache_key, request, result):
+			continue
+		completed += 1
+	return completed
+
+
+func _finish_staged_gpu_provider_chunk_descriptor(chunk_x: int, chunk_z: int, ring: int, lod: int) -> bool:
+	if not _can_use_staged_gpu_provider_chunk_pages():
+		return false
+	var count: int = _vertices_for_lod(lod)
+	if count < 2:
+		return false
+	var request = _chunk_page_request(chunk_x, chunk_z, ring, lod, count, float(world.chunk_size_m))
+	if not request.validate().is_empty():
+		return false
+	var cache_key: String = request.cache_key()
+	if _gpu_provider_chunk_descriptor_cache.has(cache_key):
+		return true
+	var worker: RefCounted = _gpu_provider_chunk_descriptor_workers.get(cache_key) as RefCounted
+	if worker == null:
+		return false
+	var worker_request: Dictionary = _gpu_provider_chunk_descriptor_worker_requests.get(cache_key, {}) as Dictionary
+	var result: Dictionary = {}
+	if bool(worker.call("is_done")):
+		result = worker.call("take_result") as Dictionary
+	else:
+		result = worker.call("wait_for_result", 5000) as Dictionary
+	_gpu_provider_chunk_descriptor_workers.erase(cache_key)
+	_gpu_provider_chunk_descriptor_worker_requests.erase(cache_key)
+	return _store_gpu_provider_chunk_descriptor_result(cache_key, worker_request, result)
+
+
+func _store_gpu_provider_chunk_descriptor_result(cache_key: String, request: Dictionary, result: Dictionary) -> bool:
+	_last_gpu_provider_chunk_descriptor_worker_elapsed_ms = int(result.get("worker_elapsed_ms", 0))
+	if result.get("status", "fail") != "pass":
+		_last_gpu_provider_chunk_descriptor_error = "worker:%s" % str(result.get("error", "fail"))
+		return false
+	var descriptor_blocks: Array = result.get("descriptor_blocks", []) as Array
+	if descriptor_blocks.is_empty():
+		_last_gpu_provider_chunk_descriptor_error = "worker_descriptor_blocks_empty"
+		return false
+	_gpu_provider_chunk_descriptor_cache[cache_key] = {
+		"blocks": request.get("blocks", []) as Array,
+		"descriptor_blocks": descriptor_blocks,
+		"chunk_x": int(request.get("chunk_x", 0)),
+		"chunk_z": int(request.get("chunk_z", 0)),
+		"ring": int(request.get("ring", 0)),
+		"lod": int(request.get("lod", 0)),
+		"vertices_per_side": int(request.get("vertices_per_side", 0)),
+	}
+	_touch_gpu_provider_chunk_descriptor(cache_key)
+	_trim_gpu_provider_chunk_descriptor_cache()
+	_last_gpu_provider_chunk_descriptor_error = ""
+	return true
+
+
+func _staged_gpu_provider_chunk_descriptor_ready(chunk_x: int, chunk_z: int, ring: int, lod: int) -> bool:
+	if not _can_use_staged_gpu_provider_chunk_pages():
+		return false
+	var count: int = _vertices_for_lod(lod)
+	if count < 2:
+		return false
+	var request = _chunk_page_request(chunk_x, chunk_z, ring, lod, count, float(world.chunk_size_m))
+	if not request.validate().is_empty():
+		return false
+	return _gpu_provider_chunk_descriptor_cache.has(request.cache_key())
+
+
+func _touch_gpu_provider_chunk_descriptor(cache_key: String) -> void:
+	var existing: int = _gpu_provider_chunk_descriptor_lru.find(cache_key)
+	if existing >= 0:
+		_gpu_provider_chunk_descriptor_lru.remove_at(existing)
+	_gpu_provider_chunk_descriptor_lru.append(cache_key)
+
+
+func _trim_gpu_provider_chunk_descriptor_cache() -> void:
+	var max_entries: int = max(1, gpu_provider_chunk_descriptor_cache_max_entries)
+	while _gpu_provider_chunk_descriptor_cache.size() > max_entries and not _gpu_provider_chunk_descriptor_lru.is_empty():
+		var oldest: String = _gpu_provider_chunk_descriptor_lru.pop_front()
+		_gpu_provider_chunk_descriptor_cache.erase(oldest)
+
+
+func _gpu_page_chunk_descriptor(
+	chunk_x: int,
+	chunk_z: int,
+	ring: int,
+	lod: int,
+	allow_sync_staged_provider: bool = false
+) -> Dictionary:
+	if world == null or world.provider == null:
+		return {"status": "fail", "error": "world_not_ready"}
+	var count: int = _vertices_for_lod(lod)
+	if count < 2:
+		return {"status": "fail", "error": "vertices_per_side:%d" % count}
+	var chunk_size: float = float(world.chunk_size_m)
+	var step_m: float = chunk_size / float(count - 1)
+	if not is_finite(step_m) or step_m <= 0.0:
+		return {"status": "fail", "error": "step_m:%f" % step_m}
+	var origin := Vector2(float(chunk_x) * chunk_size, float(chunk_z) * chunk_size)
+	var request = _chunk_page_request(chunk_x, chunk_z, ring, lod, count, chunk_size)
+	var validation: String = request.validate()
+	if not validation.is_empty():
+		return {"status": "fail", "error": "request:%s" % validation}
+	var cache_key: String = request.cache_key()
+	var build_start_ms: int = Time.get_ticks_msec()
+	var result: Dictionary = {}
+	if use_gpu_provider_page_chunk_textures:
+		if _chunk_page_renderer_has_page(cache_key):
+			var bounds: Dictionary = _conservative_chunk_page_height_bounds()
+			result = {
+				"status": "pass",
+				"height_min_m": float(bounds["min"]),
+				"height_max_m": float(bounds["max"]),
+				"height_image_only": true,
+				"texture_payload_mode": "gpu_provider_rd_height_texture_resident",
+			}
+		else:
+			result = _attach_gpu_provider_chunk_texture(origin, step_m, count, cache_key, allow_sync_staged_provider)
+	else:
+		result = _cpu_encoded_chunk_page(origin, step_m, count)
+	if result.get("status", "fail") != "pass":
+		return result
+	var height_min: float = float(result.get("height_min_m", -8192.0))
+	var height_max: float = float(result.get("height_max_m", 8192.0))
+	var descriptor := {
+		"status": "pass",
+		"chunk_x": chunk_x,
+		"chunk_z": chunk_z,
+		"ring": ring,
+		"lod": lod,
+		"origin_x": origin.x,
+		"origin_z": origin.y,
+		"chunk_size_m": chunk_size,
+		"vertices_per_side": count,
+		"spacing_m": step_m,
+		"height_min_m": height_min,
+		"height_max_m": height_max,
+		"height_range_m": max(0.0, height_max - height_min),
+		"cache_key": cache_key,
+		"texture_payload_mode": str(result.get("texture_payload_mode", "")),
+		"build_ms": Time.get_ticks_msec() - build_start_ms,
+	}
+	for field in [
+		"height_texture_rid",
+		"height_texture_owned_by_residency",
+		"height_bytes",
+		"height_image_only",
+		"rd_owned_rids",
+		"height_image_data",
+		"normal_image_data",
+		"height_image",
+		"normal_image",
+	]:
+		if result.has(field):
+			descriptor[field] = result[field]
+	if not use_gpu_rd_chunk_compute_normals and not descriptor.has("normal_image_data"):
+		descriptor["normal_image_data"] = _chunk_page_flat_normal_image_data(count)
+	return descriptor
+
+
+func _assign_gpu_page_chunk_from_native(key: String, request: Dictionary, native: Dictionary, build_ms: int) -> bool:
+	var active_info: Dictionary = _active_info_for_key(key)
+	if active_info.is_empty():
+		return false
+	var count: int = int(request.get("vertices_per_side", 0))
+	var height: PackedFloat32Array = native.get("height", PackedFloat32Array()) as PackedFloat32Array
+	if count < 2 or height.size() != count * count:
+		_last_gpu_page_chunk_error = "native_height_size:%d expected:%d" % [height.size(), count * count]
+		return false
+	var descriptor: Dictionary = _gpu_page_chunk_descriptor_from_height(
+		int(request.get("chunk_x", active_info.get("chunk_x", 0))),
+		int(request.get("chunk_z", active_info.get("chunk_z", 0))),
+		int(request.get("ring", active_info.get("ring", 0))),
+		int(request.get("lod", active_info.get("lod", 0))),
+		height,
+		build_ms,
+		"native_worker_height_page"
+	)
+	if descriptor.get("status", "fail") != "pass":
+		_last_gpu_page_chunk_error = str(descriptor.get("error", "native_descriptor_failed"))
+		return false
+	var applied: Dictionary = _ensure_chunk_page_renderer().call(
+		"apply_descriptor",
+		_chunk_renderer,
+		key,
+		int(descriptor["chunk_x"]),
+		int(descriptor["chunk_z"]),
+		int(descriptor["ring"]),
+		int(descriptor["lod"]),
+		world.chunk_size_m,
+		descriptor
+	) as Dictionary
+	_last_gpu_page_chunk_texture_ms = int(applied.get("texture_ms", 0))
+	if applied.get("status", "fail") != "pass":
+		_last_gpu_page_chunk_error = "native_%s" % str(applied.get("error", "apply_failed"))
+		return false
+	_record_chunk_build_time(_last_gpu_page_chunk_texture_ms)
+	_gpu_page_chunk_count += 1
+	_gpu_page_chunks_built_this_update += 1
+	_last_gpu_page_chunk_ms = _last_gpu_page_chunk_texture_ms
+	_gpu_page_chunk_ms_this_update += _last_gpu_page_chunk_ms
+	_last_gpu_page_chunk_error = ""
+	return true
+
+
+func _gpu_page_chunk_descriptor_from_height(
+	chunk_x: int,
+	chunk_z: int,
+	ring: int,
+	lod: int,
+	height: PackedFloat32Array,
+	build_ms: int,
+	payload_mode: String
+) -> Dictionary:
+	var count: int = _vertices_for_lod(lod)
+	if count < 2 or height.size() != count * count:
+		return {"status": "fail", "error": "height_size:%d expected:%d" % [height.size(), count * count]}
+	var chunk_size: float = float(world.chunk_size_m)
+	var step_m: float = chunk_size / float(count - 1)
+	var request = _chunk_page_request(chunk_x, chunk_z, ring, lod, count, chunk_size)
+	var validation: String = request.validate()
+	if not validation.is_empty():
+		return {"status": "fail", "error": "request:%s" % validation}
+	var height_data := PackedByteArray()
+	height_data.resize(count * count * 4)
+	var min_height := INF
+	var max_height := -INF
+	for index in range(height.size()):
+		var value: float = float(height[index])
+		if not is_finite(value):
+			return {"status": "fail", "error": "height_nonfinite:%d" % index}
+		min_height = minf(min_height, value)
+		max_height = maxf(max_height, value)
+		height_data.encode_float(index * 4, value)
+	return {
+		"status": "pass",
+		"chunk_x": chunk_x,
+		"chunk_z": chunk_z,
+		"ring": ring,
+		"lod": lod,
+		"origin_x": float(chunk_x) * chunk_size,
+		"origin_z": float(chunk_z) * chunk_size,
+		"chunk_size_m": chunk_size,
+		"vertices_per_side": count,
+		"spacing_m": step_m,
+		"height_min_m": min_height,
+		"height_max_m": max_height,
+		"height_range_m": max(0.0, max_height - min_height),
+		"cache_key": request.cache_key(),
+		"height_image_data": height_data,
+		"normal_image_data": _chunk_page_flat_normal_image_data(count) if not use_gpu_rd_chunk_compute_normals else PackedByteArray(),
+		"height_image_only": use_gpu_rd_chunk_compute_normals,
+		"texture_payload_mode": payload_mode,
+		"build_ms": build_ms,
+	}
+
+
+func _attach_gpu_provider_chunk_texture(
+	origin: Vector2,
+	step_m: float,
+	count: int,
+	cache_key: String,
+	allow_sync_staged_provider: bool = false
+) -> Dictionary:
+	if not _can_use_direct_rd_chunk_page_textures():
+		return {"status": "fail", "error": "direct_rd_unavailable"}
+	var blocks: Array = []
+	if use_gpu_provider_page_chunk_descriptor_staging:
+		if not _gpu_provider_chunk_descriptor_cache.has(cache_key) and not allow_sync_staged_provider:
+			return {"status": "fail", "error": "provider_descriptor_not_staged"}
+		if _gpu_provider_chunk_descriptor_cache.has(cache_key):
+			var cached_descriptor: Dictionary = _gpu_provider_chunk_descriptor_cache[cache_key] as Dictionary
+			var descriptor_blocks: Array = cached_descriptor.get("descriptor_blocks", []) as Array
+			_touch_gpu_provider_chunk_descriptor(cache_key)
+			if not descriptor_blocks.is_empty():
+				var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+				var backend: RefCounted = _ensure_chunk_gpu_provider_page_texture_backend()
+				var staged_result: Dictionary = backend.call(
+					"create_height_texture_from_prepared_descriptors",
+					rd,
+					descriptor_blocks,
+					count,
+					count,
+					step_m
+				) as Dictionary
+				if staged_result.get("status", "fail") == "pass":
+					var staged_bounds: Dictionary = _conservative_chunk_page_height_bounds()
+					staged_result["height_min_m"] = float(staged_bounds["min"])
+					staged_result["height_max_m"] = float(staged_bounds["max"])
+				return staged_result
+			blocks = cached_descriptor.get("blocks", []) as Array
+		elif allow_sync_staged_provider:
+			blocks = _gpu_provider_chunk_page_blocks(origin, step_m, count)
+	else:
+		blocks = _gpu_provider_chunk_page_blocks(origin, step_m, count)
+	if blocks.is_empty():
+		return {"status": "fail", "error": "prepared_blocks_empty"}
+	var first_block: Dictionary = blocks[0] as Dictionary
+	if first_block.get("status", "pass") != "pass":
+		return {"status": "fail", "error": "prepared:%s" % str(first_block.get("error", "fail"))}
+	var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+	var backend: RefCounted = _ensure_chunk_gpu_provider_page_texture_backend()
+	var result: Dictionary = backend.call(
+		"create_height_texture_from_prepared_blocks",
+		rd,
+		blocks,
+		count,
+		count,
+		step_m,
+		int(world.seed),
+		float(world.region_size_m)
+	) as Dictionary
+	if result.get("status", "fail") != "pass":
+		return result
+	var bounds: Dictionary = _conservative_chunk_page_height_bounds()
+	result["height_min_m"] = float(bounds["min"])
+	result["height_max_m"] = float(bounds["max"])
+	return result
+
+
+func _cpu_encoded_chunk_page(origin: Vector2, step_m: float, count: int) -> Dictionary:
+	var height: PackedFloat32Array = world.provider.sample_height_grid(
+		origin.x,
+		origin.y,
+		step_m,
+		count,
+		count,
+		int(world.seed),
+		float(world.region_size_m)
+	)
+	if height.size() != count * count:
+		return {"status": "fail", "error": "height_size:%d expected:%d" % [height.size(), count * count]}
+	var height_range := {"min": INF, "max": -INF}
+	var height_data := PackedByteArray()
+	height_data.resize(count * count * 4)
+	for index in range(height.size()):
+		var value: float = float(height[index])
+		if not is_finite(value):
+			return {"status": "fail", "error": "height_nonfinite:%d" % index}
+		height_range["min"] = minf(float(height_range["min"]), value)
+		height_range["max"] = maxf(float(height_range["max"]), value)
+		height_data.encode_float(index * 4, value)
+	return {
+		"status": "pass",
+		"height_image_data": height_data,
+		"height_image_only": true,
+		"height_min_m": float(height_range["min"]),
+		"height_max_m": float(height_range["max"]),
+		"texture_payload_mode": "cpu_preencoded_height",
+	}
+
+
+func _gpu_provider_chunk_page_blocks(origin: Vector2, step_m: float, count: int) -> Array:
+	var blocks: Array = []
+	var x_ranges: Array[Dictionary] = _axis_ranges_by_region_for_span(origin.x, step_m, count)
+	var z_ranges: Array[Dictionary] = _axis_ranges_by_region_for_span(origin.y, step_m, count)
+	for z_range_value in z_ranges:
+		var z_range: Dictionary = z_range_value as Dictionary
+		for x_range_value in x_ranges:
+			var x_range: Dictionary = x_range_value as Dictionary
+			var x0: int = int(x_range["start"])
+			var x1: int = int(x_range["end"])
+			var z0: int = int(z_range["start"])
+			var z1: int = int(z_range["end"])
+			var count_x: int = x1 - x0 + 1
+			var count_z: int = z1 - z0 + 1
+			var world_x0: float = origin.x + float(x0) * step_m
+			var world_z0: float = origin.y + float(z0) * step_m
+			var prepared: Dictionary = world.provider.call(
+				"native_prepared_height_grid_request",
+				world_x0,
+				world_z0,
+				step_m,
+				count_x,
+				count_z,
+				int(world.seed),
+				float(world.region_size_m)
+			) as Dictionary
+			if prepared.get("status", "fail") != "pass":
+				return [{"status": "fail", "error": prepared.get("error", prepared.get("status", "fail"))}]
+			blocks.append({
+				"status": "pass",
+				"prepared_request": prepared,
+				"origin_x": world_x0,
+				"origin_z": world_z0,
+				"count_x": count_x,
+				"count_z": count_z,
+				"offset_x": x0,
+				"offset_z": z0,
+			})
+	return blocks
+
+
+func _axis_ranges_by_region_for_span(origin_axis: float, step_m: float, count: int) -> Array[Dictionary]:
+	var ranges: Array[Dictionary] = []
+	if count <= 0:
+		return ranges
+	var start := 0
+	var current_region: int = _region_for_axis(origin_axis)
+	for index in range(1, count):
+		var coord: float = origin_axis + float(index) * step_m
+		var region: int = _region_for_axis(coord)
+		if region == current_region:
+			continue
+		ranges.append({"start": start, "end": index - 1, "region": current_region})
+		start = index
+		current_region = region
+	ranges.append({"start": start, "end": count - 1, "region": current_region})
+	return ranges
+
+
+func _region_for_axis(coord: float) -> int:
+	return int(floor(coord / float(world.region_size_m)))
+
+
+func _chunk_page_feature_flags(ring: int, lod: int) -> Dictionary:
+	var flags := {
+		"debug_mode": debug_mode,
+		"fast_gray": use_fast_gray_material,
+		"provider_gpu_texture": use_gpu_provider_page_chunk_textures,
+		"profile": _landform_profile_cache_key(),
+	}
+	if use_lod_mesh_density:
+		flags["ring"] = ring
+		flags["lod"] = lod
+	return flags
+
+
+func _chunk_page_quality_profile(lod: int) -> String:
+	if not use_lod_mesh_density:
+		return "full_density"
+	return "lod_%d" % lod
+
+
+func _landform_profile_cache_key() -> String:
+	if world == null or world.provider == null or not world.provider.has_method("landform_profile_report"):
+		return ""
+	var report: Dictionary = world.provider.call("landform_profile_report") as Dictionary
+	var settings: Dictionary = report.get("settings", {}) as Dictionary
+	if not settings.is_empty():
+		return str(settings)
+	return str(report.get("profile_id", report.get("profile", "")))
+
+
+func _chunk_page_flat_normal_image_data(count: int) -> PackedByteArray:
+	return _ensure_chunk_page_renderer().call("flat_normal_image_data", count) as PackedByteArray
 
 
 func _assign_chunk_payload(key: String, payload: Dictionary, build_ms: int) -> void:
@@ -403,7 +1391,7 @@ func _assign_chunk_payload(key: String, payload: Dictionary, build_ms: int) -> v
 	_record_chunk_build_time(build_ms)
 	var ring: int = int(payload.get("ring", active_info.get("ring", 0)))
 	var lod: int = int(payload.get("lod", active_info.get("lod", 0)))
-	_chunk_renderer.call(
+	var mesh_instance: MeshInstance3D = _chunk_renderer.call(
 		"apply_chunk",
 		key,
 		chunk_x,
@@ -413,7 +1401,9 @@ func _assign_chunk_payload(key: String, payload: Dictionary, build_ms: int) -> v
 		world.chunk_size_m,
 		TerrainChunkBuildJobScript.mesh_from_payload(payload),
 		_material_for_chunk(chunk_x, chunk_z, ring, lod)
-	)
+	) as MeshInstance3D
+	if mesh_instance != null:
+		mesh_instance.set_meta("gpu_page_chunk", false)
 
 
 func _build_chunk_mesh(chunk_x: int, chunk_z: int, ring: int = 0, lod: int = 0) -> ArrayMesh:
@@ -459,6 +1449,36 @@ func _build_chunk_payload(chunk_x: int, chunk_z: int, ring: int = 0, lod: int = 
 	_last_mesh_normals_ms = TerrainMeshBuilderScript.last_normals_build_ms
 	_cpu_chunk_payload_count += 1
 	return _finalize_chunk_payload(payload, count)
+
+
+func _can_use_gpu_page_chunks() -> bool:
+	if not use_gpu_page_chunks:
+		return false
+	if world == null or world.provider == null:
+		return false
+	if debug_mode == TerrainWorldScript.DEBUG_HYDROLOGY:
+		return false
+	if debug_mode == TerrainWorldScript.DEBUG_GRAY and not use_fast_gray_material:
+		return false
+	if debug_mode != TerrainWorldScript.DEBUG_GRAY and debug_mode != TerrainWorldScript.DEBUG_ELEVATION_COLOR:
+		return false
+	if use_mesh_skirts or use_lod_mesh_density:
+		return false
+	if use_gpu_provider_page_chunk_textures and not _provider_supports_native_prepared_grid():
+		return false
+	if use_gpu_provider_page_chunk_textures and not _can_use_direct_rd_chunk_page_textures():
+		return false
+	return true
+
+
+func _can_use_staged_gpu_provider_chunk_pages() -> bool:
+	return (
+		_can_use_gpu_page_chunks()
+		and use_gpu_provider_page_chunk_textures
+		and use_gpu_provider_page_chunk_descriptor_staging
+		and _provider_supports_native_prepared_grid()
+		and _can_use_direct_rd_chunk_page_textures()
+	)
 
 
 func _can_use_native_chunk_workers() -> bool:
@@ -563,12 +1583,18 @@ func _poll_native_chunk_workers() -> void:
 			else:
 				_build_or_update_chunk_node(key, int(active_info["chunk_x"]), int(active_info["chunk_z"]), int(active_info["ring"]), int(active_info["lod"]))
 			continue
-		var payload: Dictionary = _native_chunk_payload_to_job_payload(request, native)
 		_last_native_worker_elapsed_ms = int(native.get("worker_elapsed_ms", 0))
 		_last_native_chunk_payload_ms = _last_native_worker_elapsed_ms
 		_last_height_grid_ms = 0
 		_last_native_mesh_payload_ms = _last_native_worker_elapsed_ms
 		var build_ms: int = _last_native_worker_elapsed_ms
+		if native.get("status", "fail") == "pass" and _can_use_gpu_page_chunks():
+			if _assign_gpu_page_chunk_from_native(key, request, native, build_ms):
+				_native_worker_payload_count += 1
+				_native_worker_results_applied_this_update += 1
+				_last_native_worker_results_applied = _native_worker_results_applied_this_update
+				continue
+		var payload: Dictionary = _native_chunk_payload_to_job_payload(request, native)
 		if payload.get("status", "fail") == "pass":
 			payload = _finalize_chunk_payload(payload, int(request["vertices_per_side"]))
 			_native_worker_payload_count += 1
@@ -642,6 +1668,8 @@ func _prune_streamer_queue_for_built_chunks() -> void:
 			continue
 		filtered.append(key)
 	world.streamer.queued_builds = filtered
+	if not last_report.is_empty():
+		last_report["queued_build_count"] = filtered.size()
 
 
 func _native_chunk_request_id(key: String, request: Dictionary) -> String:
@@ -685,6 +1713,21 @@ func _clear_native_chunk_workers(wait_for_running: bool = false) -> void:
 	_native_chunk_workers.clear()
 	_native_worker_requests.clear()
 	_native_worker_queue.clear()
+
+
+func _clear_gpu_provider_chunk_descriptor_workers(wait_for_running: bool = false) -> void:
+	for worker_value in _gpu_provider_chunk_descriptor_workers.values():
+		var worker: RefCounted = worker_value as RefCounted
+		if worker == null:
+			continue
+		if bool(worker.call("is_done")):
+			worker.call("take_result")
+		elif wait_for_running:
+			worker.call("wait_for_result", 5000)
+		else:
+			worker.call("detach_until_done")
+	_gpu_provider_chunk_descriptor_workers.clear()
+	_gpu_provider_chunk_descriptor_worker_requests.clear()
 
 
 func _provider_supports_native_prepared_grid() -> bool:
@@ -1189,6 +2232,113 @@ func _native_backend_available() -> bool:
 	return _native_backend != null
 
 
+func _can_use_direct_rd_chunk_page_textures() -> bool:
+	return (
+		use_gpu_rd_chunk_page_textures
+		and ClassDB.class_exists("Texture2DRD")
+		and RenderingServer.has_method("get_rendering_device")
+		and RenderingServer.call("get_rendering_device") != null
+	)
+
+
+func _ensure_chunk_page_renderer() -> RefCounted:
+	if _chunk_page_renderer == null:
+		_chunk_page_renderer = TerrainChunkPageRendererScript.new()
+	_chunk_page_renderer.call("configure", {
+		"cache_max_pages": chunk_page_cache_max_pages,
+		"residency_max_pages": chunk_gpu_page_residency_max_pages,
+		"use_rd_page_textures": use_gpu_rd_chunk_page_textures,
+		"use_rd_compute_normals": use_gpu_rd_chunk_compute_normals,
+		"fast_gray_exposure": fast_gray_exposure,
+		"fast_gray_contrast": fast_gray_contrast,
+		"elevation_color_enabled": debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR,
+		"edge_fog_enabled": use_edge_fog,
+		"edge_fog_begin_m": edge_fog_begin_m,
+		"edge_fog_end_m": edge_fog_end_m,
+		"edge_fog_color": edge_fog_color,
+	})
+	return _chunk_page_renderer
+
+
+func _ensure_chunk_gpu_provider_page_texture_backend() -> RefCounted:
+	if _chunk_gpu_provider_page_texture_backend == null:
+		_chunk_gpu_provider_page_texture_backend = TerrainGpuProviderPageTextureBackendScript.new()
+	return _chunk_gpu_provider_page_texture_backend
+
+
+func _chunk_gpu_page_residency_state() -> Dictionary:
+	if _chunk_page_renderer == null:
+		return {
+			"max_pages": chunk_gpu_page_residency_max_pages,
+			"count": 0,
+			"uploads": 0,
+			"rd_uploads": 0,
+			"image_uploads": 0,
+			"total_mib": 0.0,
+		}
+	return _chunk_page_renderer.call("gpu_page_residency_state") as Dictionary
+
+
+func _chunk_gpu_provider_texture_backend_state() -> Dictionary:
+	if _chunk_gpu_provider_page_texture_backend == null:
+		return {
+			"compile_count": 0,
+			"dispatch_count": 0,
+			"last_create_texture_ms": 0,
+			"max_create_texture_ms": 0,
+			"last_block_count": 0,
+			"last_error": "",
+		}
+	return _chunk_gpu_provider_page_texture_backend.call("debug_state") as Dictionary
+
+
+func _chunk_page_renderer_has_page(cache_key: String) -> bool:
+	if _chunk_page_renderer == null or cache_key.is_empty():
+		return false
+	return bool(_chunk_page_renderer.call("has_page", cache_key))
+
+
+func _update_chunk_page_protected_keys() -> void:
+	if _chunk_page_renderer == null or world == null:
+		return
+	var keys: Array[String] = []
+	for key_value in chunk_nodes.keys():
+		var mesh_instance: MeshInstance3D = chunk_nodes[key_value] as MeshInstance3D
+		if mesh_instance == null or not bool(mesh_instance.get_meta("gpu_page_chunk", false)):
+			continue
+		var chunk_x: int = int(mesh_instance.get_meta("chunk_x", 0))
+		var chunk_z: int = int(mesh_instance.get_meta("chunk_z", 0))
+		var lod: int = int(mesh_instance.get_meta("lod", 0))
+		var ring: int = int(mesh_instance.get_meta("ring", 0))
+		var count: int = _vertices_for_lod(lod)
+		var request = TerrainPageRequestScript.from_chunk(
+			chunk_x,
+			chunk_z,
+			float(world.chunk_size_m),
+			count,
+			int(world.seed),
+			"near_chunk_height",
+			_chunk_page_quality_profile(lod),
+			_chunk_page_feature_flags(ring, lod)
+		)
+		if request.validate().is_empty():
+			keys.append(request.cache_key())
+	_chunk_page_renderer.call("set_protected_keys", keys)
+
+
+func _conservative_chunk_page_height_bounds() -> Dictionary:
+	var scale := 1.0
+	if world != null and world.provider != null and world.provider.has_method("landform_profile_report"):
+		var profile: Dictionary = world.provider.call("landform_profile_report") as Dictionary
+		var settings: Dictionary = profile.get("settings", {}) as Dictionary
+		if not settings.is_empty():
+			scale = maxf(scale, float(settings.get("macro_relief_scale", 1.0)))
+			scale = maxf(scale, float(settings.get("kernel_relief_strength", 1.0)))
+			scale = maxf(scale, float(settings.get("mountain_boost", 1.0)))
+	var extent: float = 8192.0 * clampf(scale, 1.0, 3.0)
+	return {"min": -extent, "max": extent}
+
+
 func _build_gray_colors_for_chunk(chunk_x: int, chunk_z: int, count: int, step_m: float) -> PackedColorArray:
 	var extended_count: int = count + 2
 	var origin_x: float = float(chunk_x) * world.chunk_size_m - step_m
@@ -1346,6 +2496,13 @@ func _queue_active_chunks_for_rebuild() -> void:
 		_remove_queued_native_worker_for_key(key)
 		if not world.streamer.queued_builds.has(key):
 			world.streamer.queued_builds.append(key)
+
+
+func _requeue_streamer_build_key(key: String) -> void:
+	if world == null or world.streamer == null or key.is_empty():
+		return
+	if not world.streamer.queued_builds.has(key):
+		world.streamer.queued_builds.push_front(key)
 
 
 func _fast_gray_material() -> ShaderMaterial:
@@ -1524,7 +2681,9 @@ void fragment() {
 	return material
 
 
-func _debug_color(chunk_x: int, chunk_z: int, ring: int, lod: int) -> Color:
+func _debug_color(chunk_x: int, chunk_z: int, ring: int, _lod: int) -> Color:
+	if debug_mode == TerrainWorldScript.DEBUG_SURFACE_OWNER:
+		return Color(0.06, 0.72, 0.95)
 	if debug_mode == TerrainWorldScript.DEBUG_CHUNK_ID:
 		var r: float = float(abs((chunk_x * 73 + chunk_z * 19) % 255)) / 255.0
 		var g: float = float(abs((chunk_x * 37 - chunk_z * 97) % 255)) / 255.0
@@ -1550,6 +2709,71 @@ func _debug_color(chunk_x: int, chunk_z: int, ring: int, lod: int) -> Color:
 		)
 		return _family_color(str(sample.get("primary_family", "unknown")))
 	return Color(0.52, 0.52, 0.50)
+
+
+func _near_chunk_payload_mode() -> String:
+	if use_native_chunk_workers:
+		return "native_worker_mesh"
+	if use_native_chunk_payloads:
+		return "native_payload_mesh"
+	return "cpu_mesh"
+
+
+func _material_mode(material: Material) -> String:
+	if material == null:
+		return "missing"
+	var shader_material: ShaderMaterial = material as ShaderMaterial
+	if shader_material != null:
+		if _shader_texture_valid(shader_material, "height_texture"):
+			return "height_texture_shader"
+		if debug_mode == TerrainWorldScript.DEBUG_ELEVATION_COLOR:
+			return "elevation_color_shader"
+		if debug_mode == TerrainWorldScript.DEBUG_GRAY and use_fast_gray_material:
+			return "fast_gray_shader"
+		return "shader"
+	var standard: StandardMaterial3D = material as StandardMaterial3D
+	if standard != null:
+		if debug_mode == TerrainWorldScript.DEBUG_SURFACE_OWNER:
+			return "surface_owner_color"
+		return "standard"
+	return material.get_class()
+
+
+func _shader_texture_valid(material: Material, parameter_name: String) -> bool:
+	var shader_material: ShaderMaterial = material as ShaderMaterial
+	if shader_material == null:
+		return false
+	var texture: Texture2D = shader_material.get_shader_parameter(parameter_name) as Texture2D
+	return texture != null
+
+
+func _aabb_dictionary(aabb: AABB) -> Dictionary:
+	return {
+		"position": _vec3_array(aabb.position),
+		"size": _vec3_array(aabb.size),
+	}
+
+
+func _vec3_array(value: Vector3) -> Array[float]:
+	return [snappedf(value.x, 0.001), snappedf(value.y, 0.001), snappedf(value.z, 0.001)]
+
+
+func _mesh_summary(mesh: Mesh) -> Dictionary:
+	if mesh == null:
+		return {"surface_count": 0, "vertex_count": 0, "index_count": 0}
+	var vertex_count := 0
+	var index_count := 0
+	for surface in range(mesh.get_surface_count()):
+		var arrays: Array = mesh.surface_get_arrays(surface)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] as PackedInt32Array
+		vertex_count += vertices.size()
+		index_count += indices.size()
+	return {
+		"surface_count": mesh.get_surface_count(),
+		"vertex_count": vertex_count,
+		"index_count": index_count,
+	}
 
 
 func _family_color(family: String) -> Color:
@@ -1578,7 +2802,156 @@ func _family_color(family: String) -> Color:
 
 func _retire_inactive_chunk_nodes() -> void:
 	_ensure_chunk_renderer()
-	_chunk_renderer.call("retire_inactive", _active_info_by_key)
+	var keep_keys: Dictionary = {}
+	var missing_active: int = _active_missing_chunk_count()
+	if defer_inactive_chunk_retire_until_active_ready and missing_active > 0:
+		var retention_limit: int = mini(max_retained_inactive_chunk_nodes, missing_active * 2)
+		keep_keys = _inactive_chunk_retention_keys(retention_limit)
+	_chunk_renderer.call("retire_inactive", _active_info_by_key, keep_keys)
+
+
+func _active_chunk_window_has_pending_visual_work() -> bool:
+	if last_report.is_empty():
+		return false
+	if int(last_report.get("queued_build_count", 0)) > 0:
+		return true
+	if not _native_chunk_workers.is_empty() or not _native_worker_queue.is_empty():
+		return true
+	if not _gpu_provider_chunk_descriptor_workers.is_empty():
+		return true
+	for key_value in _active_info_by_key.keys():
+		var key: String = str(key_value)
+		if not chunk_nodes.has(key):
+			return true
+		var active_info: Dictionary = _active_info_by_key[key] as Dictionary
+		if not _chunk_node_matches_active_info(key, active_info):
+			return true
+	return false
+
+
+func _active_missing_chunk_count(radius_chunks: int = -1) -> int:
+	if last_report.is_empty():
+		return 0
+	var center: Array = last_report.get("viewer_chunk", [0, 0]) as Array
+	var center_x: int = int(center[0])
+	var center_z: int = int(center[1])
+	var missing := 0
+	for key_value in _active_info_by_key.keys():
+		var key: String = str(key_value)
+		var active_info: Dictionary = _active_info_by_key[key] as Dictionary
+		if radius_chunks >= 0:
+			var dx: int = abs(int(active_info.get("chunk_x", 0)) - center_x)
+			var dz: int = abs(int(active_info.get("chunk_z", 0)) - center_z)
+			if max(dx, dz) > radius_chunks:
+				continue
+		if not chunk_nodes.has(key) or not _chunk_node_matches_active_info(key, active_info):
+			missing += 1
+	return missing
+
+
+func _retained_inactive_chunk_count() -> int:
+	var retained := 0
+	for key_value in chunk_nodes.keys():
+		if not _active_info_by_key.has(str(key_value)):
+			retained += 1
+	return retained
+
+
+func _visible_chunk_count() -> int:
+	var count := 0
+	for node_value in chunk_nodes.values():
+		var mesh_instance: MeshInstance3D = node_value as MeshInstance3D
+		if mesh_instance != null and mesh_instance.visible:
+			count += 1
+	return count
+
+
+func _standby_chunk_count() -> int:
+	var count := 0
+	for key_value in chunk_nodes.keys():
+		var key: String = str(key_value)
+		if not _active_info_by_key.has(key):
+			continue
+		var mesh_instance: MeshInstance3D = chunk_nodes[key] as MeshInstance3D
+		if mesh_instance != null and not mesh_instance.visible:
+			count += 1
+	return count
+
+
+func _sync_chunk_visibility_for_runtime_window() -> void:
+	if last_report.is_empty():
+		return
+	var visible_radius: int = _runtime_visible_radius_chunks()
+	var center: Array = last_report.get("viewer_chunk", [0, 0]) as Array
+	var center_x: int = int(center[0])
+	var center_z: int = int(center[1])
+	for key_value in chunk_nodes.keys():
+		var key: String = str(key_value)
+		var mesh_instance: MeshInstance3D = chunk_nodes[key] as MeshInstance3D
+		if mesh_instance == null:
+			continue
+		var active_info: Dictionary = _active_info_by_key.get(key, {}) as Dictionary
+		if active_info.is_empty():
+			mesh_instance.visible = false
+			continue
+		var dx: int = abs(int(active_info.get("chunk_x", 0)) - center_x)
+		var dz: int = abs(int(active_info.get("chunk_z", 0)) - center_z)
+		mesh_instance.visible = max(dx, dz) <= visible_radius
+
+
+func _active_info_in_visible_runtime_window(active_info: Dictionary) -> bool:
+	if last_report.is_empty():
+		return true
+	var visible_radius: int = _runtime_visible_radius_chunks()
+	var center: Array = last_report.get("viewer_chunk", [0, 0]) as Array
+	var center_x: int = int(center[0])
+	var center_z: int = int(center[1])
+	var dx: int = abs(int(active_info.get("chunk_x", 0)) - center_x)
+	var dz: int = abs(int(active_info.get("chunk_z", 0)) - center_z)
+	return max(dx, dz) <= visible_radius
+
+
+func _runtime_visible_radius_chunks() -> int:
+	if last_report.is_empty():
+		return 2147483647
+	return int(last_report.get("visible_radius_chunks", last_report.get("max_visible_radius_chunks", 2147483647)))
+
+
+func _inactive_chunk_retention_keys(retention_limit: int = -1) -> Dictionary:
+	var retained: Dictionary = {}
+	var inactive: Array[String] = []
+	for key_value in chunk_nodes.keys():
+		var key: String = str(key_value)
+		if not _active_info_by_key.has(key):
+			inactive.append(key)
+	if inactive.is_empty():
+		return retained
+	var max_retained: int = max(0, max_retained_inactive_chunk_nodes if retention_limit < 0 else retention_limit)
+	if max_retained <= 0:
+		return retained
+	var center: Array = last_report.get("viewer_chunk", [0, 0]) as Array
+	var center_x: int = int(center[0])
+	var center_z: int = int(center[1])
+	inactive.sort_custom(func(a: String, b: String) -> bool:
+		var ax: int = _key_x(a)
+		var az: int = _key_z(a)
+		var bx: int = _key_x(b)
+		var bz: int = _key_z(b)
+		var ar: int = max(abs(ax - center_x), abs(az - center_z))
+		var br: int = max(abs(bx - center_x), abs(bz - center_z))
+		if ar != br:
+			return ar < br
+		var ad: int = abs(ax - center_x) + abs(az - center_z)
+		var bd: int = abs(bx - center_x) + abs(bz - center_z)
+		if ad != bd:
+			return ad < bd
+		if az != bz:
+			return az < bz
+		return ax < bx
+	)
+	for index in range(min(max_retained, inactive.size())):
+		retained[inactive[index]] = true
+	return retained
 
 
 func _ensure_chunk_renderer() -> void:
@@ -1615,3 +2988,13 @@ func _refresh_active_info_index() -> void:
 
 func _chunk_key(chunk_x: int, chunk_z: int) -> String:
 	return "%d,%d" % [chunk_x, chunk_z]
+
+
+func _key_x(key: String) -> int:
+	var parts := key.split(",", false)
+	return int(parts[0]) if parts.size() > 0 else 0
+
+
+func _key_z(key: String) -> int:
+	var parts := key.split(",", false)
+	return int(parts[1]) if parts.size() > 1 else 0

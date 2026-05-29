@@ -48,6 +48,7 @@ func apply_chunk(
 	mesh_instance.position = Vector3(float(chunk_x) * chunk_size_m, 0.0, float(chunk_z) * chunk_size_m)
 	mesh_instance.mesh = mesh
 	mesh_instance.material_override = material
+	mesh_instance.custom_aabb = AABB()
 	mesh_instance.set_meta("chunk_x", chunk_x)
 	mesh_instance.set_meta("chunk_z", chunk_z)
 	mesh_instance.set_meta("ring", ring)
@@ -55,12 +56,14 @@ func apply_chunk(
 	return mesh_instance
 
 
-func retire_inactive(active_keys: Dictionary) -> int:
+func retire_inactive(active_keys: Dictionary, keep_keys: Dictionary = {}) -> int:
 	var retired := 0
 	var existing_keys: Array = chunk_nodes.keys()
 	for key_value in existing_keys:
 		var key: String = str(key_value)
 		if active_keys.has(key):
+			continue
+		if keep_keys.has(key):
 			continue
 		var node: MeshInstance3D = chunk_nodes[key] as MeshInstance3D
 		chunk_nodes.erase(key)
@@ -110,6 +113,8 @@ func _release_node(mesh_instance: MeshInstance3D) -> void:
 		mesh_instance.set_meta("chunk_z", 0)
 		mesh_instance.set_meta("ring", -1)
 		mesh_instance.set_meta("lod", -1)
+		mesh_instance.set_meta("gpu_page_chunk", false)
+		mesh_instance.custom_aabb = AABB()
 		_chunk_node_pool.append(mesh_instance)
 	else:
 		mesh_instance.queue_free()

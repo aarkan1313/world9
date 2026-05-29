@@ -27,14 +27,14 @@ func _run() -> int:
 	var packed: PackedScene = load(SCENE_PATH) as PackedScene
 	if packed == null:
 		errors.append("scene_load_failed")
-		_write_manifest(out_dir, {}, [], errors)
+		_write_manifest(out_dir, {}, {}, [], errors)
 		_report(errors, out_dir)
 		return 1
 
 	var scene: Node3D = packed.instantiate() as Node3D
 	if scene == null:
 		errors.append("scene_instantiate_failed")
-		_write_manifest(out_dir, {}, [], errors)
+		_write_manifest(out_dir, {}, {}, [], errors)
 		_report(errors, out_dir)
 		return 1
 
@@ -56,9 +56,11 @@ func _run() -> int:
 			var sample := await _drain_after_motion(scene, "move_%d" % index, direction, 80.0, errors)
 			samples.append(sample)
 		var final_stats: Dictionary = _far_stats(scene)
+		var final_terrain_stats: Dictionary = _terrain_stats(scene)
 		_check_motion_samples(samples, scene, errors)
 		_check_final_stats(final_stats, scene, errors)
-		_write_manifest(out_dir, final_stats, samples, errors)
+		_check_final_terrain_stats(final_terrain_stats, errors)
+		_write_manifest(out_dir, final_stats, final_terrain_stats, samples, errors)
 
 	var far_clipmap: Node = scene.get("far_clipmap") as Node
 	if far_clipmap != null and far_clipmap.has_method("clear_levels"):
@@ -158,6 +160,8 @@ func _scene_settled(scene: Node3D, far_stats: Dictionary) -> bool:
 	var gpu_state: Dictionary = far_stats.get("gpu_page_residency", {}) as Dictionary
 	return (
 		int(scene.call("built_chunk_count")) >= int(scene.call("expected_active_count"))
+		and int(_terrain_stats(scene).get("active_native_workers", 0)) == 0
+		and int(_terrain_stats(scene).get("queued_native_worker_builds", 0)) == 0
 		and int(far_stats.get("pending_rebuild_count", 0)) == 0
 		and int(far_stats.get("active_worker_count", 0)) == 0
 		and int(far_stats.get("staged_native_payload_count", 0)) == 0
@@ -171,6 +175,13 @@ func _far_stats(scene: Node3D) -> Dictionary:
 	if far_clipmap == null or not far_clipmap.has_method("stats"):
 		return {}
 	return far_clipmap.call("stats") as Dictionary
+
+
+func _terrain_stats(scene: Node3D) -> Dictionary:
+	var terrain: Node = scene.get("terrain") as Node
+	if terrain == null or not terrain.has_method("build_stats"):
+		return {}
+	return terrain.call("build_stats") as Dictionary
 
 
 func _descriptor_summary(scene: Node3D) -> Dictionary:
@@ -267,7 +278,19 @@ func _check_final_stats(stats: Dictionary, scene: Node3D, errors: Array[String])
 		errors.append("motion_protected_page_evictions:%s" % str(page_cache))
 
 
-func _write_manifest(out_dir: String, final_stats: Dictionary, samples: Array[Dictionary], errors: Array[String]) -> void:
+func _check_final_terrain_stats(stats: Dictionary, errors: Array[String]) -> void:
+	if stats.is_empty():
+		errors.append("motion_final_terrain_stats_empty")
+		return
+	if bool(stats.get("use_gpu_page_chunks", false)):
+		errors.append("motion_near_gpu_page_chunks_unexpected:%s" % str(stats))
+	if int(stats.get("gpu_page_chunk_count", 0)) != 0:
+		errors.append("motion_near_gpu_page_chunks:%s" % str(stats))
+	if not str(stats.get("last_gpu_page_chunk_error", "")).is_empty():
+		errors.append("motion_near_gpu_page_chunk_error:%s" % str(stats))
+
+
+func _write_manifest(out_dir: String, final_stats: Dictionary, final_terrain_stats: Dictionary, samples: Array[Dictionary], errors: Array[String]) -> void:
 	var manifest := {
 		"version": 1,
 		"schema": "worldgen9.gpu_page_motion_manifest.v1",
@@ -275,6 +298,7 @@ func _write_manifest(out_dir: String, final_stats: Dictionary, samples: Array[Di
 		"sample_count": samples.size(),
 		"samples": samples,
 		"final_far_stats": final_stats,
+		"final_terrain_stats": final_terrain_stats,
 		"errors": errors.duplicate(),
 		"status": "pass" if errors.is_empty() else "fail",
 	}

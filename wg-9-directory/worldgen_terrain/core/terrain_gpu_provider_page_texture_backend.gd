@@ -7,6 +7,9 @@ var _shader_rid: RID
 var _pipeline_rid: RID
 var _compile_count: int = 0
 var _dispatch_count: int = 0
+var _last_create_texture_ms: int = 0
+var _max_create_texture_ms: int = 0
+var _last_block_count: int = 0
 var _last_error: String = ""
 
 
@@ -24,27 +27,32 @@ func clear(rd: RenderingDevice) -> void:
 
 
 func create_height_texture(rd: RenderingDevice, descriptor: Dictionary) -> Dictionary:
+	var started_ms: int = Time.get_ticks_msec()
+	_last_block_count = 1
 	var validation: String = _validate_descriptor(rd, descriptor)
 	if not validation.is_empty():
 		_last_error = validation
+		_record_create_texture_ms(started_ms)
 		return {"status": "fail", "error": validation}
 	var pipeline_result: Dictionary = _ensure_pipeline(rd)
 	if pipeline_result.get("status", "fail") != "pass":
+		_record_create_texture_ms(started_ms)
 		return pipeline_result
 
 	var width: int = int(descriptor.get("count_x", 0))
 	var height: int = int(descriptor.get("count_z", 0))
-	var zero_height := PackedByteArray()
-	zero_height.resize(width * height * 4)
-	var height_rid: RID = _create_height_texture_rid(rd, width, height, zero_height)
+	var height_rid: RID = _create_height_texture_rid(rd, width, height)
 	if not height_rid.is_valid():
 		_last_error = "gpu_provider_texture_resource_create_failed"
+		_record_create_texture_ms(started_ms)
 		return {"status": "fail", "error": _last_error}
 	var dispatch: Dictionary = _dispatch_descriptor_to_height_texture(rd, descriptor, height_rid, 0, 0)
 	if dispatch.get("status", "fail") != "pass":
 		_free_rids(rd, [height_rid])
+		_record_create_texture_ms(started_ms)
 		return dispatch
 
+	_record_create_texture_ms(started_ms)
 	return {
 		"status": "pass",
 		"schema": "worldgen9.gpu_provider_page_texture.v1",
@@ -99,20 +107,25 @@ func create_height_texture_from_prepared_blocks(
 	world_seed: int,
 	region_size_m: float
 ) -> Dictionary:
+	var started_ms: int = Time.get_ticks_msec()
+	_last_block_count = blocks.size()
 	if rd == null:
+		_record_create_texture_ms(started_ms)
 		return {"status": "fail", "error": "rendering_device_unavailable"}
 	if width < 1 or height < 1:
+		_record_create_texture_ms(started_ms)
 		return {"status": "fail", "error": "texture_size:%d,%d" % [width, height]}
 	if blocks.is_empty():
+		_record_create_texture_ms(started_ms)
 		return {"status": "fail", "error": "blocks_empty"}
 	var pipeline_result: Dictionary = _ensure_pipeline(rd)
 	if pipeline_result.get("status", "fail") != "pass":
+		_record_create_texture_ms(started_ms)
 		return pipeline_result
-	var zero_height := PackedByteArray()
-	zero_height.resize(width * height * 4)
-	var height_rid: RID = _create_height_texture_rid(rd, width, height, zero_height)
+	var height_rid: RID = _create_height_texture_rid(rd, width, height)
 	if not height_rid.is_valid():
 		_last_error = "gpu_provider_texture_resource_create_failed"
+		_record_create_texture_ms(started_ms)
 		return {"status": "fail", "error": _last_error}
 	var descriptor_builder = TerrainGpuHeightPageBackendScript.new()
 	var owned_rids: Array = []
@@ -133,6 +146,7 @@ func create_height_texture_from_prepared_blocks(
 		if descriptor.get("status", "fail") != "pass":
 			_free_rids(rd, owned_rids)
 			_free_rids(rd, [height_rid])
+			_record_create_texture_ms(started_ms)
 			return descriptor
 		var dispatch: Dictionary = _dispatch_descriptor_to_height_texture(
 			rd,
@@ -144,11 +158,13 @@ func create_height_texture_from_prepared_blocks(
 		if dispatch.get("status", "fail") != "pass":
 			_free_rids(rd, owned_rids)
 			_free_rids(rd, [height_rid])
+			_record_create_texture_ms(started_ms)
 			return dispatch
 		for rid_value in dispatch.get("rd_owned_rids", []) as Array:
 			owned_rids.append(rid_value)
 		total_entries += int(descriptor.get("entry_count", 0))
 		total_kernel_values += int(descriptor.get("kernel_value_count", 0))
+	_record_create_texture_ms(started_ms)
 	return {
 		"status": "pass",
 		"schema": "worldgen9.gpu_provider_page_texture.v1",
@@ -167,12 +183,93 @@ func create_height_texture_from_prepared_blocks(
 	}
 
 
+func create_height_texture_from_prepared_descriptors(
+	rd: RenderingDevice,
+	descriptor_blocks: Array,
+	width: int,
+	height: int,
+	step_m: float
+) -> Dictionary:
+	var started_ms: int = Time.get_ticks_msec()
+	_last_block_count = descriptor_blocks.size()
+	if rd == null:
+		_record_create_texture_ms(started_ms)
+		return {"status": "fail", "error": "rendering_device_unavailable"}
+	if width < 1 or height < 1:
+		_record_create_texture_ms(started_ms)
+		return {"status": "fail", "error": "texture_size:%d,%d" % [width, height]}
+	if descriptor_blocks.is_empty():
+		_record_create_texture_ms(started_ms)
+		return {"status": "fail", "error": "descriptor_blocks_empty"}
+	var pipeline_result: Dictionary = _ensure_pipeline(rd)
+	if pipeline_result.get("status", "fail") != "pass":
+		_record_create_texture_ms(started_ms)
+		return pipeline_result
+	var height_rid: RID = _create_height_texture_rid(rd, width, height)
+	if not height_rid.is_valid():
+		_last_error = "gpu_provider_texture_resource_create_failed"
+		_record_create_texture_ms(started_ms)
+		return {"status": "fail", "error": _last_error}
+	var owned_rids: Array = []
+	var total_entries := 0
+	var total_kernel_values := 0
+	for block_value in descriptor_blocks:
+		var block: Dictionary = block_value as Dictionary
+		var descriptor: Dictionary = block.get("descriptor", {}) as Dictionary
+		if descriptor.get("status", "fail") != "pass":
+			_free_rids(rd, owned_rids)
+			_free_rids(rd, [height_rid])
+			_record_create_texture_ms(started_ms)
+			return {"status": "fail", "error": str(descriptor.get("error", "descriptor_failed"))}
+		var dispatch: Dictionary = _dispatch_descriptor_to_height_texture(
+			rd,
+			descriptor,
+			height_rid,
+			int(block.get("offset_x", 0)),
+			int(block.get("offset_z", 0))
+		)
+		if dispatch.get("status", "fail") != "pass":
+			_free_rids(rd, owned_rids)
+			_free_rids(rd, [height_rid])
+			_record_create_texture_ms(started_ms)
+			return dispatch
+		for rid_value in dispatch.get("rd_owned_rids", []) as Array:
+			owned_rids.append(rid_value)
+		total_entries += int(descriptor.get("entry_count", 0))
+		total_kernel_values += int(descriptor.get("kernel_value_count", 0))
+	_record_create_texture_ms(started_ms)
+	return {
+		"status": "pass",
+		"schema": "worldgen9.gpu_provider_page_texture.v1",
+		"vertices_per_side": width,
+		"spacing_m": step_m,
+		"height_texture_rid": height_rid,
+		"height_texture_owned_by_residency": true,
+		"height_bytes": width * height * 4,
+		"height_image_only": true,
+		"height_texture_mode": "gpu_provider_rd",
+		"texture_payload_mode": "gpu_provider_rd_height_texture",
+		"rd_owned_rids": owned_rids,
+		"entry_count": total_entries,
+		"kernel_value_count": total_kernel_values,
+		"block_count": descriptor_blocks.size(),
+	}
+
+
 func debug_state() -> Dictionary:
 	return {
 		"compile_count": _compile_count,
 		"dispatch_count": _dispatch_count,
+		"last_create_texture_ms": _last_create_texture_ms,
+		"max_create_texture_ms": _max_create_texture_ms,
+		"last_block_count": _last_block_count,
 		"last_error": _last_error,
 	}
+
+
+func _record_create_texture_ms(started_ms: int) -> void:
+	_last_create_texture_ms = Time.get_ticks_msec() - started_ms
+	_max_create_texture_ms = maxi(_max_create_texture_ms, _last_create_texture_ms)
 
 
 func _validate_descriptor(rd: RenderingDevice, descriptor: Dictionary) -> String:
@@ -312,7 +409,7 @@ func _provider_height_texture_shader() -> String:
 	return source
 
 
-func _create_height_texture_rid(rd: RenderingDevice, width: int, height: int, data: PackedByteArray) -> RID:
+func _create_height_texture_rid(rd: RenderingDevice, width: int, height: int) -> RID:
 	var format := RDTextureFormat.new()
 	format.width = width
 	format.height = height
@@ -326,7 +423,12 @@ func _create_height_texture_rid(rd: RenderingDevice, width: int, height: int, da
 		| RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
 		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	)
-	return rd.texture_create(format, RDTextureView.new(), [data])
+	var texture_rid: RID = rd.texture_create(format, RDTextureView.new(), [])
+	if texture_rid.is_valid():
+		return texture_rid
+	var zero_height := PackedByteArray()
+	zero_height.resize(width * height * 4)
+	return rd.texture_create(format, RDTextureView.new(), [zero_height])
 
 
 func _free_rids(rd: RenderingDevice, rids: Array) -> void:

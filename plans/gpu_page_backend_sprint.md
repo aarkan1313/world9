@@ -1,6 +1,6 @@
 # GPU Page Backend Sprint
 
-Status: started, not complete.
+Status: blocked for live visual acceptance as of 2026-05-28.
 
 The current durable direction is persistent terrain pages:
 
@@ -11,6 +11,32 @@ The current durable direction is persistent terrain pages:
 - previous/current page blending
 - coarse/fine LOD morph in shader
 - bounded GPU page residency
+
+## Active Blocker - 2026-05-28
+
+Live review still shows a large black terrain slab/rectangle near the viewer
+while the overlay can report full active chunk residency, no queued work, and no
+active workers. This invalidates the previous assumption that the full level-0
+underlay plus near residency halo solved the black-square failure.
+
+Do not treat the current `fast` or `gpu` suites as visual acceptance for this
+bug. They prove useful data contracts, residency counts, and some renderer
+paths, but they do not currently prove that every visible near/far terrain
+surface has valid geometry, material, texture bindings, and depth/culling state
+during live fast movement.
+
+Next work must be diagnostic before more feature work:
+
+- identify whether the black slab is near chunk mesh, far clipmap page, page
+  material fallback, invalid texture binding, stale payload, culling/AABB, or
+  render-order/depth state
+- add visible provenance/debug colors for near chunks and every far level
+- add a renderer capture gate that fails on large near-camera black connected
+  components when the terrain should be filled
+- only then fix the source and update acceptance wording
+
+The canonical restart/handoff for this blocker is
+`plans/orchestrator_handoff_current_state.md`.
 
 ## Completed In This Sprint
 
@@ -196,6 +222,99 @@ The current durable direction is persistent terrain pages:
   `max_native_chunk_worker_results_per_update`. The focused hitch profiler
   records per-frame terrain build deltas and worker-result commits so near
   chunk completion bursts are visible separately from far-page GPU work.
+- The streaming preview now treats active-but-unbuilt terrain chunks, queued
+  terrain builds, queued native chunk workers, and active native chunk workers
+  as pending visual work. This keeps GPU page/walk review scenes draining near
+  terrain after motion stops instead of waiting for the next movement tick and
+  then committing an edge burst.
+- Far clipmap async payloads are now render-context scoped. Worker requests,
+  worker payloads, staged payloads, and final commits carry/validate a
+  `render_context_version` plus context key covering full-underlay, inner
+  extent, persistent page mode, profile/provider identity, and GPU texture path
+  state. Context flips clear old in-flight/staged work, and the handoff gate
+  now checks actual level-0 mesh index count so stale hole-filtered topology
+  cannot be accepted while stats report the page loaded.
+- Added an opt-in near-chunk page-render path on `TerrainWorldNode` behind
+  `use_gpu_page_chunks`. It keeps chunk topology as a shared persistent flat
+  mesh per chunk density and displaces in a shader from page height textures,
+  while unsupported modes still fall back to the existing mesh payload path.
+- The first accepted near-page integration uses existing native chunk workers as
+  the async height producer, then commits the completed height as a bounded
+  `Texture2DRD` page with a cheap flat normal payload. This avoids the rejected
+  main-thread near-page provider dispatch path, which was measured at visible
+  multi-hundred-millisecond stalls when used per chunk.
+- `terrain_gpu_page_profile.tscn` keeps direct-RD far clipmap provider-texture
+  pages enabled, but near terrain page chunks are no longer part of the saved
+  visual review profile. Live review showed under-camera rectangular page
+  artifacts, so the accepted visual profile uses the proven native mesh near
+  path until the page renderer passes parity/coverage review.
+- `terrain_gpu_page_profile.tscn` and `terrain_gpu_page_review.tscn` now use
+  three forward-prefetch steps, a one-chunk all-direction residency halo, ten
+  native chunk workers, and eight native worker results per update. The halo is
+  a real `TerrainStreamer` setting, not a scene-only workaround: it keeps the
+  next base-window row resident before the player crosses a chunk boundary,
+  while directional prefetch can still trail at the optional outer fringe.
+- The hitch profiler now reports base-window missing chunks separately from
+  optional prefetch/halo backlog and fails if the required visible base window
+  has any data-level holes. After the residency-halo slice, the
+  renderer-enabled profile passed with `max_terrain_missing_base_chunks=0`,
+  `step_ms max=44`, `p95=11`, `frame_ms max=58`, `p99=40`, and zero ImageTexture
+  uploads on the far page residency path. This is now known to be insufficient:
+  the live scene can still show a large black slab while those counts look
+  healthy.
+- Live streaming profiles now keep far clipmap level 0 as a full underlay
+  behind the authoritative near chunks instead of cutting a player-centered
+  hole. This removed one suspected hole source but did not close the live visual
+  blocker: black rectangular/slab terrain can still appear during review. Treat
+  the underlay as an attempted mitigation, not an accepted fix.
+- `TerrainQualityProfile.GPU_PAGE_REVIEW` and `terrain_gpu_page_review.tscn`
+  now explicitly expect zero near GPU page chunks in saved visual review. The
+  saved GPU page review scene/profile gates prove far clipmap provider-texture
+  direct-RD residency while the near page renderer remains opt-in.
+- The GPU page capture and motion manifests still record near page chunk counts,
+  but require the saved review scene to keep that experimental path disabled
+  until near GPU chunks have visual parity against native chunks.
+- Extracted `TerrainChunkPageRenderer` as the near chunk page-rendering boundary.
+  It owns bounded page texture residency, shared flat chunk meshes, page shader
+  material creation, custom AABB assignment, and flat-normal placeholder bytes;
+  `TerrainWorldNode` now keeps orchestration and height/page descriptors instead
+  of owning all near page render mechanics.
+- Added opt-in near provider descriptor staging. When
+  `use_gpu_provider_page_chunk_descriptor_staging` is enabled, near chunks build
+  prepared provider blocks into a bounded LRU cache over the update loop and
+  direct provider chunk commits consume only staged descriptors. Missing staged
+  descriptors no longer trigger hidden CPU mesh fallback; they either use the
+  existing native-worker height-page route when that route is enabled, or requeue
+  until the descriptor staging budget catches up.
+- Added `terrain_gpu_provider_chunk_descriptor_staging_check.gd` to the GPU
+  suite. It proves a single near chunk, a moving 3x3 near window, and a full
+  7x7 review-window backlog can stage provider descriptors, dispatch
+  renderer-device height textures, enter direct RD chunk residency, avoid
+  ImageTexture uploads, and avoid staged-path CPU fallbacks without enabling the
+  path as a saved-scene default.
+- Added `terrain_gpu_provider_chunk_staged_hitch_check.gd` as an experimental
+  promotion profiler for staged near provider chunks. It is intentionally not in
+  the default GPU suite yet: the current review-density direct provider chunk
+  path is correctness-clean but measures far too slow for live use
+  (`p95/max step_ms` around `650ms` in the first profile, and still roughly
+  `390ms` p95 after per-update commit-budget pacing). This confirms the saved
+  scenes should keep native-worker near height pages until near provider
+  dispatch is moved off the motion frame, made region-aware, or otherwise made
+  much cheaper.
+- Hardened direct provider texture ownership for cache-hit and failure cases.
+  Provider-generated RD height textures and dispatch buffers are now either
+  adopted by `TerrainGpuPageResidency` or explicitly released on rejection.
+  Far clipmap and near chunk page paths now skip renderer-device provider
+  dispatch when the target page is already resident, using a metadata-only
+  descriptor so revisits do not allocate throwaway GPU resources.
+- Re-ran the experimental staged near-provider hitch profile after the ownership
+  and pacing fixes. Leak warnings are gone and the worst burst is smaller, but
+  the profile still rejects promotion on frame pacing (`p95 step_ms` is roughly
+  `390ms` after pacing). The per-frame report now shows the cause: descriptor
+  staging is cheap, while synchronous provider texture creation costs roughly
+  `125-260ms` per near page at review density. Descriptor staging and residency
+  ownership are valid, but live review-density provider texture dispatch is
+  still not acceptable for saved scenes.
 
 ## Important Constraint
 
@@ -232,6 +351,21 @@ far clipmap page
     -> base-region GPU provider descriptor block(s)
     -> renderer-device height texture
     -> bounded far-page residency/material commit
+
+near chunk page
+  -> opt-in TerrainWorldNode.use_gpu_page_chunks
+    -> TerrainChunkPageRenderer render/residency boundary
+    -> native worker height result
+    -> RF height page bytes
+    -> bounded Texture2DRD residency
+    -> shared persistent flat chunk mesh
+    -> shader displacement from height texture
+
+near provider descriptor staging
+  -> opt-in TerrainWorldNode.use_gpu_provider_page_chunk_descriptor_staging
+    -> bounded prepared-block LRU cache
+    -> direct provider texture dispatch only when descriptor is staged
+    -> native worker height-page fallback or requeue when descriptor is missing
 ```
 
 Acceptance for the next slice:
@@ -252,6 +386,14 @@ Acceptance for the next slice:
   the direct-RD path can be considered visually accepted
 - the GPU page motion manifest must stay present in runtime readiness now that
   the direct-RD path is promoted into `walk_review`
+- the GPU page review scene/profile/capture/motion gates must prove direct-RD
+  far pages while keeping near GPU page chunks disabled in saved visual review
+  scenes; opt-in near chunk renderer tests remain the place to prove that path
+- near provider descriptor staging must remain opt-in until a live hitch/profile
+  gate proves it improves or preserves frame pacing in the saved review scene;
+  the focused GPU gate now proves the full 7x7 review-window backlog without
+  hidden CPU fallback, while the experimental live profiler currently rejects
+  review-density staged near provider chunks as too slow
 - fast and quality gates stay green
 - `--suite gpu` proves any GPU path that claims to be enabled
 - renderer-device height texture ownership is explicit; externally supplied page
@@ -267,14 +409,39 @@ Acceptance for the next slice:
 - native near-chunk worker result application must stay budgeted separately
   from worker count; worker parallelism may stay high without applying every
   completed chunk mesh in one movement frame
+- near GPU page chunk commits have an optional per-update millisecond
+  budget, `TerrainWorldNode.max_gpu_page_chunk_build_ms_per_update`, which is
+  forwarded by the streaming preview scene. This is a pacing guard for the
+  experimental path, not acceptance for saved visual review.
+- near chunk page mode must keep the legacy mesh path as fallback for hydrology,
+  non-fast-gray vertex-color debug, skirts, current geometric LOD-density
+  experiments, missing renderer device support, and unsupported providers
+- the measured main-thread GPU-provider near chunk path is not accepted for live
+  streaming until descriptor staging/prefetch or an async renderer-device commit
+  path removes per-chunk stalls
 
 ## Not Done Yet
 
 - GPU-resident material masks.
 - Full live walk scene height generation on GPU compute for near chunks/local
-  detail.
+  detail. Near chunks have an experimental page renderer, but the accepted live
+  review path currently stays on native mesh chunks because near page chunks
+  showed under-camera rectangle artifacts in live review.
 - Pass/corridor facts, hydrology facts, erosion facts, and any final provider
   branches beyond the macro-height/page-profile/kernel/provider-page proof.
+- Async/staged near provider-page compute promotion in saved scenes. The focused
+  GPU gate proves full-window descriptor backlog behavior, but the saved walk
+  and GPU review scenes should keep native-worker near height pages until the
+  hitch profiler proves staged provider chunks preserve live frame pacing. The
+  first live staged-provider profile measured roughly `650ms` p95/max step time
+  at 129x129 review density. After commit-budget pacing and finer telemetry,
+  the same rejected profiler now shows descriptor staging is cheap
+  (`~5-8ms/frame`) while renderer-device provider height texture creation is the
+  blocker (`~125-260ms` per near page, worse when a chunk crosses region
+  boundaries and splits into multiple provider blocks). The next real fix is
+  async/prefetched renderer texture commits, a cheaper persistent provider
+  dispatch path, or a region-aware page layout, not enabling synchronous
+  provider chunks by default.
 - Re-promoting corridor tour as an acceptance gate.
 
 Those remain roadmap work, not accepted finished systems.

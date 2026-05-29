@@ -77,6 +77,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 	var max_gpu_page_mib := 0.0
 	var max_gpu_uploads := 0
 	var max_gpu_evictions := 0
+	var stalled_far_pending_frames := 0
 	var page_material_reuse_frames := 0
 	var page_descriptor_texture_hit_frames := 0
 	var total_page_descriptor_texture_hits := 0
@@ -120,6 +121,8 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			prefetch_not_full_frames += 1
 		if far_delta > 0 or anchor_moved:
 			recenter_frames += 1
+		if far_pending > 0 and int(far_stats.get("active_worker_count", 0)) == 0 and far_delta == 0:
+			stalled_far_pending_frames += 1
 		if created > 0 or retired > 0:
 			chunk_churn_frames += 1
 		max_queue = max(max_queue, queued + native_queued)
@@ -181,6 +184,8 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 		warnings.append("prefetch_not_full_frames:%d warning_limit:%d" % [prefetch_not_full_frames, WARN_NOT_FULL_FRAMES])
 	if recenter_frames <= 0:
 		errors.append("no_recenter_frames_observed")
+	if stalled_far_pending_frames > 0:
+		errors.append("stalled_far_pending_without_workers:%d" % stalled_far_pending_frames)
 	if max_page_blends <= 0:
 		errors.append("no_page_blend_activity_observed")
 	if total_page_descriptor_preencoded_hits <= 0:
@@ -224,6 +229,7 @@ func _profile_forward_motion(scene: Node3D, errors: Array[String]) -> Dictionary
 			"max_gpu_page_mib": max_gpu_page_mib,
 			"max_gpu_uploads": max_gpu_uploads,
 			"max_gpu_evictions": max_gpu_evictions,
+			"stalled_far_pending_frames": stalled_far_pending_frames,
 			"page_material_reuse_frames": page_material_reuse_frames,
 			"page_descriptor_texture_hit_frames": page_descriptor_texture_hit_frames,
 			"total_page_descriptor_texture_hits": total_page_descriptor_texture_hits,

@@ -12,7 +12,9 @@ const MAX_HARD_STEP_MS := 220
 const MAX_GPU_PROVIDER_PAGE_MS := 180
 const MAX_GPU_TEXTURE_RESIDENCY_MS := 180
 const MAX_METADATA_COMMITS_PER_FRAME := 1
-const MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME := 1
+const MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME := 4
+const MAX_STAGED_PAYLOAD_COMMIT_MS := 45
+const MAX_TRANSIENT_MISSING_BASE_CHUNKS := 6
 
 
 func _init() -> void:
@@ -54,7 +56,7 @@ func _run() -> int:
 	if not bool(scene.call("setup")):
 		errors.append("setup_failed:%s" % str(scene.get("errors")))
 	else:
-		_drain_initial_work(scene, errors)
+		await _drain_initial_work(scene, errors)
 		profile_report = await _profile_motion(scene, errors)
 		_write_report(out_dir, profile_report, errors)
 
@@ -97,14 +99,18 @@ func _drain_initial_work(scene: Node3D, errors: Array[String]) -> void:
 		var queued: int = int(report.get("queued_build_count", 0))
 		var native_queued: int = int(terrain_stats.get("queued_native_worker_builds", 0))
 		var native_workers: int = int(terrain_stats.get("active_native_workers", 0))
+		var descriptor_workers: int = int(terrain_stats.get("active_gpu_provider_chunk_descriptor_workers", 0))
+		var missing_active: int = int(terrain_stats.get("active_missing_chunk_count", 0))
 		var active: int = int(report.get("active_count", 0))
 		if (
-			queued == 0
+			active > 0
+			and queued == 0
 			and native_queued == 0
 			and native_workers == 0
+			and descriptor_workers == 0
+			and missing_active == 0
 			and int(far_stats.get("pending_rebuild_count", 0)) == 0
 			and int(far_stats.get("active_worker_count", 0)) == 0
-			and int(scene.call("built_chunk_count")) >= active
 		):
 			return
 		await process_frame
@@ -116,6 +122,7 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 	scene.set("look_pitch_rad", deg_to_rad(-8.0))
 	if scene.has_method("_update_camera"):
 		scene.call("_update_camera")
+	await _drain_initial_work(scene, errors)
 	var frames: Array[Dictionary] = []
 	var step_ms_values: Array[int] = []
 	var frame_ms_values: Array[int] = []
@@ -131,6 +138,9 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 	var max_terrain_queued_native_worker_builds := 0
 	var max_terrain_build_delta := 0
 	var max_terrain_native_worker_results_applied := 0
+	var max_terrain_missing_active_chunks := 0
+	var max_terrain_missing_base_chunks := 0
+	var max_stream_queue := 0
 	var total_metadata_commits := 0
 	var total_provider_dispatches := 0
 	var total_terrain_build_delta := 0
@@ -172,6 +182,11 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 		var terrain_active_native_workers: int = int(terrain_stats.get("active_native_workers", 0))
 		var terrain_queued_native_worker_builds: int = int(terrain_stats.get("queued_native_worker_builds", 0))
 		var terrain_native_worker_results_applied: int = int(terrain_stats.get("last_native_worker_results_applied", 0))
+		var terrain_built_chunks: int = int(scene.call("built_chunk_count"))
+		var stream_active_chunks: int = int(stream_report.get("active_count", 0))
+		var stream_queued_chunks: int = int(stream_report.get("queued_build_count", 0))
+		var terrain_missing_active_chunks: int = int(terrain_stats.get("active_missing_chunk_count", 0))
+		var terrain_missing_base_chunks: int = _missing_base_chunk_count(scene, stream_report)
 		step_ms_values.append(step_ms)
 		frame_ms_values.append(frame_ms)
 		max_provider_page_ms = max(max_provider_page_ms, provider_ms)
@@ -185,6 +200,9 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 		max_terrain_queued_native_worker_builds = max(max_terrain_queued_native_worker_builds, terrain_queued_native_worker_builds)
 		max_terrain_build_delta = max(max_terrain_build_delta, terrain_build_delta)
 		max_terrain_native_worker_results_applied = max(max_terrain_native_worker_results_applied, terrain_native_worker_results_applied)
+		max_terrain_missing_active_chunks = max(max_terrain_missing_active_chunks, terrain_missing_active_chunks)
+		max_terrain_missing_base_chunks = max(max_terrain_missing_base_chunks, terrain_missing_base_chunks)
+		max_stream_queue = max(max_stream_queue, stream_queued_chunks)
 		total_metadata_commits += metadata_commits
 		total_staged_payload_commits += staged_payload_commits
 		total_provider_dispatches += int(far_stats.get("last_gpu_provider_page_dispatches", 0))
@@ -199,6 +217,10 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 			"frame_ms": frame_ms,
 			"stream_created": int(stream_report.get("created_count", 0)),
 			"stream_retired": int(stream_report.get("retired_count", 0)),
+			"stream_active_chunks": stream_active_chunks,
+			"stream_expected_active_chunks": int(stream_report.get("expected_active_count", stream_active_chunks)),
+			"stream_queued_chunks": stream_queued_chunks,
+			"prefetch_forward_chunks": int(stream_report.get("prefetch_forward_chunks", 0)),
 			"far_pending": int(far_stats.get("pending_rebuild_count", 0)),
 			"far_rebuild_delta": build_delta,
 			"anchor_moved": anchor_moved,
@@ -217,11 +239,17 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 			"rd_normal_uploads": int(gpu_state.get("rd_compute_normal_uploads", 0)),
 			"page_count": int(gpu_state.get("count", 0)),
 			"terrain_build_delta": terrain_build_delta,
+			"terrain_built_chunks": terrain_built_chunks,
+			"terrain_missing_active_chunks": terrain_missing_active_chunks,
+			"terrain_missing_base_chunks": terrain_missing_base_chunks,
 			"terrain_last_chunk_build_ms": terrain_last_chunk_build_ms,
 			"terrain_last_native_worker_elapsed_ms": terrain_native_worker_elapsed_ms,
 			"terrain_active_native_workers": terrain_active_native_workers,
 			"terrain_queued_native_worker_builds": terrain_queued_native_worker_builds,
 			"terrain_native_worker_results_applied": terrain_native_worker_results_applied,
+			"terrain_native_worker_result_budget": int(terrain_stats.get("max_native_chunk_worker_results_per_update", 0)),
+			"terrain_active_gpu_provider_chunk_descriptor_workers": int(terrain_stats.get("active_gpu_provider_chunk_descriptor_workers", 0)),
+			"terrain_gpu_provider_chunk_descriptor_cache_count": int(terrain_stats.get("gpu_provider_chunk_descriptor_cache_count", 0)),
 			"terrain_recent_build_count": int(terrain_stats.get("recent_build_count", 0)),
 			"terrain_max_recent_chunk_build_ms": int(terrain_stats.get("max_recent_chunk_build_ms", 0)),
 		})
@@ -229,7 +257,9 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 		previous_anchor = anchor
 		previous_terrain_builds = terrain_total_builds
 
+	var idle_drain_report: Dictionary = await _drain_idle_pending_visual_work(scene, 90)
 	var final_far_stats: Dictionary = _far_stats(scene)
+	var final_terrain_stats: Dictionary = _terrain_stats(scene)
 	var final_gpu_state: Dictionary = final_far_stats.get("gpu_page_residency", {}) as Dictionary
 	var summary := {
 		"step_ms": _timing_summary(step_ms_values),
@@ -244,6 +274,9 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 		"max_staged_payload_commit_ms": max_staged_payload_commit_ms,
 		"total_terrain_build_delta": total_terrain_build_delta,
 		"max_terrain_build_delta": max_terrain_build_delta,
+		"max_terrain_missing_active_chunks": max_terrain_missing_active_chunks,
+		"max_terrain_missing_base_chunks": max_terrain_missing_base_chunks,
+		"max_stream_queue": max_stream_queue,
 		"max_terrain_last_chunk_build_ms": max_terrain_last_chunk_build_ms,
 		"max_terrain_native_worker_elapsed_ms": max_terrain_native_worker_elapsed_ms,
 		"max_terrain_active_native_workers": max_terrain_active_native_workers,
@@ -251,12 +284,14 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 		"max_terrain_native_worker_results_applied": max_terrain_native_worker_results_applied,
 		"max_gpu_provider_page_ms": max_provider_page_ms,
 		"max_gpu_texture_residency_ms": max_texture_residency_ms,
+		"idle_drain": idle_drain_report,
 		"final_gpu_page_residency": final_gpu_state,
 		"final_far_stats": final_far_stats,
+		"final_terrain_stats": final_terrain_stats,
 	}
 	_validate_profile(summary, errors)
 	return {
-		"schema": "worldgen9.gpu_page_hitch_profile.v1",
+		"schema": "worldgen9.gpu_page_hitch_profile.v2",
 		"scene": SCENE_PATH,
 		"profile": {
 			"frame_count": FRAME_COUNT,
@@ -270,6 +305,8 @@ func _profile_motion(scene: Node3D, errors: Array[String]) -> Dictionary:
 			"max_gpu_texture_residency_ms": MAX_GPU_TEXTURE_RESIDENCY_MS,
 			"max_metadata_commits_per_frame": MAX_METADATA_COMMITS_PER_FRAME,
 			"max_staged_payload_commits_per_frame": MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME,
+			"max_staged_payload_commit_ms": MAX_STAGED_PAYLOAD_COMMIT_MS,
+			"max_transient_missing_base_chunks": MAX_TRANSIENT_MISSING_BASE_CHUNKS,
 		},
 		"summary": summary,
 		"frames": frames,
@@ -292,6 +329,8 @@ func _direction_for_frame(frame_index: int) -> Vector2:
 func _validate_profile(summary: Dictionary, errors: Array[String]) -> void:
 	var step_summary: Dictionary = summary.get("step_ms", {}) as Dictionary
 	var final_gpu_state: Dictionary = summary.get("final_gpu_page_residency", {}) as Dictionary
+	var final_terrain_stats: Dictionary = summary.get("final_terrain_stats", {}) as Dictionary
+	var idle_drain: Dictionary = summary.get("idle_drain", {}) as Dictionary
 	if int(step_summary.get("max", 0)) > MAX_HARD_STEP_MS:
 		errors.append("gpu_page_step_ms:%d limit:%d" % [int(step_summary.get("max", 0)), MAX_HARD_STEP_MS])
 	if int(summary.get("max_gpu_provider_page_ms", 0)) > MAX_GPU_PROVIDER_PAGE_MS:
@@ -302,12 +341,31 @@ func _validate_profile(summary: Dictionary, errors: Array[String]) -> void:
 		errors.append("metadata_commits_per_frame:%d limit:%d" % [int(summary.get("max_metadata_commits_per_frame", 0)), MAX_METADATA_COMMITS_PER_FRAME])
 	if int(summary.get("max_staged_payload_commits_per_frame", 0)) > MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME:
 		errors.append("staged_payload_commits_per_frame:%d limit:%d" % [int(summary.get("max_staged_payload_commits_per_frame", 0)), MAX_STAGED_PAYLOAD_COMMITS_PER_FRAME])
+	if int(summary.get("max_staged_payload_commit_ms", 0)) > MAX_STAGED_PAYLOAD_COMMIT_MS:
+		errors.append("staged_payload_commit_ms:%d limit:%d" % [int(summary.get("max_staged_payload_commit_ms", 0)), MAX_STAGED_PAYLOAD_COMMIT_MS])
+	if int(summary.get("max_terrain_missing_base_chunks", 0)) > MAX_TRANSIENT_MISSING_BASE_CHUNKS:
+		errors.append(
+			"missing_base_chunks:%d limit:%d"
+			% [int(summary.get("max_terrain_missing_base_chunks", 0)), MAX_TRANSIENT_MISSING_BASE_CHUNKS]
+		)
 	if int(summary.get("recenter_frames", 0)) <= 0:
 		errors.append("no_recenter_frames")
+	if bool(idle_drain.get("pending_after_drain", false)):
+		errors.append("idle_pending_not_drained:%s" % str(idle_drain))
 	if int(final_gpu_state.get("image_uploads", 0)) != 0:
 		errors.append("unexpected_image_uploads:%s" % str(final_gpu_state))
 	if int(final_gpu_state.get("evictions", 0)) != 0:
 		errors.append("unexpected_gpu_page_evictions:%s" % str(final_gpu_state))
+	if not bool(final_terrain_stats.get("use_gpu_page_chunks", false)):
+		errors.append("near_gpu_page_chunks_disabled:%s" % str(final_terrain_stats))
+	if int(final_terrain_stats.get("gpu_page_chunk_count", 0)) <= 0:
+		errors.append("near_gpu_page_chunks_not_committed:%s" % str(final_terrain_stats))
+	if int(final_terrain_stats.get("cpu_chunk_payload_count", 0)) != 0:
+		errors.append("near_sync_cpu_chunks_committed:%s" % str(final_terrain_stats))
+	if int(final_terrain_stats.get("gpu_page_chunk_fallback_count", 0)) != 0:
+		errors.append("near_gpu_page_chunk_fallbacks:%s" % str(final_terrain_stats))
+	if not str(final_terrain_stats.get("last_gpu_page_chunk_error", "")).is_empty():
+		errors.append("near_gpu_page_chunk_error:%s" % str(final_terrain_stats.get("last_gpu_page_chunk_error", "")))
 
 
 func _far_stats(scene: Node3D) -> Dictionary:
@@ -326,6 +384,55 @@ func _terrain_stats(scene: Node3D) -> Dictionary:
 
 func _terrain_total_builds(scene: Node3D) -> int:
 	return int(_terrain_stats(scene).get("total_chunk_builds", 0))
+
+
+func _missing_base_chunk_count(scene: Node3D, stream_report: Dictionary) -> int:
+	var terrain_node: Node = scene.get("terrain") as Node
+	if terrain_node == null:
+		return 0
+	var chunk_nodes: Dictionary = terrain_node.get("chunk_nodes") as Dictionary
+	var center: Array = stream_report.get("viewer_chunk", [0, 0]) as Array
+	var center_x: int = int(center[0])
+	var center_z: int = int(center[1])
+	var visible_radius: int = int(scene.get("visible_radius_chunks"))
+	var missing := 0
+	for item_value in stream_report.get("active_chunks", []) as Array:
+		var item: Dictionary = item_value as Dictionary
+		var chunk_x: int = int(item.get("chunk_x", 0))
+		var chunk_z: int = int(item.get("chunk_z", 0))
+		if max(abs(chunk_x - center_x), abs(chunk_z - center_z)) > visible_radius:
+			continue
+		var key := "%d,%d" % [chunk_x, chunk_z]
+		if not chunk_nodes.has(key):
+			missing += 1
+	return missing
+
+
+func _drain_idle_pending_visual_work(scene: Node3D, max_frames: int) -> Dictionary:
+	var frames := 0
+	var last_report: Dictionary = scene.get("last_stream_report") as Dictionary
+	while frames < max_frames:
+		if not bool(scene.call("_has_pending_visual_work")):
+			break
+		last_report = scene.call("step_viewer", 0.0, Vector2.ZERO, 0.0, 0.0) as Dictionary
+		frames += 1
+		await process_frame
+	var active_count: int = int(last_report.get("active_count", 0))
+	var built_count: int = int(scene.call("built_chunk_count"))
+	var terrain_stats: Dictionary = _terrain_stats(scene)
+	var far_stats: Dictionary = _far_stats(scene)
+	return {
+		"frames": frames,
+		"pending_after_drain": bool(scene.call("_has_pending_visual_work")),
+		"active_chunks": active_count,
+		"built_chunks": built_count,
+		"missing_active_chunks": max(0, active_count - built_count),
+		"queued_chunks": int(last_report.get("queued_build_count", 0)),
+		"queued_native_worker_builds": int(terrain_stats.get("queued_native_worker_builds", 0)),
+		"active_native_workers": int(terrain_stats.get("active_native_workers", 0)),
+		"far_pending": int(far_stats.get("pending_rebuild_count", 0)),
+		"far_workers": int(far_stats.get("active_worker_count", 0)),
+	}
 
 
 func _far_build_counts(scene: Node3D) -> Array:

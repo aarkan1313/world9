@@ -59,6 +59,7 @@ func _apply_walk_review_runtime_minimums() -> void:
 		warmup_build_steps = max(warmup_build_steps, 4)
 		preload_active_chunks_before_start = true
 		max_native_chunk_workers = max(max_native_chunk_workers, 6)
+		max_native_chunk_worker_results_per_update = max(max_native_chunk_worker_results_per_update, 2)
 		review_sync_hole_fill_radius_chunks = max(review_sync_hole_fill_radius_chunks, 1)
 		review_sync_hole_fill_max_chunks_per_frame = max(review_sync_hole_fill_max_chunks_per_frame, 2)
 	else:
@@ -66,6 +67,7 @@ func _apply_walk_review_runtime_minimums() -> void:
 		warmup_build_steps = min(warmup_build_steps, 1)
 		preload_active_chunks_before_start = false
 		max_native_chunk_workers = max(max_native_chunk_workers, 4)
+		max_native_chunk_worker_results_per_update = max(max_native_chunk_worker_results_per_update, 1)
 		review_sync_hole_fill_radius_chunks = max(review_sync_hole_fill_radius_chunks, 1)
 		review_sync_hole_fill_max_chunks_per_frame = max(review_sync_hole_fill_max_chunks_per_frame, 1)
 
@@ -174,13 +176,15 @@ func step_viewer(delta: float, movement: Vector2, yaw_delta: float = 0.0, vertic
 	if free_fly_enabled:
 		_ensure_camera_height_initialized()
 		camera_world_y += vertical_input * move_speed_mps * delta
+	var forward := Vector2(sin(camera_yaw_rad), cos(camera_yaw_rad)).normalized()
 	if movement.length_squared() > 0.000001:
 		var normalized := movement.normalized()
-		var forward := _camera_forward_xz()
-		var right := _camera_right_xz()
+		var right := Vector2(-forward.y, forward.x)
 		var world_direction: Vector2 = (right * normalized.x + forward * normalized.y).normalized()
-		_stream_priority_direction = world_direction
+		_stream_priority_direction = forward
 		viewer_position_xz += world_direction * move_speed_mps * delta
+	elif _stream_priority_direction.length_squared() <= 0.000001:
+		_stream_priority_direction = forward
 	var report := _update_streamer()
 	_update_camera()
 	return report
@@ -194,26 +198,33 @@ func diagnostics_text() -> String:
 	var stats: Dictionary = terrain.build_stats() if terrain != null else {}
 	var clipmap_stats: Dictionary = far_clipmap.stats() if far_clipmap != null else {}
 	var detail_stats: Dictionary = local_detail.build_stats() if local_detail != null else {}
+	var base_missing_count: int = 0
+	if terrain != null and terrain.has_method("active_missing_chunk_count"):
+		base_missing_count = int(terrain.call("active_missing_chunk_count", visible_radius_chunks))
 	var spacing_m: float = chunk_size_m / float(max(1, vertices_per_side - 1))
 	var ground_y: float = terrain.world.sample_height(viewer_position_xz.x, viewer_position_xz.y) if terrain != null and terrain.world != null else 0.0
 	var camera_y: float = camera.global_position.y if camera != null and camera.is_inside_tree() else camera_world_y
 	var clearance_m: float = camera_y - ground_y if camera != null else 0.0
 	var region_summary: Dictionary = _current_region_summary()
-	return "fps %.0f | fly %s | speed %.0fm/s x%.1f | chunks %d/%d | queue %d+%d | workers %d | fill %d preload %d | build %.0fms avg %.0fms native %.0fms | far %dL %.0fms t%.0fms %s p%d w%d | detail %d b%.0f/a%.0f/t%.0fms mat %s disp %s %.2f/%.1fm | vtx %d step %.1fm | site %d/%d region %s %s kernels %s/%s | pos %.0f,%.0f | alt %.0fm | chunk %d,%d | mode %s" % [
+	return "fps %.0f | fly %s | speed %.0fm/s x%.1f | chunks %d/%d vis %d standby %d base miss %d | queue %d+%d | workers n%d g%d | fill %d preload %d | build %.0fms avg %.0fms page %.0fms | far %dL %.0fms t%.0fms %s p%d w%d | detail %d b%.0f/a%.0f/t%.0fms mat %s disp %s %.2f/%.1fm | vtx %d step %.1fm | site %d/%d region %s %s kernels %s/%s | pos %.0f,%.0f | alt %.0fm | chunk %d,%d | mode %s" % [
 		fps,
 		"on" if free_fly_enabled else "ground",
 		_effective_move_speed_mps(),
 		_current_speed_scale(),
 		built_chunk_count(),
 		active_count,
+		int(stats.get("visible_chunk_count", built_chunk_count())),
+		int(stats.get("standby_chunk_count", 0)),
+		base_missing_count,
 		queued_count,
 		int(stats.get("queued_native_worker_builds", 0)),
 		int(stats.get("active_native_workers", 0)),
+		int(stats.get("active_gpu_provider_chunk_descriptor_workers", 0)),
 		last_review_sync_fill_count,
 		last_preload_chunk_count,
 		float(stats.get("last_chunk_build_ms", 0.0)),
 		float(stats.get("avg_recent_chunk_build_ms", 0.0)),
-		float(stats.get("last_native_chunk_payload_ms", stats.get("last_native_mesh_payload_ms", 0.0))),
+		float(stats.get("last_gpu_page_chunk_ms", 0.0)),
 		int(clipmap_stats.get("levels", 0)),
 		float(clipmap_stats.get("last_build_ms", 0.0)),
 		float(clipmap_stats.get("last_surface_texture_ms", 0.0)),
@@ -259,8 +270,8 @@ func _update_camera() -> void:
 		sin(look_pitch_rad),
 		cos(camera_yaw_rad) * cos(look_pitch_rad)
 	).normalized()
-	var position := Vector3(viewer_position_xz.x, camera_y, viewer_position_xz.y)
-	camera.look_at_from_position(position, position + forward * 20.0, Vector3.UP)
+	var camera_position := Vector3(viewer_position_xz.x, camera_y, viewer_position_xz.y)
+	camera.look_at_from_position(camera_position, camera_position + forward * 20.0, Vector3.UP)
 
 
 func _current_region_summary() -> Dictionary:

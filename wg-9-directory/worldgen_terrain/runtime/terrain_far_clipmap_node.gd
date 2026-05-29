@@ -110,6 +110,9 @@ var _page_cache: RefCounted
 var _page_texture_backend: RefCounted
 var _gpu_page_normal_backend: RefCounted
 var _gpu_provider_page_texture_backend: RefCounted
+var _render_context_key: String = ""
+var _render_context_version: int = 0
+var _stale_payload_drop_count: int = 0
 
 
 func _exit_tree() -> void:
@@ -206,6 +209,9 @@ func clear_levels(wait_for_running: bool = false) -> void:
 	_staged_native_payloads.clear()
 	_staged_native_origin = Vector2(INF, INF)
 	_staged_native_commit_ready = false
+	_render_context_key = ""
+	_render_context_version = 0
+	_stale_payload_drop_count = 0
 	if _page_cache != null:
 		_page_cache.clear()
 	if _page_texture_backend != null:
@@ -217,6 +223,47 @@ func clear_levels(wait_for_running: bool = false) -> void:
 func clear_async_state_for_review(wait_for_running: bool = false) -> void:
 	_clear_native_workers(wait_for_running)
 	pending_rebuild_count = _count_pending_rebuilds()
+
+
+func _sync_render_context() -> void:
+	var next_key: String = _render_context_signature()
+	if _render_context_key == next_key:
+		return
+	if _render_context_key.is_empty():
+		_render_context_key = next_key
+		_render_context_version = max(1, _render_context_version + 1)
+		return
+	_render_context_key = next_key
+	_render_context_version += 1
+	_clear_native_workers(false)
+	_clear_previous_page_blend_keys()
+	for level in range(level_transition_nodes.size()):
+		_remove_transition_node(level)
+	for level in range(level_origins.size()):
+		level_origins[level] = Vector2(INF, INF)
+
+
+func _render_context_signature() -> String:
+	return "%d:%d:%.9f:%.9f:%.9f:%d:%d:%d:%d:%d:%d:%d:%d:%d:%s:%d:%.9f:%d" % [
+		level_count,
+		vertices_per_side,
+		base_spacing_m,
+		base_outer_extent_m,
+		near_hole_extent_m,
+		1 if level0_full_underlay_enabled else 0,
+		1 if use_persistent_page_mesh else 0,
+		1 if use_gpu_page_normal_backend else 0,
+		1 if use_gpu_rd_page_textures else 0,
+		1 if use_gpu_rd_compute_normals else 0,
+		1 if use_gpu_provider_page_textures else 0,
+		gpu_provider_max_sync_blocks,
+		1 if use_surface_texture_material else 0,
+		1 if use_elevation_color_material else 0,
+		_active_landform_profile_id(),
+		int(world.seed) if world != null else 0,
+		float(world.region_size_m) if world != null else 0.0,
+		1 if _can_use_height_only_gpu_page_payload() else 0,
+	]
 
 
 func configure_geometry(p_level_count: int, p_base_spacing_m: float, p_base_outer_extent_m: float) -> bool:
@@ -306,6 +353,7 @@ func set_edge_fog_center_xz(center_xz: Vector2) -> void:
 func update_viewer(viewer_xz: Vector2) -> Dictionary:
 	if world == null:
 		return {"status": "fail", "error": "world_not_setup"}
+	_sync_render_context()
 	TerrainFarClipmapPayloadWorkerScript.cleanup_detached_workers()
 	var start_ms: int = Time.get_ticks_msec()
 	total_vertex_count = 0
@@ -346,13 +394,20 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		rebuild_budget = 0
 	elif _provider_profile_disables_native_grid():
 		rebuild_budget = min(rebuild_budget, max(1, max_profile_fallback_rebuild_levels_per_update))
+	var cached_page_set_ready: bool = (
+		use_persistent_page_mesh
+		and rebuild_budget > 0
+		and _all_page_cache_levels_available(_pending_origin)
+	)
+	if cached_page_set_ready:
+		rebuild_budget = max(rebuild_budget, level_nodes.size())
 	var rebuilt_count := 0
 	for level in range(level_nodes.size()):
 		if _pending_origin != level_origins[level] and rebuilt_count < rebuild_budget:
 			if _staged_payload_matches_pending(level):
 				last_deferred_levels.append(level)
 				continue
-			if use_persistent_page_mesh and _page_cache_has_level(level, _pending_origin):
+			if cached_page_set_ready and _page_cache_has_level(level, _pending_origin):
 				_rebuild_level(level, _pending_origin)
 				last_rebuilt_levels.append(level)
 				rebuilt_count += 1
@@ -427,6 +482,8 @@ func update_viewer(viewer_xz: Vector2) -> Dictionary:
 		"last_staged_payload_commit_ms": last_staged_payload_commit_ms,
 		"max_staged_payload_commit_ms": max_staged_payload_commit_ms,
 		"staged_native_commit_ready": _staged_native_commit_ready,
+		"render_context_version": _render_context_version,
+		"stale_payload_drop_count": _stale_payload_drop_count,
 	}
 
 
@@ -481,7 +538,24 @@ func stats() -> Dictionary:
 		"last_staged_payload_commit_ms": last_staged_payload_commit_ms,
 		"max_staged_payload_commit_ms": max_staged_payload_commit_ms,
 		"staged_native_commit_ready": _staged_native_commit_ready,
+		"render_context_version": _render_context_version,
+		"stale_payload_drop_count": _stale_payload_drop_count,
 	}
+
+
+func surface_provenance() -> Array[Dictionary]:
+	var surfaces: Array[Dictionary] = []
+	for level in range(level_nodes.size()):
+		var mesh_instance: MeshInstance3D = level_nodes[level] as MeshInstance3D
+		if mesh_instance == null:
+			continue
+		surfaces.append(_surface_provenance_for_level(level, mesh_instance, false))
+		var transition: MeshInstance3D = null
+		if level < level_transition_nodes.size():
+			transition = level_transition_nodes[level] as MeshInstance3D
+		if transition != null:
+			surfaces.append(_surface_provenance_for_level(level, transition, true))
+	return surfaces
 
 
 func has_pending_rebuilds() -> bool:
@@ -649,12 +723,8 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		if gpu_normal_status.get("status", "fail") != "pass":
 			normals = _normals_from_height(height, side, spacing)
 			heightfield["normals"] = normals
-	level_heightfields[level] = heightfield
-	level_surface_descriptors[level] = {}
 	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
-	level_material_descriptors[level] = descriptor
 	var mesh_instance: MeshInstance3D = level_nodes[level]
-	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
 	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
 	var previous_height_texture: Texture2D = null
 	var previous_normal_texture: Texture2D = null
@@ -667,7 +737,7 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
 	_track_previous_page_key_for_blend(level, previous_cache_key, previous_height_texture != null)
-	mesh_instance.material_override = _page_height_material_for_descriptor(
+	var page_material: ShaderMaterial = _page_height_material_for_descriptor(
 		descriptor,
 		level,
 		previous_height_texture,
@@ -677,6 +747,14 @@ func _rebuild_level_page(level: int, origin: Vector2, use_transition: bool = tru
 		previous_page_extent,
 		previous_material
 	)
+	if not _page_height_material_has_valid_textures(page_material):
+		last_page_error = "level_%d:page_material_invalid:%s" % [level, last_page_error]
+		return
+	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
+	level_heightfields[level] = heightfield
+	level_surface_descriptors[level] = {}
+	level_material_descriptors[level] = descriptor
+	mesh_instance.material_override = _visible_material_for_level(level, page_material)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
 	level_origins[level] = origin
@@ -697,28 +775,33 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 	var previous_descriptor: Dictionary = level_material_descriptors[level] as Dictionary
 	var previous_cache_key: String = str(previous_descriptor.get("cache_key", ""))
 	var heightfield: Dictionary = _heightfield_metadata_for_level(level, origin, outer_extent, spacing, side)
-	var attach_start_ms: int = Time.get_ticks_msec()
-	var gpu_provider_status: Dictionary = _attach_gpu_provider_page_texture(heightfield, level, origin, outer_extent, spacing, side)
-	last_gpu_provider_texture_ms = Time.get_ticks_msec() - attach_start_ms
-	max_gpu_provider_texture_ms = max(max_gpu_provider_texture_ms, last_gpu_provider_texture_ms)
-	if gpu_provider_status.get("status", "fail") != "pass":
-		last_gpu_provider_page_ms = Time.get_ticks_msec() - page_start_ms
-		max_gpu_provider_page_ms = max(max_gpu_provider_page_ms, last_gpu_provider_page_ms)
-		return gpu_provider_status
-	level_heightfields[level] = heightfield
-	level_surface_descriptors[level] = {}
+	var cache_key: String = str(heightfield.get("cache_key", ""))
+	var resident_page_available: bool = (
+		use_persistent_page_mesh
+		and _page_texture_backend != null
+		and not cache_key.is_empty()
+		and _page_texture_backend.has_page(cache_key)
+	)
+	if resident_page_available:
+		last_gpu_provider_texture_ms = 0
+	else:
+		var attach_start_ms: int = Time.get_ticks_msec()
+		var gpu_provider_status: Dictionary = _attach_gpu_provider_page_texture(heightfield, level, origin, outer_extent, spacing, side)
+		last_gpu_provider_texture_ms = Time.get_ticks_msec() - attach_start_ms
+		max_gpu_provider_texture_ms = max(max_gpu_provider_texture_ms, last_gpu_provider_texture_ms)
+		if gpu_provider_status.get("status", "fail") != "pass":
+			last_gpu_provider_page_ms = Time.get_ticks_msec() - page_start_ms
+			max_gpu_provider_page_ms = max(max_gpu_provider_page_ms, last_gpu_provider_page_ms)
+			return gpu_provider_status
 	var descriptor_start_ms: int = Time.get_ticks_msec()
 	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
 	last_gpu_provider_prepare_ms = Time.get_ticks_msec() - descriptor_start_ms
 	if descriptor.get("status", "fail") != "pass":
+		_release_gpu_provider_heightfield_resources(heightfield)
 		last_gpu_provider_page_ms = Time.get_ticks_msec() - page_start_ms
 		max_gpu_provider_page_ms = max(max_gpu_provider_page_ms, last_gpu_provider_page_ms)
 		return descriptor
-	level_material_descriptors[level] = descriptor
 	var mesh_instance: MeshInstance3D = level_nodes[level]
-	var mesh_start_ms: int = Time.get_ticks_msec()
-	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
-	last_gpu_provider_mesh_ms = Time.get_ticks_msec() - mesh_start_ms
 	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
 	var previous_height_texture: Texture2D = null
 	var previous_normal_texture: Texture2D = null
@@ -732,7 +815,7 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
 	_track_previous_page_key_for_blend(level, previous_cache_key, previous_height_texture != null)
 	var material_start_ms: int = Time.get_ticks_msec()
-	mesh_instance.material_override = _page_height_material_for_descriptor(
+	var page_material: ShaderMaterial = _page_height_material_for_descriptor(
 		descriptor,
 		level,
 		previous_height_texture,
@@ -743,6 +826,19 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 		previous_material
 	)
 	last_gpu_provider_material_ms = Time.get_ticks_msec() - material_start_ms
+	if not _page_height_material_has_valid_textures(page_material):
+		_release_gpu_provider_heightfield_resources(heightfield)
+		last_page_error = "level_%d:page_material_invalid:%s" % [level, last_page_error]
+		last_gpu_provider_page_ms = Time.get_ticks_msec() - page_start_ms
+		max_gpu_provider_page_ms = max(max_gpu_provider_page_ms, last_gpu_provider_page_ms)
+		return {"status": "fail", "error": last_page_error}
+	var mesh_start_ms: int = Time.get_ticks_msec()
+	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, inner_extent)
+	last_gpu_provider_mesh_ms = Time.get_ticks_msec() - mesh_start_ms
+	level_heightfields[level] = heightfield
+	level_surface_descriptors[level] = {}
+	level_material_descriptors[level] = descriptor
+	mesh_instance.material_override = _visible_material_for_level(level, page_material)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
 	level_origins[level] = origin
@@ -758,14 +854,39 @@ func _rebuild_level_gpu_provider_page(level: int, origin: Vector2, use_transitio
 	return {"status": "pass", "level": level}
 
 
+func _release_gpu_provider_heightfield_resources(heightfield: Dictionary) -> void:
+	var height_rid: RID = heightfield.get("height_texture_rid", RID()) as RID
+	var owned_rids: Array = heightfield.get("rd_owned_rids", []) as Array
+	if not height_rid.is_valid() and owned_rids.is_empty():
+		return
+	if not RenderingServer.has_method("get_rendering_device"):
+		return
+	var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+	if rd == null:
+		return
+	if height_rid.is_valid() and bool(heightfield.get("height_texture_owned_by_residency", true)):
+		rd.free_rid(height_rid)
+	for rid_value in owned_rids:
+		var rid: RID = rid_value as RID
+		if rid.is_valid():
+			rd.free_rid(rid)
+	heightfield.erase("height_texture_rid")
+	heightfield.erase("height_texture_owned_by_residency")
+	heightfield.erase("rd_owned_rids")
+
+
 func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true) -> void:
 	var level: int = int(payload.get("level", -1))
 	if level < 0 or level >= level_nodes.size():
+		return
+	if not _native_payload_matches_current_context(level, payload):
+		_stale_payload_drop_count += 1
 		return
 	var origin := Vector2(float(payload["origin_x"]), float(payload["origin_z"]))
 	var side: int = int(payload["side"])
 	var outer_extent: float = float(payload["outer_extent_m"])
 	var spacing: float = float(payload["spacing_m"])
+	var current_inner_extent: float = _inner_extent_for_level(level)
 	var height: PackedFloat32Array = payload["height"] as PackedFloat32Array
 	_cache_page_payload(level, origin, outer_extent, spacing, side, height)
 	var previous_heightfield: Dictionary = level_heightfields[level] as Dictionary
@@ -791,10 +912,7 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 		if gpu_normal_status.get("status", "fail") != "pass" and normals.size() != side * side:
 			normals = _normals_from_height(height, side, spacing)
 			heightfield["normals"] = normals
-	level_heightfields[level] = heightfield
-	level_surface_descriptors[level] = {}
 	var descriptor: Dictionary = _page_material_descriptor_from_heightfield(heightfield)
-	level_material_descriptors[level] = descriptor
 	var mesh_instance: MeshInstance3D = level_nodes[level]
 	var previous_material: ShaderMaterial = mesh_instance.material_override as ShaderMaterial
 	var previous_height_texture: Texture2D = null
@@ -808,8 +926,7 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 		previous_page_origin = _shader_vec2_param(previous_material, "page_origin_m", origin)
 		previous_page_extent = _shader_float_param(previous_material, "page_extent_m", outer_extent)
 	_track_previous_page_key_for_blend(level, previous_cache_key, previous_height_texture != null)
-	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, float(payload["inner_extent_m"]))
-	mesh_instance.material_override = _page_height_material_for_descriptor(
+	var page_material: ShaderMaterial = _page_height_material_for_descriptor(
 		descriptor,
 		level,
 		previous_height_texture,
@@ -819,6 +936,14 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 		previous_page_extent,
 		previous_material
 	)
+	if not _page_height_material_has_valid_textures(page_material):
+		last_page_error = "level_%d:page_material_invalid:%s" % [level, last_page_error]
+		return
+	_ensure_persistent_page_mesh(level, side, spacing, outer_extent, current_inner_extent)
+	level_heightfields[level] = heightfield
+	level_surface_descriptors[level] = {}
+	level_material_descriptors[level] = descriptor
+	mesh_instance.material_override = _visible_material_for_level(level, page_material)
 	mesh_instance.position = Vector3(origin.x, visual_y_bias_per_level_m * float(level + 1), origin.y)
 	_apply_persistent_page_custom_aabb(level, heightfield, previous_heightfield)
 	level_origins[level] = origin
@@ -826,7 +951,7 @@ func _assign_level_page_payload(payload: Dictionary, use_transition: bool = true
 	_set_level_geometry_counts(
 		level,
 		side * side,
-		int(payload.get("index_count", _clipmap_index_count(side, spacing, outer_extent, float(payload["inner_extent_m"]))))
+		int(payload.get("index_count", _clipmap_index_count(side, spacing, outer_extent, current_inner_extent)))
 	)
 	_start_page_blend(level, previous_height_texture != null and use_transition)
 	_refresh_page_morph_sources()
@@ -884,6 +1009,17 @@ func _page_cache_has_level(level: int, origin: Vector2) -> bool:
 	if not request.validate().is_empty():
 		return false
 	return _page_cache.has_page(request.cache_key())
+
+
+func _all_page_cache_levels_available(origin: Vector2) -> bool:
+	if not use_persistent_page_mesh:
+		return false
+	for level in range(level_nodes.size()):
+		if level_origins[level] == origin:
+			continue
+		if not _page_cache_has_level(level, origin):
+			return false
+	return true
 
 
 func _cache_page_payload(level: int, origin: Vector2, outer_extent: float, spacing: float, side: int, height: PackedFloat32Array) -> void:
@@ -1130,10 +1266,14 @@ func _rebuild_level(level: int, origin: Vector2, use_transition: bool = true) ->
 func _assign_level_payload(payload: Dictionary, use_transition: bool = true) -> void:
 	if payload.get("status", "fail") != "pass":
 		return
+	var payload_level: int = int(payload.get("level", -1))
+	if not _native_payload_matches_current_context(payload_level, payload):
+		_stale_payload_drop_count += 1
+		return
 	if use_persistent_page_mesh:
 		_assign_level_page_payload(payload, use_transition)
 		return
-	var level: int = int(payload["level"])
+	var level: int = payload_level
 	if level < 0 or level >= level_nodes.size():
 		return
 	var origin := Vector2(float(payload["origin_x"]), float(payload["origin_z"]))
@@ -1435,6 +1575,8 @@ func _can_use_native_workers() -> bool:
 func _should_schedule_native_worker_for_level(level: int, origin: Vector2) -> bool:
 	if not _can_use_native_workers():
 		return false
+	if use_persistent_page_mesh:
+		return true
 	if _can_use_gpu_provider_page_textures():
 		return _gpu_provider_page_block_count(level, origin) > max(1, gpu_provider_max_sync_blocks)
 	return true
@@ -1568,6 +1710,8 @@ func _prepare_worker_request(level: int, origin: Vector2) -> Dictionary:
 		"region_size_m": world.region_size_m,
 		"height_page_only": use_persistent_page_mesh,
 		"height_image_only": _can_use_height_only_gpu_page_payload(),
+		"render_context_key": _render_context_key,
+		"render_context_version": _render_context_version,
 		"blocks": blocks,
 	}
 	request["request_id"] = _worker_request_id(request)
@@ -1575,7 +1719,7 @@ func _prepare_worker_request(level: int, origin: Vector2) -> Dictionary:
 
 
 func _worker_request_id(request: Dictionary) -> String:
-	return "%d:%s:%s:%d:%s:%s:%s:%s:%s" % [
+	return "%d:%s:%s:%d:%s:%s:%s:%s:%s:%d" % [
 		int(request.get("level", -1)),
 		_float_request_id(float(request.get("origin_x", INF))),
 		_float_request_id(float(request.get("origin_z", INF))),
@@ -1585,6 +1729,7 @@ func _worker_request_id(request: Dictionary) -> String:
 		_float_request_id(float(request.get("inner_extent_m", 0.0))),
 		"height_page" if bool(request.get("height_page_only", false)) else "mesh",
 		"height_image_only" if bool(request.get("height_image_only", false)) else "full_texture",
+		int(request.get("render_context_version", 0)),
 	]
 
 
@@ -1621,6 +1766,10 @@ func _worker_request_matches_origin(level: int, request: Dictionary, origin: Vec
 		return false
 	if bool(request.get("height_image_only", false)) != _can_use_height_only_gpu_page_payload():
 		return false
+	if int(request.get("render_context_version", -1)) != _render_context_version:
+		return false
+	if str(request.get("render_context_key", "")) != _render_context_key:
+		return false
 	var request_origin := Vector2(float(request.get("origin_x", INF)), float(request.get("origin_z", INF)))
 	return request_origin == origin
 
@@ -1654,6 +1803,9 @@ func _can_use_direct_rd_page_textures() -> bool:
 
 
 func _stage_native_payload(level: int, payload: Dictionary) -> void:
+	if not _native_payload_matches_current_context(level, payload):
+		_stale_payload_drop_count += 1
+		return
 	var origin := Vector2(float(payload.get("origin_x", INF)), float(payload.get("origin_z", INF)))
 	if origin != _pending_origin:
 		last_worker_error = "level_%d:stale_payload_origin" % level
@@ -1671,6 +1823,40 @@ func _stage_native_payload(level: int, payload: Dictionary) -> void:
 	_staged_native_payloads[level] = payload
 
 
+func _native_payload_matches_current_context(level: int, payload: Dictionary) -> bool:
+	if payload.get("status", "fail") != "pass":
+		return false
+	if level < 0 or level >= level_nodes.size():
+		last_worker_error = "level_%d:payload_level_out_of_range" % level
+		return false
+	if int(payload.get("level", -1)) != level:
+		last_worker_error = "level_%d:payload_level_mismatch" % level
+		return false
+	var origin := Vector2(float(payload.get("origin_x", INF)), float(payload.get("origin_z", INF)))
+	if origin != _pending_origin:
+		last_worker_error = "level_%d:stale_payload_origin" % level
+		return false
+	if int(payload.get("render_context_version", -1)) != _render_context_version:
+		last_worker_error = "level_%d:stale_payload_context_version" % level
+		return false
+	if str(payload.get("render_context_key", "")) != _render_context_key:
+		last_worker_error = "level_%d:stale_payload_context_key" % level
+		return false
+	var current_inner_extent: float = _inner_extent_for_level(level)
+	if not is_equal_approx(float(payload.get("inner_extent_m", -1.0)), current_inner_extent):
+		last_worker_error = "level_%d:stale_payload_inner_extent" % level
+		return false
+	var expected_mode: String = "height_page" if use_persistent_page_mesh else "mesh_payload"
+	if str(payload.get("payload_mode", "mesh_payload")) != expected_mode:
+		last_worker_error = "level_%d:stale_payload_mode:%s expected:%s" % [
+			level,
+			str(payload.get("payload_mode", "")),
+			expected_mode,
+		]
+		return false
+	return true
+
+
 func _clear_staged_payloads_for_other_origin(origin: Vector2) -> void:
 	if _staged_native_payloads.is_empty():
 		_staged_native_origin = origin
@@ -1685,29 +1871,38 @@ func _clear_staged_payloads_for_other_origin(origin: Vector2) -> void:
 func _staged_payload_matches_pending(level: int) -> bool:
 	if _staged_native_origin != _pending_origin:
 		return false
-	return _staged_native_payloads.has(level)
+	if not _staged_native_payloads.has(level):
+		return false
+	return _native_payload_matches_current_context(level, _staged_native_payloads[level] as Dictionary)
 
 
 func _commit_staged_payloads_if_ready() -> void:
 	if _staged_native_origin != _pending_origin:
 		_staged_native_commit_ready = false
 		return
+	_drop_stale_staged_payloads()
 	if not _staged_native_commit_ready:
-		if _staged_native_payloads.size() < level_nodes.size():
-			return
 		for level in range(level_nodes.size()):
+			if level_origins[level] == _pending_origin:
+				continue
 			if not _staged_native_payloads.has(level):
 				return
 		_staged_native_commit_ready = true
 	var commit_start_ms: int = Time.get_ticks_msec()
-	var commit_budget: int = max(1, max_staged_payload_commits_per_update)
+	var commit_budget: int = level_nodes.size()
 	var committed_count := 0
 	for level in range(level_nodes.size()):
 		if committed_count >= commit_budget:
 			break
 		if not _staged_native_payloads.has(level):
 			continue
-		_assign_level_payload(_staged_native_payloads[level] as Dictionary, use_persistent_page_mesh)
+		var payload: Dictionary = _staged_native_payloads[level] as Dictionary
+		if not _native_payload_matches_current_context(level, payload):
+			_staged_native_payloads.erase(level)
+			_stale_payload_drop_count += 1
+			_staged_native_commit_ready = false
+			continue
+		_assign_level_payload(payload, use_persistent_page_mesh)
 		_staged_native_payloads.erase(level)
 		committed_count += 1
 	last_staged_payload_commits = committed_count
@@ -1716,6 +1911,16 @@ func _commit_staged_payloads_if_ready() -> void:
 	if _staged_native_payloads.is_empty():
 		_staged_native_commit_ready = false
 		_staged_native_origin = _pending_origin
+
+
+func _drop_stale_staged_payloads() -> void:
+	for key_value in _staged_native_payloads.keys():
+		var level: int = int(key_value)
+		if _native_payload_matches_current_context(level, _staged_native_payloads[level] as Dictionary):
+			continue
+		_staged_native_payloads.erase(level)
+		_stale_payload_drop_count += 1
+		_staged_native_commit_ready = false
 
 
 func _clipmap_indices(side: int, spacing: float, outer_extent: float, inner_extent: float) -> PackedInt32Array:
@@ -2375,11 +2580,14 @@ func _page_height_material_for_descriptor(
 			if fallback_descriptor.get("status", "fail") == "pass":
 				texture_entry = _gpu_page_image_textures_for_descriptor(fallback_descriptor, str(descriptor.get("cache_key", "")))
 	if texture_entry.get("status", "fail") != "pass":
-		var error_material := ShaderMaterial.new()
-		error_material.shader = _page_height_material_shader()
-		return error_material
+		last_page_material_reused = false
+		return null
 	var height_texture: Texture2D = texture_entry["height_texture"] as Texture2D
 	var normal_texture: Texture2D = texture_entry["normal_texture"] as Texture2D
+	if height_texture == null or normal_texture == null:
+		last_page_error = "page_texture_missing"
+		last_page_material_reused = false
+		return null
 	var page_origin := Vector2(float(descriptor.get("origin_x", 0.0)), float(descriptor.get("origin_z", 0.0)))
 	var page_extent: float = float(descriptor.get("outer_extent_m", 0.0))
 	if not is_finite(previous_page_origin_m.x) or not is_finite(previous_page_origin_m.y):
@@ -2416,6 +2624,14 @@ func _page_height_material_for_descriptor(
 	material.set_shader_parameter("elevation_color_enabled", use_elevation_color_material)
 	_apply_level_edge_fog_shader_parameters(level, material)
 	return material
+
+
+func _page_height_material_has_valid_textures(material: ShaderMaterial) -> bool:
+	if material == null:
+		return false
+	var height_texture: Texture2D = material.get_shader_parameter("height_texture") as Texture2D
+	var normal_texture: Texture2D = material.get_shader_parameter("normal_texture") as Texture2D
+	return height_texture != null and normal_texture != null
 
 
 func _gpu_page_textures_for_descriptor(descriptor: Dictionary) -> Dictionary:
@@ -2486,6 +2702,121 @@ func _shader_float_param(material: ShaderMaterial, name: String, fallback: float
 	if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
 		return float(value)
 	return fallback
+
+
+func _visible_material_for_level(level: int, page_material: ShaderMaterial) -> Material:
+	if debug_level_colors:
+		return _material_for_level(level)
+	return page_material
+
+
+func _surface_provenance_for_level(level: int, mesh_instance: MeshInstance3D, transition: bool) -> Dictionary:
+	var heightfield: Dictionary = {}
+	if level < level_heightfields.size():
+		heightfield = level_heightfields[level] as Dictionary
+	var descriptor: Dictionary = {}
+	if level < level_material_descriptors.size():
+		descriptor = level_material_descriptors[level] as Dictionary
+	var origin := Vector2(INF, INF)
+	if level < level_origins.size():
+		origin = level_origins[level] as Vector2
+	var material: Material = mesh_instance.material_override
+	var cache_key: String = str(descriptor.get("cache_key", heightfield.get("cache_key", "")))
+	var residency: Dictionary = _gpu_page_residency_state()
+	return {
+		"owner": "far_clipmap",
+		"node": mesh_instance.name,
+		"level": level,
+		"transition": transition,
+		"origin_xz": _vec2_array(origin),
+		"render_context_version": _render_context_version,
+		"render_context_key": _render_context_key,
+		"payload_mode": str(descriptor.get("texture_payload_mode", heightfield.get("texture_payload_mode", last_worker_payload_mode))),
+		"material_mode": _material_mode(material),
+		"height_texture_valid": _shader_texture_valid(material, "height_texture") or _descriptor_has_valid_rid(descriptor, "height_texture_rid"),
+		"normal_texture_valid": _shader_texture_valid(material, "normal_texture") or _descriptor_has_valid_rid(descriptor, "normal_texture_rid"),
+		"cache_key": cache_key,
+		"resident": _page_texture_backend != null and not cache_key.is_empty() and _page_texture_backend.has_page(cache_key),
+		"loaded": mesh_instance.mesh != null and is_finite(origin.x) and is_finite(origin.y),
+		"visible": mesh_instance.visible,
+		"custom_aabb": _aabb_dictionary(mesh_instance.custom_aabb),
+		"global_position": _vec3_array(mesh_instance.global_position),
+		"heightfield": {
+			"status": str(heightfield.get("status", "")),
+			"vertices_per_side": int(heightfield.get("vertices_per_side", 0)),
+			"spacing_m": float(heightfield.get("spacing_m", 0.0)),
+			"outer_extent_m": float(heightfield.get("outer_extent_m", 0.0)),
+			"inner_extent_m": _inner_extent_for_level(level),
+			"height_min_m": float(heightfield.get("height_min_m", descriptor.get("height_min_m", 0.0))),
+			"height_max_m": float(heightfield.get("height_max_m", descriptor.get("height_max_m", 0.0))),
+		},
+		"mesh": _mesh_summary(mesh_instance.mesh),
+		"gpu_page_residency_count": int(residency.get("count", 0)),
+	}
+
+
+func _material_mode(material: Material) -> String:
+	if material == null:
+		return "missing"
+	if debug_level_colors:
+		return "surface_owner_color"
+	var shader_material: ShaderMaterial = material as ShaderMaterial
+	if shader_material != null:
+		if _shader_texture_valid(shader_material, "height_texture"):
+			return "page_height_shader"
+		if use_surface_texture_material:
+			return "surface_texture_shader"
+		return "gray_shader"
+	var standard: StandardMaterial3D = material as StandardMaterial3D
+	if standard != null:
+		return "standard"
+	return material.get_class()
+
+
+func _shader_texture_valid(material: Material, parameter_name: String) -> bool:
+	var shader_material: ShaderMaterial = material as ShaderMaterial
+	if shader_material == null:
+		return false
+	var texture: Texture2D = shader_material.get_shader_parameter(parameter_name) as Texture2D
+	return texture != null
+
+
+func _descriptor_has_valid_rid(descriptor: Dictionary, key: String) -> bool:
+	var rid_value: Variant = descriptor.get(key, RID())
+	return rid_value is RID and (rid_value as RID).is_valid()
+
+
+func _aabb_dictionary(aabb: AABB) -> Dictionary:
+	return {
+		"position": _vec3_array(aabb.position),
+		"size": _vec3_array(aabb.size),
+	}
+
+
+func _vec2_array(value: Vector2) -> Array[float]:
+	return [snappedf(value.x, 0.001), snappedf(value.y, 0.001)]
+
+
+func _vec3_array(value: Vector3) -> Array[float]:
+	return [snappedf(value.x, 0.001), snappedf(value.y, 0.001), snappedf(value.z, 0.001)]
+
+
+func _mesh_summary(mesh: Mesh) -> Dictionary:
+	if mesh == null:
+		return {"surface_count": 0, "vertex_count": 0, "index_count": 0}
+	var vertex_count := 0
+	var index_count := 0
+	for surface in range(mesh.get_surface_count()):
+		var arrays: Array = mesh.surface_get_arrays(surface)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] as PackedInt32Array
+		vertex_count += vertices.size()
+		index_count += indices.size()
+	return {
+		"surface_count": mesh.get_surface_count(),
+		"vertex_count": vertex_count,
+		"index_count": index_count,
+	}
 
 
 func _material_for_level(level: int, alpha: float = 1.0) -> Material:

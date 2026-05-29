@@ -110,6 +110,13 @@ func _check_worker_request_signature(clipmap: Node3D, errors: Array[String]) -> 
 	var changed_mode_id: String = clipmap._worker_request_id(changed_mode)
 	if changed_mode_id == request_id:
 		errors.append("worker_request_id_not_payload_mode_specific:%s" % request_id)
+	var changed_context: Dictionary = request.duplicate(true)
+	changed_context["render_context_version"] = int(changed_context.get("render_context_version", 0)) + 1
+	if clipmap._worker_request_matches_pending(0, changed_context):
+		errors.append("worker_request_accepted_wrong_context")
+	var changed_context_id: String = clipmap._worker_request_id(changed_context)
+	if changed_context_id == request_id:
+		errors.append("worker_request_id_not_context_specific:%s" % request_id)
 
 
 func _check_geometric_transition_band(clipmap: Node3D, errors: Array[String]) -> void:

@@ -159,6 +159,8 @@ func _build_payload(request: Dictionary) -> Dictionary:
 				"spacing_m": float(request["spacing_m"]),
 				"side": side,
 				"request_id": str(request["request_id"]),
+				"render_context_key": str(request.get("render_context_key", "")),
+				"render_context_version": int(request.get("render_context_version", 0)),
 			}
 		var normal_payload: Dictionary = backend.call(
 			"build_normal_payload_from_height",
@@ -203,6 +205,8 @@ func _build_payload(request: Dictionary) -> Dictionary:
 			"spacing_m": float(request["spacing_m"]),
 			"side": side,
 			"request_id": str(request["request_id"]),
+			"render_context_key": str(request.get("render_context_key", "")),
+			"render_context_version": int(request.get("render_context_version", 0)),
 		}
 	var mesh: Dictionary = backend.call(
 		"build_clipmap_mesh_payload_from_height",
@@ -228,6 +232,8 @@ func _build_payload(request: Dictionary) -> Dictionary:
 	mesh["spacing_m"] = float(request["spacing_m"])
 	mesh["side"] = side
 	mesh["request_id"] = str(request["request_id"])
+	mesh["render_context_key"] = str(request.get("render_context_key", ""))
+	mesh["render_context_version"] = int(request.get("render_context_version", 0))
 	mesh["payload_mode"] = "mesh_payload"
 	return mesh
 

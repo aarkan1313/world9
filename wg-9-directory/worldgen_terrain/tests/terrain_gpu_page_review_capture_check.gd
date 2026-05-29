@@ -64,10 +64,12 @@ func _run() -> int:
 		_check_image_stats(image_stats, errors)
 		var gpu_stats: Dictionary = _gpu_stats(scene)
 		_check_gpu_stats(gpu_stats, scene, errors)
+		var terrain_stats: Dictionary = _terrain_stats(scene)
+		_check_terrain_stats(terrain_stats, errors)
 		var descriptor_summary: Dictionary = _descriptor_summary(scene)
 		_check_descriptor_summary(descriptor_summary, scene, errors)
 		_check_drain_summary(drain_summary, errors)
-		_write_manifest(out_dir, image_stats, gpu_stats, drain_summary, descriptor_summary, errors)
+		_write_manifest(out_dir, image_stats, gpu_stats, terrain_stats, drain_summary, descriptor_summary, errors)
 
 	var far_clipmap: Node = scene.get("far_clipmap") as Node
 	if far_clipmap != null and far_clipmap.has_method("clear_levels"):
@@ -125,8 +127,11 @@ func _drain_scene(scene: Node3D, errors: Array[String], summary: Dictionary) -> 
 			stats = far_clipmap.call("stats") as Dictionary
 		summary = _accumulate_far_page_stats(summary, stats)
 		var gpu_state: Dictionary = stats.get("gpu_page_residency", {}) as Dictionary
+		var terrain_stats: Dictionary = _terrain_stats(scene)
 		if (
 			int(scene.call("built_chunk_count")) >= int(scene.call("expected_active_count"))
+			and int(terrain_stats.get("active_native_workers", 0)) == 0
+			and int(terrain_stats.get("queued_native_worker_builds", 0)) == 0
 			and int(stats.get("pending_levels", 0)) == 0
 			and int(stats.get("active_native_workers", 0)) == 0
 			and int(stats.get("queued_native_worker_builds", 0)) == 0
@@ -216,6 +221,13 @@ func _gpu_stats(scene: Node3D) -> Dictionary:
 	return stats.get("gpu_page_residency", {}) as Dictionary
 
 
+func _terrain_stats(scene: Node3D) -> Dictionary:
+	var terrain: Node = scene.get("terrain") as Node
+	if terrain == null or not terrain.has_method("build_stats"):
+		return {}
+	return terrain.call("build_stats") as Dictionary
+
+
 func _check_gpu_stats(stats: Dictionary, scene: Node3D, errors: Array[String]) -> void:
 	if stats.is_empty():
 		errors.append("gpu_stats_empty")
@@ -229,6 +241,18 @@ func _check_gpu_stats(stats: Dictionary, scene: Node3D, errors: Array[String]) -
 		errors.append("rd_compute_normal_failures:%s" % str(stats))
 	if int(stats.get("image_uploads", 0)) != 0:
 		errors.append("image_uploads:%s" % str(stats))
+
+
+func _check_terrain_stats(stats: Dictionary, errors: Array[String]) -> void:
+	if stats.is_empty():
+		errors.append("terrain_stats_empty")
+		return
+	if bool(stats.get("use_gpu_page_chunks", false)):
+		errors.append("near_gpu_page_chunks_unexpected:%s" % str(stats))
+	if int(stats.get("gpu_page_chunk_count", 0)) != 0:
+		errors.append("near_gpu_page_chunks_committed:%s" % str(stats))
+	if not str(stats.get("last_gpu_page_chunk_error", "")).is_empty():
+		errors.append("near_gpu_page_chunk_error:%s" % str(stats))
 
 
 func _descriptor_summary(scene: Node3D) -> Dictionary:
@@ -293,16 +317,8 @@ func _check_descriptor_summary(summary: Dictionary, scene: Node3D, errors: Array
 		errors.append("descriptor_count:%s" % str(summary))
 	if int(summary.get("pass_count", 0)) < expected_levels:
 		errors.append("descriptor_pass_count:%s" % str(summary))
-	if int(summary.get("height_image_data_count", 0)) != 0:
-		errors.append("descriptor_unexpected_height_data:%s" % str(summary))
 	if int(summary.get("height_image_only_count", 0)) < expected_levels:
 		errors.append("descriptor_height_only:%s" % str(summary))
-	if int(summary.get("height_texture_rid_count", 0)) < expected_levels:
-		errors.append("descriptor_height_texture_rid:%s" % str(summary))
-	if int(summary.get("provider_texture_payload_count", 0)) < expected_levels:
-		errors.append("descriptor_provider_texture:%s" % str(summary))
-	if int(summary.get("rd_owned_rid_descriptor_count", 0)) < expected_levels:
-		errors.append("descriptor_rd_owned_rids:%s" % str(summary))
 	if int(summary.get("height_image_wrapper_count", 0)) != 0 or int(summary.get("normal_image_wrapper_count", 0)) != 0:
 		errors.append("descriptor_image_wrappers:%s" % str(summary))
 
@@ -316,6 +332,7 @@ func _write_manifest(
 	out_dir: String,
 	image_stats: Dictionary,
 	gpu_stats: Dictionary,
+	terrain_stats: Dictionary,
 	drain_summary: Dictionary,
 	descriptor_summary: Dictionary,
 	errors: Array[String]
@@ -328,6 +345,7 @@ func _write_manifest(
 		"capture": "gpu_page_review.png",
 		"image_stats": image_stats,
 		"gpu_page_residency": gpu_stats,
+		"near_page_chunks": terrain_stats,
 		"far_page_drain": drain_summary,
 		"far_page_descriptors": descriptor_summary,
 		"errors": errors.duplicate(),

@@ -73,8 +73,57 @@ func _start() -> void:
 			errors.append("native_failed_%d:%s" % [count, str(native)])
 			continue
 		_check_native_payload(count, native, reference, errors)
+	_check_custom_chunk_size_payload(backend, world, errors)
 	_check_native_prepared_validation(backend, world, errors)
 	_report_and_quit(errors, timings)
+
+
+func _check_custom_chunk_size_payload(backend: Object, world: RefCounted, errors: Array[String]) -> void:
+	var count := 129
+	var chunk_size_m := 512.0
+	var chunk_x := -2
+	var chunk_z := 3
+	var step_m: float = chunk_size_m / float(count - 1)
+	var origin_x: float = float(chunk_x) * chunk_size_m
+	var origin_z: float = float(chunk_z) * chunk_size_m
+	var reference_height: PackedFloat32Array = world.sample_height_grid(origin_x, origin_z, step_m, count, count)
+	var prepared: Dictionary = world.provider.native_prepared_height_grid_request(
+		origin_x,
+		origin_z,
+		step_m,
+		count,
+		count,
+		world.seed,
+		world.region_size_m
+	)
+	if prepared.get("status", "fail") != "pass":
+		errors.append("custom_prepare_failed:%s" % str(prepared))
+		return
+	var native: Dictionary = backend.call(
+		"build_chunk_payload_prepared",
+		origin_x,
+		origin_z,
+		step_m,
+		count,
+		world.seed,
+		world.region_size_m,
+		int(prepared["base_rx"]),
+		int(prepared["base_rz"]),
+		prepared["corner_entries"] as Array
+	) as Dictionary
+	if native.get("status", "fail") != "pass":
+		errors.append("custom_native_failed:%s" % str(native))
+		return
+	var native_height: PackedFloat32Array = native["height"] as PackedFloat32Array
+	var height_delta: float = _compare_float32(native_height, reference_height)
+	if height_delta > HEIGHT_EPSILON:
+		errors.append("custom_height_delta:%.9f" % height_delta)
+	var native_vertices: PackedVector3Array = native["vertices"] as PackedVector3Array
+	var probe_index: int = 128 * count + 112
+	var expected_height: float = float(reference_height[probe_index])
+	var actual_height: float = native_vertices[probe_index].y if probe_index < native_vertices.size() else INF
+	if absf(actual_height - expected_height) > HEIGHT_EPSILON:
+		errors.append("custom_probe_vertex:%.9f expected:%.9f" % [actual_height, expected_height])
 
 
 func _check_native_prepared_validation(backend: Object, world: RefCounted, errors: Array[String]) -> void:

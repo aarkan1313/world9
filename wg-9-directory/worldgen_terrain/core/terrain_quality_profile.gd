@@ -90,15 +90,19 @@ static func _walk_review_profile() -> Dictionary:
 			"max_lod": 2,
 			"build_budget_per_frame": 8,
 			"prefetch_forward_chunks": 1,
+			"residency_halo_chunks": 1,
 			"warmup_build_steps": 4,
 			"preload_active_chunks_before_start": true,
 			"preload_active_chunk_limit": 0,
 			"move_speed_mps": 18.0,
 			"fast_multiplier": 60.0,
 			"slow_multiplier": 0.25,
-			"max_native_chunk_workers": 6,
-			"review_sync_hole_fill_radius_chunks": 1,
+			"max_native_chunk_workers": 8,
+			"max_native_chunk_worker_results_per_update": 4,
+			"review_sync_hole_fill_radius_chunks": 3,
 			"review_sync_hole_fill_max_chunks_per_frame": 2,
+			"defer_inactive_chunk_retire_until_active_ready": false,
+			"max_retained_inactive_chunk_nodes": 0,
 			"use_lod_mesh_density": false,
 			"use_mesh_skirts": false,
 			"mesh_skirt_depth_m": 48.0,
@@ -107,6 +111,8 @@ static func _walk_review_profile() -> Dictionary:
 			"far_clipmap_base_spacing_m": 64.0,
 			"far_clipmap_base_outer_extent_m": 4096.0,
 			"far_clipmap_handoff_overlap_m": 64.0,
+			"far_clipmap_visual_y_bias_per_level_m": -0.08,
+			"far_clipmap_full_underlay_level0": true,
 			"far_clipmap_recenter_distance_m": 768.0,
 			"far_clipmap_rebuild_levels_per_update": 4,
 			"far_clipmap_transition_fade_seconds": 0.35,
@@ -125,6 +131,19 @@ static func _walk_review_profile() -> Dictionary:
 			"use_fast_gray_material": true,
 			"use_native_chunk_payloads": true,
 			"use_native_chunk_workers": true,
+			"use_gpu_page_chunks": true,
+			"use_gpu_provider_page_chunk_textures": true,
+			"use_gpu_provider_page_chunk_descriptor_staging": true,
+			"use_gpu_rd_chunk_page_textures": true,
+			"use_gpu_rd_chunk_compute_normals": true,
+			"max_gpu_page_chunk_builds_per_update": 8,
+			"max_gpu_page_prefetch_chunk_builds_per_update": 1,
+			"max_gpu_page_chunk_build_ms_per_update": 45,
+			"max_gpu_provider_chunk_descriptor_stages_per_update": 8,
+			"max_gpu_provider_chunk_descriptor_workers": 8,
+			"chunk_page_cache_max_pages": 384,
+			"chunk_gpu_page_residency_max_pages": 384,
+			"gpu_provider_chunk_descriptor_cache_max_entries": 384,
 			"fast_gray_exposure": 0.42,
 			"fast_gray_contrast": 1.42,
 		},
@@ -164,14 +183,32 @@ static func _local_detail_review_profile() -> Dictionary:
 static func _gpu_page_review_profile() -> Dictionary:
 	var profile_data: Dictionary = _walk_review_profile()
 	profile_data["id"] = GPU_PAGE_REVIEW
-	profile_data["description"] = "Explicit GPU far-page review profile using the same direct Texture2DRD page residency path as walk_review, kept as a stable renderer-enabled acceptance target."
+	profile_data["description"] = "Explicit GPU page review profile using direct Texture2DRD page residency for far clipmap pages and near chunk page-displacement."
 	var settings: Dictionary = (profile_data["settings"] as Dictionary).duplicate(true)
 	settings.merge({
-		"far_clipmap_rebuild_levels_per_update": 1,
+		"far_clipmap_rebuild_levels_per_update": 4,
+		"visible_radius_chunks": 2,
+		"prefetch_forward_chunks": 3,
+		"residency_halo_chunks": 1,
+		"max_native_chunk_workers": 8,
+		"max_native_chunk_worker_results_per_update": 4,
 		"use_far_clipmap_gpu_page_normal_backend": true,
 		"use_far_clipmap_gpu_rd_page_textures": true,
 		"use_far_clipmap_gpu_rd_compute_normals": true,
 		"use_far_clipmap_gpu_provider_page_textures": true,
+		"use_gpu_page_chunks": true,
+		"use_gpu_provider_page_chunk_textures": true,
+		"use_gpu_provider_page_chunk_descriptor_staging": true,
+		"use_gpu_rd_chunk_page_textures": true,
+		"use_gpu_rd_chunk_compute_normals": true,
+		"max_gpu_page_chunk_builds_per_update": 8,
+		"max_gpu_page_prefetch_chunk_builds_per_update": 1,
+		"max_gpu_page_chunk_build_ms_per_update": 45,
+		"max_gpu_provider_chunk_descriptor_stages_per_update": 8,
+		"max_gpu_provider_chunk_descriptor_workers": 8,
+		"chunk_page_cache_max_pages": 384,
+		"chunk_gpu_page_residency_max_pages": 384,
+		"gpu_provider_chunk_descriptor_cache_max_entries": 384,
 	}, true)
 	profile_data["settings"] = settings
 	profile_data["budgets"] = {
@@ -180,6 +217,7 @@ static func _gpu_page_review_profile() -> Dictionary:
 		"gpu_page_review_min_normal_dispatches": 0,
 		"gpu_page_review_min_rd_compute_normal_uploads": 4,
 		"gpu_page_review_min_provider_page_dispatches": 0,
+		"gpu_page_review_expected_near_page_chunks": 1,
 	}
 	profile_data["review_only"] = true
 	return profile_data

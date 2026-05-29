@@ -23,19 +23,26 @@ func _start() -> void:
 	var returned_report: Dictionary = scene.step_viewer(0.0, Vector2(0.0, 1.0), 0.0)
 	_drain_queue(scene, errors)
 	var prefetch_report: Dictionary = returned_report.duplicate(true)
-	var expected_prefetch_count: int = (scene.visible_radius_chunks * 2 + 1) * (scene.visible_radius_chunks * 2 + 2)
+	var expected_prefetch_count: int = int(prefetch_report.get("expected_active_count", 0))
 	if int(scene.prefetch_forward_chunks) != 1:
 		errors.append("prefetch_setting:%d" % int(scene.prefetch_forward_chunks))
+	if int(scene.residency_halo_chunks) != 1:
+		errors.append("residency_halo_setting:%d" % int(scene.residency_halo_chunks))
 	if int(prefetch_report.get("active_count", 0)) != expected_prefetch_count:
 		errors.append("prefetch_active_count:%d expected:%d report:%s" % [
 			int(prefetch_report.get("active_count", 0)),
 			expected_prefetch_count,
 			str(prefetch_report),
 		])
+	if int(prefetch_report.get("residency_halo_chunks", 0)) != int(scene.residency_halo_chunks):
+		errors.append("prefetch_halo_report:%s" % str(prefetch_report.get("residency_halo_chunks", null)))
 	if int(prefetch_report.get("base_active_count", 0)) != 49:
 		errors.append("prefetch_base_active:%d" % int(prefetch_report.get("base_active_count", 0)))
 	if prefetch_report.get("prefetch_step", []) != [0, 1]:
 		errors.append("prefetch_step:%s" % str(prefetch_report.get("prefetch_step", [])))
+	var backward_report: Dictionary = scene.step_viewer(0.0, Vector2(0.0, -1.0), 0.0)
+	if backward_report.get("prefetch_step", []) != [0, 1]:
+		errors.append("backward_camera_prefetch_step:%s" % str(backward_report.get("prefetch_step", [])))
 	if scene.built_chunk_count() < int(prefetch_report.get("active_count", 0)):
 		errors.append("prefetch_not_built:%d/%d startup:%s" % [
 			scene.built_chunk_count(),

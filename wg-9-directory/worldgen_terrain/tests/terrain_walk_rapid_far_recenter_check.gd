@@ -74,6 +74,7 @@ func _start() -> void:
 		var origin: Vector2 = origin_value as Vector2
 		if origin.distance_to(expected_latest_origin) > 0.001:
 			errors.append("rapid_recenter_origin:%s expected:%s" % [str(origin), str(expected_latest_origin)])
+	var cached_return_report: Dictionary = _check_cached_return_recenter(scene, counts_after_drain, errors)
 	var report := {
 		"counts_before": counts_before,
 		"counts_after_boundary": counts_after_boundary,
@@ -86,6 +87,7 @@ func _start() -> void:
 		"first_scheduled": first_stats.get("last_scheduled_levels", []),
 		"second_deferred": second_stats.get("last_deferred_levels", []),
 		"second_workers": int(second_stats.get("active_worker_count", 0)),
+		"cached_return": cached_return_report,
 	}
 	scene.queue_free()
 	if not errors.is_empty():
@@ -130,6 +132,39 @@ func _expected_level_count(scene: Node3D) -> int:
 	if scene.far_clipmap == null:
 		return 0
 	return int(scene.far_clipmap.stats().get("levels", 0))
+
+
+func _check_cached_return_recenter(scene: Node3D, counts_before_return: Array, errors: Array[String]) -> Dictionary:
+	if scene.far_clipmap == null:
+		return {}
+	var previous_budget: int = int(scene.far_clipmap_rebuild_levels_per_update)
+	scene.far_clipmap_rebuild_levels_per_update = 1
+	scene.viewer_position_xz = Vector2(scene.chunk_size_m - 4.0, scene.chunk_size_m * 0.5)
+	scene._update_streamer()
+	var stats: Dictionary = scene.far_clipmap.stats()
+	var counts_after_return: Array = _far_counts(scene)
+	var origins_after_return: Array = _far_origins(scene)
+	var expected_origin: Vector2 = scene._far_clipmap_center_xz()
+	var expected_levels: Array = _expected_levels(scene)
+	var delta: int = _count_delta(counts_before_return, counts_after_return)
+	if delta != expected_levels.size():
+		errors.append("cached_return_not_atomic:%d expected:%d stats:%s" % [delta, expected_levels.size(), str(stats)])
+	if (stats.get("last_rebuilt_levels", []) as Array) != expected_levels:
+		errors.append("cached_return_rebuilt_levels:%s" % str(stats.get("last_rebuilt_levels", [])))
+	if not (stats.get("last_scheduled_levels", []) as Array).is_empty():
+		errors.append("cached_return_scheduled:%s" % str(stats.get("last_scheduled_levels", [])))
+	for origin_value in origins_after_return:
+		var origin: Vector2 = origin_value as Vector2
+		if origin.distance_to(expected_origin) > 0.001:
+			errors.append("cached_return_origin:%s expected:%s" % [str(origin), str(expected_origin)])
+	scene.far_clipmap_rebuild_levels_per_update = previous_budget
+	return {
+		"expected_origin": [expected_origin.x, expected_origin.y],
+		"counts_before": counts_before_return,
+		"counts_after": counts_after_return,
+		"delta": delta,
+		"stats": stats,
+	}
 
 
 func _expected_levels(scene: Node3D) -> Array[int]:

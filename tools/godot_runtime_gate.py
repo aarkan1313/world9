@@ -112,6 +112,7 @@ GPU_CHECKS = [
     "terrain_gpu_compute_probe_check.gd",
     "terrain_gpu_height_page_backend_check.gd",
     "terrain_gpu_provider_page_texture_backend_check.gd",
+    "terrain_gpu_provider_chunk_descriptor_staging_check.gd",
     "terrain_gpu_compute_texture_probe_check.gd",
     "terrain_gpu_page_normal_backend_check.gd",
     "terrain_gpu_texture_rd_probe_check.gd",
@@ -129,6 +130,7 @@ RENDER_CHECKS = [
     "terrain_lod_skirt_render_capture_check.gd",
     "terrain_far_clipmap_render_capture_check.gd",
     "terrain_gpu_page_review_capture_check.gd",
+    "terrain_gpu_page_black_slab_gate.gd",
     "terrain_local_detail_displacement_render_capture_check.gd",
     "terrain_walk_local_detail_review_capture_check.gd",
 ]

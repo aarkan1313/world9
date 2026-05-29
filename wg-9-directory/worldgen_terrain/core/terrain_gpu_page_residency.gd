@@ -38,8 +38,10 @@ func configure(
 
 
 func clear() -> void:
+	_sync_rendering_device()
 	for key in _pages.keys():
 		_release_page_resources(str(key), false)
+	_sync_rendering_device()
 	_pages.clear()
 	_last_used_tick.clear()
 	_protected_keys.clear()
@@ -71,15 +73,20 @@ func get_or_create_textures(cache_key: String, descriptor: Dictionary) -> Dictio
 		return cached.duplicate()
 	_misses += 1
 	if max_pages <= 0:
+		_release_descriptor_rd_resources(descriptor)
 		_rejected += 1
 		return {"status": "fail", "error": "cache_disabled"}
 	if descriptor.get("status", "fail") != "pass":
 		_rejected += 1
 		return {"status": "fail", "error": "descriptor_not_pass"}
 	var entry: Dictionary = {}
+	var attempted_rd_entry := false
 	if use_rd_textures:
+		attempted_rd_entry = true
 		entry = _rd_texture_entry(cache_key, descriptor)
 	if entry.get("status", "fail") != "pass":
+		if attempted_rd_entry and not bool(entry.get("rd_descriptor_resources_released", false)):
+			_release_descriptor_rd_resources(descriptor)
 		entry = _image_texture_entry(cache_key, descriptor)
 	if entry.get("status", "fail") != "pass":
 		_rejected += 1
@@ -155,13 +162,24 @@ func _rd_texture_entry(cache_key: String, descriptor: Dictionary) -> Dictionary:
 		if normal_rid.is_valid():
 			rd.free_rid(normal_rid)
 		_free_rd_owned_rids(rd, descriptor)
-		return {"status": "fail", "error": str(normal_result.get("error", "rd_texture_create_failed"))}
+		return {
+			"status": "fail",
+			"error": str(normal_result.get("error", "rd_texture_create_failed")),
+			"rd_descriptor_resources_released": true,
+		}
 	var height_texture = ClassDB.instantiate("Texture2DRD")
 	var normal_texture = ClassDB.instantiate("Texture2DRD")
 	if height_texture == null or normal_texture == null:
-		rd.free_rid(height_rid)
-		rd.free_rid(normal_rid)
-		return {"status": "fail", "error": "texture2drd_instantiate_failed"}
+		if height_rid.is_valid() and height_texture_owned_by_residency:
+			rd.free_rid(height_rid)
+		if normal_rid.is_valid():
+			rd.free_rid(normal_rid)
+		_free_rd_owned_rids(rd, descriptor)
+		return {
+			"status": "fail",
+			"error": "texture2drd_instantiate_failed",
+			"rd_descriptor_resources_released": true,
+		}
 	height_texture.set("texture_rd_rid", height_rid)
 	normal_texture.set("texture_rd_rid", normal_rid)
 	_rd_uploads += 1
@@ -306,6 +324,30 @@ func _create_rd_texture(
 	return rd.texture_create(format, RDTextureView.new(), [data])
 
 
+func _create_empty_rd_texture(
+	rd: RenderingDevice,
+	side: int,
+	data_format: int,
+	usage_bits: int,
+	bytes_per_pixel: int
+) -> RID:
+	var format := RDTextureFormat.new()
+	format.width = side
+	format.height = side
+	format.depth = 1
+	format.array_layers = 1
+	format.mipmaps = 1
+	format.format = data_format
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	format.usage_bits = usage_bits
+	var texture_rid: RID = rd.texture_create(format, RDTextureView.new(), [])
+	if texture_rid.is_valid():
+		return texture_rid
+	var zero_data := PackedByteArray()
+	zero_data.resize(side * side * max(1, bytes_per_pixel))
+	return rd.texture_create(format, RDTextureView.new(), [zero_data])
+
+
 func _create_rd_normal_texture(
 	rd: RenderingDevice,
 	side: int,
@@ -352,19 +394,17 @@ func _create_compute_normal_texture(
 	var step_m: float = float(descriptor.get("spacing_m", 0.0))
 	if side < 2 or not is_finite(step_m) or step_m <= 0.0:
 		return {"status": "fail", "error": "compute_normal_shape:%d %.6f" % [side, step_m]}
-	var normal_data := PackedByteArray()
-	normal_data.resize(side * side * 16)
 	var normal_usage: int = (
 		RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
 		| RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
 		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	)
-	var normal_rid: RID = _create_rd_texture(
+	var normal_rid: RID = _create_empty_rd_texture(
 		rd,
 		side,
 		RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT,
-		normal_data,
-		normal_usage
+		normal_usage,
+		16
 	)
 	if not normal_rid.is_valid():
 		return {"status": "fail", "error": "compute_normal_texture_create_failed"}
@@ -399,7 +439,7 @@ func _create_compute_normal_texture(
 	return {
 		"status": "pass",
 		"normal_rid": normal_rid,
-		"normal_bytes": normal_data.size(),
+		"normal_bytes": side * side * 16,
 		"uniform_set": uniform_set,
 		"mode": "rd_compute",
 	}
@@ -522,6 +562,21 @@ func _free_rd_owned_rids(rd: RenderingDevice, source: Dictionary) -> void:
 			rd.free_rid(rid)
 
 
+func _release_descriptor_rd_resources(descriptor: Dictionary) -> void:
+	var height_rid: RID = descriptor.get("height_texture_rid", RID()) as RID
+	var owns_height := bool(descriptor.get("height_texture_owned_by_residency", false))
+	if not height_rid.is_valid() and (descriptor.get("rd_owned_rids", []) as Array).is_empty():
+		return
+	if not RenderingServer.has_method("get_rendering_device"):
+		return
+	var rd: RenderingDevice = RenderingServer.call("get_rendering_device") as RenderingDevice
+	if rd == null:
+		return
+	if height_rid.is_valid() and owns_height:
+		rd.free_rid(height_rid)
+	_free_rd_owned_rids(rd, descriptor)
+
+
 func _pool_texture(texture: ImageTexture, width: int, height: int, format: int) -> void:
 	if texture == null or width <= 0 or height <= 0:
 		return
@@ -564,6 +619,13 @@ func _release_compute_resources() -> void:
 				rd.free_rid(shader_rid)
 	_normal_compute_pipelines.clear()
 	_normal_compute_shaders.clear()
+
+
+func _sync_rendering_device() -> void:
+	# This residency cache uses Godot's main renderer device. Main RenderingDevice
+	# instances are owned by the renderer; calling sync() here can crash/error on
+	# shutdown because only local devices may be manually submitted or synced.
+	return
 
 
 func _pooled_texture_count() -> int:

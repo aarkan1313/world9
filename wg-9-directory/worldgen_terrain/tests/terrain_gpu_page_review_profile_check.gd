@@ -75,6 +75,13 @@ func _check_gpu_page_review_profile(errors: Array[String]) -> void:
 			errors.append("provider_metadata_only_commits:%s" % str(stats))
 		if not str(stats.get("last_gpu_provider_page_error", "")).is_empty():
 			errors.append("provider_page_error:%s" % str(stats))
+	var terrain_stats: Dictionary = scene.terrain.build_stats() if scene.terrain != null else {}
+	if not bool(terrain_stats.get("use_gpu_page_chunks", false)):
+		errors.append("near_gpu_page_chunks_disabled:%s" % str(terrain_stats))
+	if int(terrain_stats.get("gpu_page_chunk_count", 0)) < int((profile.get("budgets", {}) as Dictionary).get("gpu_page_review_expected_near_page_chunks", 0)):
+		errors.append("near_gpu_page_chunks:%s" % str(terrain_stats))
+	if not str(terrain_stats.get("last_gpu_page_chunk_error", "")).is_empty():
+		errors.append("near_gpu_page_chunk_error:%s" % str(terrain_stats))
 	_clear_scene_now(scene)
 	scene.queue_free()
 

@@ -73,9 +73,12 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		"build_budget_per_frame",
 		"prefetch_forward_chunks",
 		"max_native_chunk_workers",
+		"max_native_chunk_worker_results_per_update",
 		"use_far_clipmap",
 		"far_clipmap_level_count",
 		"far_clipmap_base_outer_extent_m",
+		"far_clipmap_visual_y_bias_per_level_m",
+		"far_clipmap_full_underlay_level0",
 		"far_clipmap_rebuild_levels_per_update",
 		"use_persistent_page_clipmap",
 		"far_clipmap_gpu_page_residency_max_pages",
@@ -102,6 +105,11 @@ func _check_profile_contract(profile: Dictionary, errors: Array[String]) -> void
 		errors.append("walk_profile_rd_compute_normals_disabled")
 	if not bool(settings.get("use_far_clipmap_gpu_provider_page_textures", false)):
 		errors.append("walk_profile_gpu_provider_page_textures_disabled")
+	if not bool(settings.get("far_clipmap_full_underlay_level0", false)):
+		errors.append("walk_profile_level0_underlay_disabled")
+	var y_bias: float = float(settings.get("far_clipmap_visual_y_bias_per_level_m", 0.0))
+	if y_bias >= -0.001 or y_bias < -0.5:
+		errors.append("walk_profile_y_bias_out_of_range:%.3f" % y_bias)
 	var visibility: Dictionary = TerrainQualityProfileScript.visibility_contract(profile)
 	if float(visibility.get("hidden_buffer_m", 0.0)) <= 0.0:
 		errors.append("visibility_hidden_buffer:%.3f" % float(visibility.get("hidden_buffer_m", 0.0)))
@@ -201,6 +209,8 @@ func _check_gpu_page_profile_contract(errors: Array[String]) -> void:
 		errors.append("gpu_page_profile_rd_compute_normals_disabled")
 	if not bool(settings.get("use_far_clipmap_gpu_provider_page_textures", false)):
 		errors.append("gpu_page_profile_provider_page_textures_disabled")
+	if not bool(settings.get("far_clipmap_full_underlay_level0", false)):
+		errors.append("gpu_page_profile_level0_underlay_disabled")
 	var budgets: Dictionary = profile.get("budgets", {}) as Dictionary
 	if int(budgets.get("gpu_page_review_max_image_uploads", -1)) != 0:
 		errors.append("gpu_page_profile_image_budget:%s" % str(budgets))

@@ -19,6 +19,7 @@ const DEBUG_HEIGHT_BANDS := "height_bands"
 const DEBUG_SEAM := "seam"
 const DEBUG_FAMILY_PALETTE := "family_palette"
 const DEBUG_HYDROLOGY := "hydrology"
+const DEBUG_SURFACE_OWNER := "surface_owner"
 
 var provider: RefCounted
 var runtime_pack: RefCounted
@@ -175,6 +176,7 @@ func valid_debug_modes() -> Array[String]:
 		DEBUG_SEAM,
 		DEBUG_FAMILY_PALETTE,
 		DEBUG_HYDROLOGY,
+		DEBUG_SURFACE_OWNER,
 	]
 
 
